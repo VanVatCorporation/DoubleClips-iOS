@@ -107,7 +107,7 @@ struct TemplatePreviewItemView: View {
                     if let image = phase.image {
                         image
                             .resizable()
-                            .aspectRatio(contentMode: .fill)
+                            .aspectRatio(contentMode: .fit) // Fit within bounds
                     } else {
                         Color.gray
                     }

@@ -11,7 +11,7 @@ struct VideoPlayerView: UIViewControllerRepresentable {
         let player = AVPlayer(url: url)
         controller.player = player
         controller.showsPlaybackControls = false
-        controller.videoGravity = .resizeAspectFill
+        controller.videoGravity = .resizeAspect // Fit within bounds, maintaining aspect ratio (letterbox/pillarbox)
         
         // Enable Audio (Even in silent mode)
         do {
