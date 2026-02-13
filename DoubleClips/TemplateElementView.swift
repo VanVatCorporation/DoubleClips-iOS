@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TemplateElementView: View {
     let template: TemplateData
+    let itemWidth: CGFloat // Passed from parent
     
     var body: some View {
         VStack(spacing: 0) {
@@ -12,16 +13,18 @@ struct TemplateElementView: View {
                     if let image = phase.image {
                         image
                             .resizable()
-                            .aspectRatio(contentMode: .fill)
+                            .scaledToFill() // Fill the width
+                            .frame(width: itemWidth - (Dimens.spacingXs * 2)) // Adjust width for inner padding
+                            .frame(maxHeight: (itemWidth - (Dimens.spacingXs * 2)) * 16 / 9) // Cap height
+                            .clipped()
                     } else if phase.error != nil {
-                        Color.mdSurfaceContainer // Error placeholder
+                        Color.mdSurfaceContainer
+                   
                     } else {
-                        Color.mdSurfaceContainer // Loading placeholder
+                        Color.mdSurfaceContainer
                     }
                 }
-                .frame(height: 180)
                 .background(Color.mdSurfaceContainer)
-                .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: Dimens.cornerMd))
                 .overlay(
                     RoundedRectangle(cornerRadius: Dimens.cornerMd)
@@ -40,7 +43,7 @@ struct TemplateElementView: View {
                 .cornerRadius(Dimens.cornerSm)
                 .padding(Dimens.spacingSm)
             }
-            .padding(Dimens.spacingSm)
+            .padding(Dimens.spacingXs) // Inner padding like Android margin=5dp
             
             // Template Info
             VStack(alignment: .leading, spacing: Dimens.spacingXs) {
@@ -52,15 +55,7 @@ struct TemplateElementView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
                 HStack(spacing: Dimens.spacingSm) {
-                    // Async Loading for Avatar
-                    // Mocking avatar URL structure from Java code: https://account.vanvatcorp.com/api/avatar/...
-                    // In a real scenario, this URL construction might need to be dynamic or part of the model.
-                    // For now, using a placeholder or the logic from Java if possible, but Java used a hardcoded UUID in one place?
-                    // "https://account.vanvatcorp.com/api/avatar/9da1e7af-25f8-5543-8a56-5c69f8143e0f" was hardcoded in Java example?
-                    // Actually Java code uses: ImageHelper.getImageBitmapFromNetwork(context, "https://account.vanvatcorp.com/api/avatar/9da1e7af-25f8-5543-8a56-5c69f8143e0f")
-                    // But that seems to be a specific fallback or test?
-                    // Let's assume for now we use a generic avatar or try to construct one.
-                     
+                    // Avatar
                     AsyncImage(url: URL(string: "https://account.vanvatcorp.com/api/avatar/9da1e7af-25f8-5543-8a56-5c69f8143e0f")) { phase in
                          if let image = phase.image {
                              image.resizable().aspectRatio(contentMode: .fill)
@@ -68,7 +63,7 @@ struct TemplateElementView: View {
                              Color.mdSecondaryContainer
                          }
                     }
-                    .frame(width: Dimens.avatarSizeXs, height: Dimens.avatarSizeXs)
+                    .frame(width: 20, height: 20) // Match Android 20dp
                     .clipShape(Circle())
                     .overlay(Circle().stroke(Color.mdOutline, lineWidth: 0.5))
                     
@@ -78,19 +73,17 @@ struct TemplateElementView: View {
                         .lineLimit(1)
                 }
             }
-            .padding(.horizontal, Dimens.spacingBase)
-            .padding(.bottom, Dimens.spacingBase)
-            .padding(.top, Dimens.spacingSm)
+            .padding(.horizontal, Dimens.spacingXs) // Match Android margin=5dp
+            .padding(.bottom, Dimens.spacingXs)
         }
-        .background(Color.mdSurfaceContainerHigh)
+        .background(Color.mdSurfaceContainerHigh) // The Card Background
         .cornerRadius(Dimens.cornerBase)
         .shadow(color: Color.black.opacity(0.1), radius: 1, x: 0, y: 1)
         .overlay(
             RoundedRectangle(cornerRadius: Dimens.cornerBase)
                 .stroke(Color.mdOutlineVariant, lineWidth: 0.5)
         )
-        .padding(.horizontal, Dimens.spacingXs)
-        .padding(.top, Dimens.spacingXs)
+        // Removed external padding to let Grid handle spacing
     }
     
     // Helper to format large numbers (e.g. 1.2k)

@@ -55,6 +55,15 @@ struct TemplateView: View {
         }
     }
     
+    // Masonry Grid Helpers
+    var leftColumnTemplates: [TemplateData] {
+        filteredTemplates.enumerated().filter { $0.offset % 2 == 0 }.map { $0.element }
+    }
+    
+    var rightColumnTemplates: [TemplateData] {
+        filteredTemplates.enumerated().filter { $0.offset % 2 != 0 }.map { $0.element }
+    }
+    
     @State private var navigationPath = NavigationPath()
     
     var body: some View {
@@ -101,22 +110,39 @@ struct TemplateView: View {
                     .frame(height: 150)
                     .zIndex(1)
                     
-                    // Content (RecyclerView equivalent)
-                    ScrollView {
-                        LazyVGrid(columns: columns, spacing: Dimens.spacingSm) {
-                            ForEach(Array(filteredTemplates.enumerated()), id: \.element.id) { index, template in
-                                TemplateElementView(template: template)
-                                    .onTapGesture {
-                                        // Push to stack
-                                        navigationPath.append(template)
+                    // Content (Staggered Grid / Masonry Layout)
+                    GeometryReader { geometry in
+                        let spacing = Dimens.spacingSm
+                        let itemWidth = (geometry.size.width - spacing) / 2
+                        
+                        ScrollView {
+                            HStack(alignment: .top, spacing: spacing) {
+                                // Left Column
+                                LazyVStack(spacing: spacing) {
+                                    ForEach(leftColumnTemplates) { template in
+                                        TemplateElementView(template: template, itemWidth: itemWidth)
+                                            .onTapGesture {
+                                                navigationPath.append(template)
+                                            }
                                     }
+                                }
+                                
+                                // Right Column
+                                LazyVStack(spacing: spacing) {
+                                    ForEach(rightColumnTemplates) { template in
+                                        TemplateElementView(template: template, itemWidth: itemWidth)
+                                            .onTapGesture {
+                                                navigationPath.append(template)
+                                            }
+                                    }
+                                }
                             }
+                            .padding(spacing)
                         }
-                        .padding(Dimens.spacingSm)
-                    }
-                    .background(Color.mdTertiaryContainer)
-                    .refreshable {
-                        loadTemplates()
+                        .background(Color.mdTertiaryContainer)
+                        .refreshable {
+                            loadTemplates()
+                        }
                     }
                 }
                 

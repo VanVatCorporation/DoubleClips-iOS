@@ -75,7 +75,7 @@ struct ContentView: View {
                 }
                 .badge(3)
                 .tag(Tab.storage)
-            Text("Profile Screen")
+            ProfileView()
                 .tabItem {
                     Label("Profile", systemImage: "person")
                 }
