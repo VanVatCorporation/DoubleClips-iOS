@@ -22,41 +22,23 @@ DoubleClips is an open-source, ready-to-use video editor with functionality simi
 [<img src="https://img.buymeacoffee.com/button-api/?text=Feed%20me&emoji=%F0%9F%8D%9A&slug=viet2007ht&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt='Feed me' height="60">](https://www.buymeacoffee.com/viet2007ht)
 [<img height='50' style='border:0px;height:50px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' />](https://ko-fi.com/W7W11RA9FH)
 
-## ⚠️ Attention
-I’m pausing the development of this project due to a backlog of homework and some financial issues I need to handle. For now, I won’t be adding any new features, but I’ll be back!
-
 ## ⚙️ Install
-[<img src="./assets/get-it-on-github.png" alt='Get it on GitHub' height="80">](https://github.com/VanVatCorporation/DoubleClips/releases/latest)
-[<img src="./assets/google-play-badge.png" alt='Get it on Google Play' height="80">](https://play.google.com/store/apps/details?id=com.vanvatcorporation.doubleclips)
+iOS installation isn’t currently possible, so please wait. (I’m a bit short on cash for the $99.99 annual fee)
 
 ## 🚜 Current Features
 
-- Real-time preview (Early access).
-- Audio & Video time precise seeking.
-- Export project.
-- Smooth transitions.
-- Keyframe editing.
-- Properties Importing/Exporting (Keyframe, Clip, Track info, export as JSON)
-- Lots of properties (Reverse, Speed, Opacity, Temperature, Hue, Saturation, Brightness,...)
-- Sharable templates (Beta Early access.).
-- Edit raw FFmpeg command (Gen Cmd and you're free to edit whatever you want. Not for normal users as it require FFmpeg command experience).
-- Render cross-platform (By saving it as a zip file including the JSON timeline, transfer it to your PC, or other stronger devices, and use it to render the clip, you can easily render across platforms).
-- Full control over export parameters (including Constant Rate Factor, Width, Height, Framerate and etc. Allows you to input any value you prefer. Higher settings may take longer to render. The limitations depend on the devices used. Yup, we can render 4k, 8k, 16k or whatever k you want).
-- Multitrack editing.
-- No watermarks or subscriptions.
-- Support both Time-based and Frame-based editing style.
-- Profiles and status (Alpla Early access. Avatar and display username.).
-- ~~Transactions~~ (Not what you might think! You can upload the template, set the price for people to buy, and earn 80% of the transactions. Purchased templates can be customized however the buyers want. It’s literally their right to own it.).
-
+- 5% of all Android features.
+  
 ## ✅ Requirements
 
 ### 👨‍💻 Windows / MacOS / Linux
 
-- We are currently working on the Android version, so it isn't available yet.
+- We’re currently developing the Android and iOS versions, so they’re not available just yet.
    
 ### 📱 iOS
 
-- We are currently working on the Android version, so it isn't available yet.
+- Minimum iOS version: 15
+- FFmpeg Support (You can check if your device supports it by opening the app).
 
 ### 📱 Android
 
