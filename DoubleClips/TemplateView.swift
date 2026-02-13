@@ -112,8 +112,11 @@ struct TemplateView: View {
                     
                     // Content (Staggered Grid / Masonry Layout)
                     GeometryReader { geometry in
-                        let spacing = Dimens.spacingSm
-                        let itemWidth = (geometry.size.width - spacing) / 2
+                        // Android uses 3dp margins approx. We use spacingXs (4dp).
+                        // Calculation: ScreenWidth - LeftPad - MiddleSpace - RightPad
+                        let spacing = Dimens.spacingXs
+                        // Total spacing deduction = Padding Leading + Spacing Middle + Padding Trailing = 3 * spacing
+                        let itemWidth = (geometry.size.width - (spacing * 3)) / 2
                         
                         ScrollView {
                             HStack(alignment: .top, spacing: spacing) {
@@ -137,7 +140,8 @@ struct TemplateView: View {
                                     }
                                 }
                             }
-                            .padding(spacing)
+                            .padding(.horizontal, spacing) // Padding on sides
+                            .padding(.top, spacing) // Padding on top
                         }
                         .background(Color.mdTertiaryContainer)
                         .refreshable {
