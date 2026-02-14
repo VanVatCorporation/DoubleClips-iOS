@@ -24,44 +24,43 @@ struct HomeView: View {
             Color.mdBackground.edgesIgnoringSafeArea(.all)
             
             VStack(spacing: 0) {
-                // Title Frame (150dp equivalent)
-                ZStack(alignment: .leading) {
-                    // Background Image
-                    // Using a color for now to represent @color/colorPalette1_2
-                    Color.mdPrimary
-                        .edgesIgnoringSafeArea(.top)
-                    
-                    VStack(alignment: .leading, spacing: 0) {
-                        // Title Panel
-                        HStack {
-                            Text("Welcome") // @string/welcome
-                                .font(.mdHeadlineSmall)
-                                .foregroundColor(.mdOnPrimary) // Assuming contrast color
-                                .padding(.leading, 25)
-                            Spacer()
-                        }
-                        .frame(height: 50)
+                // Creative Header / Action Area (Fixed at top)
+                Button(action: {
+                    showAddProjectPopup = true
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 48))
+                            .foregroundColor(.white)
                         
-                        // Add Project Panel
-                        Button(action: {
-                            showAddProjectPopup = true
-                        }) {
-                            Text("Add Project") // @string/add_project
-                                .font(.mdHeadlineSmall)
-                                .foregroundColor(.mdOnPrimaryContainer)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 80) // Approx height filling the rest
-                                .background(Color.mdPrimaryContainer) // @color/colorPalette1_1 equivalent mechanism
-                                .cornerRadius(Dimens.cornerBase)
-                                .padding(.horizontal, 25)
-                                .padding(.vertical, 5)
-                        }
+                        Text("Start Creating")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.top, 8)
+                        
+                        Text("Tap to create a new project")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.8))
                     }
-                    .padding(.bottom, Dimens.spacingBase) // Adjust alignment
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 180)
+                    .background(Color.iosBlue) // Using the new color
+                    .cornerRadius(24)
+                    .shadow(color: Color.black.opacity(0.2), radius: 8, x: 0, y: 4)
+                    .padding(16) // Margin: 16dp
                 }
-                .frame(height: 150)
                 
-                // SwipeRefreshLayout & RecyclerView equivalent
+                // Section Title
+                HStack {
+                    Text("Recent Projects")
+                        .font(.system(size: 20, weight: .bold)) // 20sp bold
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 8)
+                    Spacer()
+                }
+                
+                // Project List (Scrollable)
                 List {
                     ForEach(projects) { project in
                         ProjectElementView(
@@ -87,7 +86,7 @@ struct HomeView: View {
                 .refreshable {
                     loadProjects()
                 }
-                .background(Color.mdTertiaryContainer) // Background behind list (colorPalette1_4)
+                .background(Color.mdBackground) // Background behind list (Adaptive)
             }
             
             // Progress Bar

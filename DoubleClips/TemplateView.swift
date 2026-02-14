@@ -143,11 +143,11 @@ struct TemplateView: View {
                             .padding(.horizontal, spacing) // Padding on sides
                             .padding(.top, spacing) // Padding on top
                         }
-                        .background(Color.mdTertiaryContainer)
+                        .background(Color.mdBackground)
                         .refreshable {
                             loadTemplates()
                         }
-                    }
+                    }    
                 }
                 
                 // Loading Indicator

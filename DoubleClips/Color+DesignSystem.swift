@@ -19,23 +19,26 @@ extension Color {
     static let mdErrorContainer = Color(hex: "FFDAD6")
     static let mdOnErrorContainer = Color(hex: "410002")
     
-    // Background & Surface
-    static let mdBackground = Color(hex: "FDFBFF")
-    static let mdOnBackground = Color(hex: "1A1B1F")
-    static let mdSurface = Color(hex: "FDFBFF")
-    static let mdOnSurface = Color(hex: "1A1B1F")
+    // Background & Surface (Adaptive)
+    static let mdBackground = Color(uiColor: .systemBackground)
+    static let mdOnBackground = Color(uiColor: .label)
+    static let mdSurface = Color(uiColor: .secondarySystemBackground)
+    static let mdOnSurface = Color(uiColor: .label)
     
-    // Surface Containers
-    static let mdSurfaceContainerLow = Color(hex: "F7F5FF")
-    static let mdSurfaceContainer = Color(hex: "F1EFFA")
-    static let mdSurfaceContainerHigh = Color(hex: "EBE9F4")
+    // Surface Containers (Adaptive)
+    static let mdSurfaceContainerLow = Color(uiColor: .systemFill)
+    static let mdSurfaceContainer = Color(uiColor: .secondarySystemFill)
+    static let mdSurfaceContainerHigh = Color(uiColor: .tertiarySystemFill)
     
     // Outline
-    static let mdOutline = Color(hex: "757680")
-    static let mdOutlineVariant = Color(hex: "C6C5D0")
+    static let mdOutline = Color(uiColor: .separator)
+    static let mdOutlineVariant = Color(uiColor: .opaqueSeparator)
     
     // Text Colors
-    static let mdOnSurfaceVariant = Color(hex: "45464F")
+    static let mdOnSurfaceVariant = Color(uiColor: .secondaryLabel)
+    
+    // Custom Colors
+    static let iosBlue = Color(hex: "007AFF") // Standard iOS Blue
 }
 
 extension Color {

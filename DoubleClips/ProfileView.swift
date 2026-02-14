@@ -1,149 +1,168 @@
 import SwiftUI
 
 struct ProfileView: View {
-    @State private var isLoggedIn: Bool = false // Mock state
+    @State private var isLoggedIn: Bool = false // Mock state - toggle to test
     @State private var isLoading: Bool = false
     
     var body: some View {
         ZStack {
             Color.mdBackground.edgesIgnoringSafeArea(.all)
             
-            VStack(spacing: 0) {
-                // Header Frame
-                ZStack(alignment: .bottomLeading) {
-                    Rectangle()
-                        .fill(Color.mdPrimaryContainer)
-                        .frame(height: 180)
-                        
-                        // Rounded bottom corners for header
-                        .clipShape(RoundedCorner(radius: Dimens.cornerBase, corners: [.bottomLeft, .bottomRight]))
-                        .shadow(radius: 2)
-                    
-                    // Profile Header Content
-                    HStack(alignment: .top, spacing: Dimens.spacingBase) {
-                        // Avatar
-                        Circle() // Avatar placeholder
-                            .fill(Color.mdSecondaryContainer)
-                            .frame(width: Dimens.avatarSizeXxl, height: Dimens.avatarSizeXxl)
-                            .overlay(
-                                Circle().stroke(Color.white, lineWidth: 4) // Optional border
-                            )
-                            .shadow(radius: 4)
-                        
-                        // Name
-                        if isLoggedIn {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // 1. Profile Header or Sign In Prompt
+                    if isLoggedIn {
+                        // Logged In: Avatar & Name
+                        VStack(spacing: 16) {
+                            // Avatar
+                            Image(systemName: "person.crop.circle.fill") // Placeholder
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 120, height: 120)
+                                .foregroundColor(.mdSecondaryContainer)
+                                .background(Color.mdSurfaceContainerHigh)
+                                .clipShape(Circle())
+                                .overlay(Circle().stroke(Color.mdOutline, lineWidth: 1))
+                                .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                            
+                            // Name
                             Text("Van Vat Employee")
-                                .font(.mdHeadlineSmall)
-                                .foregroundColor(.mdOnPrimaryContainer)
-                                .padding(.top, Dimens.spacingMd)
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundColor(.primary)
                         }
-                    }
-                    .padding(Dimens.spacingLg)
-                    
-                    // Sign In Overlay
-                    if !isLoggedIn {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: Dimens.cornerBase)
-                                .fill(Color.mdSurface.opacity(0.9)) // Slightly translucent
-                                .shadow(radius: 1)
+                        .padding(.top, 40)
+                    } else {
+                        // Logged Out: Sign In Prompt
+                        VStack(spacing: 16) {
+                            Text("Sign in to sync your projects and access templates.")
+                                .font(.system(size: 16))
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 32)
                             
-                            VStack(spacing: Dimens.spacingBase) {
-                                Image(systemName: "person.fill")
-                                    .resizable()
-                                    .frame(width: Dimens.iconSizeXl, height: Dimens.iconSizeXl)
-                                    .foregroundColor(.mdOnSurface.opacity(0.6))
-                                
-                                Button(action: {
-                                    // Trigger Sign In
-                                    isLoggedIn = true // Mock action
-                                }) {
-                                    Text("Sign In")
-                                        .font(.mdLabelSmall) // Or button font
-                                        .padding(.horizontal, Dimens.spacingLg)
-                                        .padding(.vertical, Dimens.spacingSm)
-                                        .background(Color.mdPrimary)
-                                        .foregroundColor(.mdOnPrimary)
-                                        .cornerRadius(Dimens.cornerFull)
-                                }
-                            }
-                        }
-                        .padding(Dimens.spacingLg)
-                    }
-                }
-                .frame(height: 220) // Give space for the avatar to overhang or fit
-                .zIndex(1) // Ensure header is above content
-                
-                // Settings List
-                ScrollView {
-                    VStack(spacing: Dimens.spacingBase) {
-                        
-                        // General Settings
-                        SectionView(title: "General") {
-                            SettingsButton(title: "Settings", icon: "gearshape.fill")
-                        }
-                        
-                        // Account Settings
-                        SectionView(title: "Account") {
-                            SettingsButton(title: "Statistics", icon: "chart.bar.fill")
-                            SettingsButton(title: "Saved Templates", icon: "heart.fill")
-                            
-                            // Log Out Button
                             Button(action: {
-                                isLoggedIn = false
+                                isLoggedIn = true
                             }) {
-                                HStack {
-                                    Image(systemName: "xmark.circle.fill")
-                                    Text("Log Out")
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding()
-                                .foregroundColor(.mdOnErrorContainer)
-                                .background(Color.mdErrorContainer)
-                                .cornerRadius(Dimens.cornerBase)
+                                Text("Sign In")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 32)
+                                    .padding(.vertical, 12)
+                                    .background(Color.mdPrimary)
+                                    .cornerRadius(24)
                             }
-                            .padding(.top, Dimens.spacingBase)
                         }
+                        .padding(.top, 60)
+                        .padding(.bottom, 20)
                     }
-                    .padding(Dimens.spacingBase)
+                    
+                    // 2. Settings Group: General
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("GENERAL")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 16)
+                        
+                        // Liquid Glass Card
+                        VStack(spacing: 0) {
+                            SettingsRow(icon: "gearshape.fill", title: "Settings", height: 50)
+                        }
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(16)
+                    }
+                    .padding(.horizontal, 16)
+                    
+                    // 3. Settings Group: Account
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("ACCOUNT")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 16)
+                        
+                        // Liquid Glass Card
+                        VStack(spacing: 0) {
+                            if isLoggedIn {
+                                SettingsRow(icon: "chart.bar.fill", title: "Statistics", height: 50)
+                                Divider().padding(.leading, 56)
+                                SettingsRow(icon: "heart.fill", title: "Saved Templates", height: 50)
+                                Divider().padding(.leading, 56)
+                                
+                                // Log Out
+                                Button(action: {
+                                    isLoggedIn = false
+                                }) {
+                                    HStack(spacing: 16) {
+                                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                                            .font(.system(size: 20))
+                                            .foregroundColor(.red)
+                                            .frame(width: 24)
+                                        
+                                        Text("Log Out")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(.red)
+                                        
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .frame(height: 50)
+                                }
+                            } else {
+                                // If logged out, maybe show "About" or similar, or just empty?
+                                // Android structure shows these options but likely requires login to access.
+                                // For visual parity with xml (it handles visibility dynamically), let's show items but protected.
+                                // But keeping it simple: Android hides Log Out.
+                                SettingsRow(icon: "info.circle.fill", title: "About App", height: 50)
+                            }
+                        }
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(16)
+                    }
+                    .padding(.horizontal, 16)
+                    
+                    Spacer(minLength: 50)
                 }
+            }
+            .refreshable {
+                // mock reload
             }
             
             if isLoading {
-                ProgressView()
-                    .scaleEffect(1.5)
+                ProgressView().scaleEffect(1.5)
             }
         }
     }
 }
 
-// Helper for settings buttons
-struct SettingsButton: View {
-    var title: String
+// Helper Row
+struct SettingsRow: View {
     var icon: String
+    var title: String
+    var height: CGFloat
     
     var body: some View {
         Button(action: {}) {
-            HStack {
+            HStack(spacing: 16) {
                 Image(systemName: icon)
-                    .foregroundColor(.mdPrimary)
+                    .font(.system(size: 20))
+                    .foregroundColor(.primary)
+                    .frame(width: 24)
+                
                 Text(title)
-                    .foregroundColor(.mdOnSurface)
+                    .font(.system(size: 16))
+                    .foregroundColor(.primary)
+                
                 Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
             }
-            .padding()
-            .background(Color.mdSurface) // Or transparent if in a list
-            // .overlay(RoundedRectangle(...).stroke(...)) // If outlined style matches
+            .padding(.horizontal, 16)
+            .frame(height: height)
         }
     }
 }
 
-// Helper for specific corner rounding
-struct RoundedCorner: Shape {
-    var radius: CGFloat = .infinity
-    var corners: UIRectCorner = .allCorners
-
-    func path(in rect: CGRect) -> Path {
-        let path = UIBezierPath(roundedRect: rect, byRoundingCorners: corners, cornerRadii: CGSize(width: radius, height: radius))
-        return Path(path.cgPath)
-    }
+#Preview {
+    ProfileView()
 }
