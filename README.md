@@ -9,7 +9,7 @@
     </p>
   </div>
   <div style="flex-shrink: 0;">
-    <img src="src/main/res/drawable/logo.png" alt="DoubleClips Logo" width="100"
+    <img src="DoubleClips/icon_ios.png" alt="DoubleClips Logo" width="100"
       style="border-radius: 8px; box-shadow: 0 0 8px rgba(0,0,0,0.05);" />
   </div>
 </div>
