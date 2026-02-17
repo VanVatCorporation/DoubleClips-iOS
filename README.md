@@ -23,7 +23,14 @@ DoubleClips is an open-source, ready-to-use video editor with functionality simi
 [<img height='50' style='border:0px;height:50px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' />](https://ko-fi.com/W7W11RA9FH)
 
 ## ⚙️ Install
+
 iOS installation isn’t currently possible, so please wait. (I’m a bit short on cash for the $99.99 annual fee)
+
+## 🧧 Happy Lunar New Year
+
+Project development will be on hold until the 10th day of the Lunar New Year (February 26) in celebration of the holiday.  
+Thank you for your understanding, and Happy New Year! 🍻
+
 
 ## 🚜 Current Features
 
