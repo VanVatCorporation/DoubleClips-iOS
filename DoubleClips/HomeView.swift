@@ -100,8 +100,10 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showAddProjectPopup) {
             AddProjectPopup(
-                onNewProject: {
-                    print("New Project Clicked")
+                onNewProject: { newProject in
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        projects.insert(newProject, at: 0) // Add to top like Android
+                    }
                     showAddProjectPopup = false
                 },
                 onImportProject: {
