@@ -13,13 +13,14 @@ enum Tab: Hashable, CaseIterable {
 
 struct ContentView: View {
     @State private var selection: Tab = .home
+    @State private var isBlockingGestures: Bool = false // Prevents tabs swipe when in Editor
     
     // Ordered list of tabs for swipe navigation
     private let tabOrder: [Tab] = [.home, .template, .search, .storage, .profile]
     
     var body: some View {
         TabView(selection: $selection) {
-            HomeView()
+            HomeView(isBlockingGestures: $isBlockingGestures)
                 .tabItem {
                     Label("Home", systemImage: "house")
                 }
@@ -53,7 +54,7 @@ struct ContentView: View {
         // We use a simultaneous DragGesture so vertical scrolling inside
         // child views (ScrollView, List, etc.) is NOT blocked.
         .gesture(
-            DragGesture(minimumDistance: 30, coordinateSpace: .local)
+            isBlockingGestures ? nil : DragGesture(minimumDistance: 30, coordinateSpace: .local)
                 .onEnded { value in
                     // Only trigger on clearly horizontal swipes
                     // (horizontal translation must be > 2x the vertical)

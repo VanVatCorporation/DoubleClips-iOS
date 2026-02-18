@@ -14,7 +14,7 @@ struct ProfileView: View {
         authRepo.currentUser?.username ?? "User"
     }
     var userAvatarUrl: URL {
-        URL(string: "https://account.vanvatcorp.com" + (authRepo.currentUser?.avatarUrl ?? "/wp-content/uploads/2020/04/default-user.png"))!
+        URL(string: "https://account.vanvatcorp.com/api/avatar/" + (authRepo.currentUser?.id ?? ""))!
     }
     
     var body: some View {

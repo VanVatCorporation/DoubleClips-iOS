@@ -1,25 +1,76 @@
 import SwiftUI
 
 struct HomeView: View {
+    @Binding var isBlockingGestures: Bool // Controls parent TabView swipe
+    
     @State private var projects: [ProjectData] = []
     @State private var isLoading: Bool = false
     @State private var showAddProjectPopup: Bool = false
+    @State private var editingProject: ProjectData? = nil
     
-    // Mock Data Loader
+    // Real Project Loader — equivalent of MainAreaScreen.reloadingProject()
     func loadProjects() {
         isLoading = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            // Mock Data
-            projects = [
-                ProjectData(projectPath: "/path/1", projectTitle: "Vacation Edit", projectTimestamp: 1672531200000, projectSize: 157286400, projectDuration: 125000),
-                ProjectData(projectPath: "/path/2", projectTitle: "Gaming Clip", projectTimestamp: 1675123200000, projectSize: 52428800, projectDuration: 45000),
-                ProjectData(projectPath: "/path/3", projectTitle: "Vlog #42", projectTimestamp: 1677628800000, projectSize: 314572800, projectDuration: 450000)
-            ]
-            isLoading = false
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Ensure the projects root directory exists
+            IOHelper.createEmptyDirectories(Constants.DEFAULT_PROJECT_DIRECTORY)
+            
+            // List all subdirectories in the projects folder
+            let dirs = IOHelper.listFiles(Constants.DEFAULT_PROJECT_DIRECTORY, options: .directories)
+            
+            var loaded: [ProjectData] = []
+            for dir in dirs {
+                if let data = ProjectData.loadProperties(from: dir.path) {
+                    loaded.append(data)
+                }
+            }
+            
+            // Sort by timestamp descending (newest first) — matching Android default
+            loaded.sort { $0.projectTimestamp > $1.projectTimestamp }
+            
+            DispatchQueue.main.async {
+                projects = loaded
+                isLoading = false
+            }
         }
     }
     
+    // Real Project Creator — equivalent of MainAreaScreen.addNewProjectWithName(title)
+    func createProject(title: String) -> ProjectData? {
+        // Find next available project_N directory
+        let projectPath = IOHelper.getNextIndexPathInFolder(
+            folderPath: Constants.DEFAULT_PROJECT_DIRECTORY,
+            prefix: "project_",
+            extension: "",
+            createEmptyFile: false
+        )
+        
+        // Create the project directory
+        IOHelper.createEmptyDirectories(projectPath)
+        guard IOHelper.isFileExist(projectPath) else { return nil }
+        
+        // Create required subdirectories (matching Java's basicDir + previewDir)
+        IOHelper.createEmptyDirectories(IOHelper.combinePath(projectPath, Constants.DEFAULT_CLIP_TEMP_DIRECTORY, "frames"))
+        IOHelper.createEmptyDirectories(IOHelper.combinePath(projectPath, Constants.DEFAULT_PREVIEW_CLIP_DIRECTORY))
+        IOHelper.createEmptyDirectories(IOHelper.combinePath(projectPath, Constants.DEFAULT_CLIP_DIRECTORY))
+        
+        // Build and save project.properties
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        var data = ProjectData(
+            projectPath: projectPath,
+            projectTitle: title,
+            projectTimestamp: now,
+            projectSize: 0,
+            projectDuration: 0
+        )
+        data.version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        data.savePropertiesAtProject()
+        
+        return data
+    }
+    
     var body: some View {
+        NavigationStack {
         ZStack {
             Color.mdBackground.edgesIgnoringSafeArea(.all)
             
@@ -66,7 +117,7 @@ struct HomeView: View {
                         ProjectElementView(
                             project: project,
                             image: Image(systemName: "photo"), // Placeholder
-                            onEdit: { print("Edit \(project.projectTitle)") },
+                            onEdit: { editingProject = project },
                             onDelete: {
                                 if let index = projects.firstIndex(where: { $0.id == project.id }) {
                                     projects.remove(at: index)
@@ -80,6 +131,9 @@ struct HomeView: View {
                         .listRowBackground(Color.clear)
                         .padding(.horizontal, 5) // match android layout margin
                         .padding(.top, 5)
+                        .onTapGesture {
+                            editingProject = project
+                        }
                     }
                 }
                 .listStyle(PlainListStyle())
@@ -98,11 +152,21 @@ struct HomeView: View {
         .onAppear {
             loadProjects()
         }
+        .navigationDestination(item: $editingProject) { project in
+            EditingView(project: project)
+                .onAppear { isBlockingGestures = true }
+                .onDisappear { isBlockingGestures = false }
+        }
         .sheet(isPresented: $showAddProjectPopup) {
             AddProjectPopup(
                 onNewProject: { newProject in
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                        projects.insert(newProject, at: 0) // Add to top like Android
+                    // Create real project on disk, then use the returned data
+                    if let realProject = createProject(title: newProject.projectTitle) {
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                            projects.insert(realProject, at: 0)
+                        }
+                        // Open editor immediately, just like Android does
+                        editingProject = realProject
                     }
                     showAddProjectPopup = false
                 },
@@ -113,9 +177,10 @@ struct HomeView: View {
             )
         }
     }
-}
+        } // NavigationStack
+    }
 
 
 #Preview {
-    HomeView()
+    HomeView(isBlockingGestures: .constant(false))
 }
