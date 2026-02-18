@@ -1,121 +1,97 @@
-# iOS Authentication Integration Guide
+# iOS Authentication Library
 
-## Overview
-This library provides JWT-based authentication for iOS using the DoubleClips authentication backend. It manages user sessions via HTTP cookies and provides automatic persistence.
+This folder contains the iOS authentication library, ported from the Android `dynamiclibs/auth` implementation.
 
 ## Architecture
-- **`AuthModels.swift`**: Data models (`User`, `LoginRequest`, `RegisterRequest`, etc.)
-- **`APIClient.swift`**: Network layer using `URLSession` with automatic cookie management
-- **`AuthRepository.swift`**: Observable singleton managing authentication state
 
-## Installation
-Copy all files from this directory into your Xcode project.
+The library follows the same architecture as the Android version:
 
-No external dependencies required - uses native Swift Foundation and Combine frameworks.
+### Core Components
+
+1. **Models**
+   - `User.swift`: User data model
+   - `ApiResponse.swift`: Generic API response wrapper
+   - `AuthRequests.swift`: Request DTOs (LoginRequest, RegisterRequest, GoogleLoginRequest)
+
+2. **Network Layer**
+   - `NetworkClient.swift`: URLSession-based HTTP client with persistent cookie storage
+     - Equivalent to Android's `RetrofitClient`
+     - Uses `HTTPCookieStorage` and `UserDefaults` for cookie persistence
+     - Handles JSON encoding/decoding with `Codable`
+
+3. **Repository**
+   - `AuthRepository.swift`: Singleton repository managing authentication state
+     - Uses `@Published` property for reactive UI updates (equivalent to Android's LiveData)
+     - Provides methods: `login()`, `loginWithGoogle()`, `register()`, `checkSession()`, `logout()`
+     - Manages in-memory user cache
 
 ## Usage
 
-### 1. Initialize in Your App
-The `AuthRepository` is a singleton that uses `@Published` properties for SwiftUI reactivity.
-
+### Login
 ```swift
-import SwiftUI
-
-@main
-struct YourApp: App {
-    @StateObject private var authRepo = AuthRepository.shared
-    
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-                .environmentObject(authRepo)
-                .onAppear {
-                    // Check if user is already logged in via persistent cookie
-                    authRepo.checkSession()
-                }
-        }
+AuthRepository.shared.login(email: "user@example.com", password: "password") { result in
+    switch result {
+    case .success(let user):
+        print("Logged in as \(user.username ?? "")")
+    case .failure(let error):
+        print("Login failed: \(error.localizedDescription)")
     }
 }
 ```
 
-### 2. Login
+### Check Session (Auto-login)
 ```swift
-AuthRepository.shared.login(email: "user@example.com", password: "password")
-
-// Observe state changes
-@EnvironmentObject var authRepo: AuthRepository
-
-if let user = authRepo.currentUser {
-    Text("Welcome, \(user.username)!")
+AuthRepository.shared.checkSession { result in
+    switch result {
+    case .success(let user):
+        print("Session valid, user: \(user.username ?? "")")
+    case .failure:
+        print("No active session")
+    }
 }
 ```
 
-### 3. Register
+### Logout
 ```swift
-AuthRepository.shared.register(
-    username: "newuser",
-    email: "user@example.com",
-    password: "password",
-    firstName: "John",
-    lastName: "Doe"
-)
+AuthRepository.shared.logout { result in
+    print("Logged out")
+}
 ```
 
-### 4. Google Login
+### Reactive UI Updates (SwiftUI)
 ```swift
-// After obtaining ID token from Google Sign-In SDK
-AuthRepository.shared.loginWithGoogle(idToken: googleIdToken)
-```
-
-> **Note**: You'll need to integrate the Google Sign-In iOS SDK separately and obtain the ID token.
-
-### 5. Logout
-```swift
-AuthRepository.shared.logout()
-```
-
-### 6. Check Session (Auto Login)
-Automatically called on app launch to restore user session from persistent cookies:
-```swift
-AuthRepository.shared.checkSession()
-```
-
-## Observing State in SwiftUI
-```swift
-struct ProfileView: View {
-    @EnvironmentObject var authRepo: AuthRepository
+struct ContentView: View {
+    @ObservedObject var authRepo = AuthRepository.shared
     
     var body: some View {
-        if authRepo.isLoading {
-            ProgressView()
-        } else if let user = authRepo.currentUser {
-            Text("Logged in as: \(user.username)")
+        if let user = authRepo.currentUser {
+            Text("Welcome, \(user.username ?? "User")")
         } else {
-            Button("Sign In") {
-                authRepo.login(email: "...", password: "...")
-            }
+            Text("Please sign in")
         }
     }
 }
 ```
 
-## Cookie Persistence
-Sessions are automatically persisted via `HTTPCookieStorage.shared`. The cookies will survive app restarts unless explicitly cleared via logout.
+## Backend Endpoints
 
-## API Endpoints
-Base URL: `https://account.vanvatcorp.com`
+The library connects to: `https://account.vanvatcorp.com`
 
 - `POST /api/login` - Email/password login
-- `POST /api/login/google` - Google SSO login
-- `POST /api/register` - Create new account
-- `GET /api/profile` - Get current user (session check)
-- `POST /api/logout` - End session
+- `POST /api/login/google` - Google OAuth login
+- `POST /api/register` - User registration
+- `GET /api/profile` - Get current user profile
+- `POST /api/logout` - Logout
 
-## Error Handling
-Errors are published via `AuthRepository.errorMessage`:
-```swift
-if let error = authRepo.errorMessage {
-    Text("Error: \(error)")
-        .foregroundColor(.red)
-}
-```
+## Cookie Management
+
+Cookies are automatically:
+- Stored in `HTTPCookieStorage.shared`
+- Persisted to `UserDefaults` across app launches
+- Sent with all requests to the auth domain
+- Cleared on logout
+
+## Dependencies
+
+- Foundation
+- Combine (for `@Published` reactive properties)
