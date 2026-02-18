@@ -7,83 +7,75 @@
 
 import SwiftUI
 
-enum Tab: Hashable {
+enum Tab: Hashable, CaseIterable {
    case home, template, search, storage, profile
 }
 
 struct ContentView: View {
     @State private var selection: Tab = .home
     
-    @State private var items = ["Apple", "Banana", "Cherry"]
+    // Ordered list of tabs for swipe navigation
+    private let tabOrder: [Tab] = [.home, .template, .search, .storage, .profile]
     
     var body: some View {
-        
         TabView(selection: $selection) {
-//            VStack {
-//                Button (role: .destructive) {
-//                    print("Item deleted")
-//                } label: {
-//                    Label("Add project", systemImage: "square.and.arrow.down")
-//                }
-//                    .font(.headline)
-//                    .foregroundColor(.white)
-//                    .frame(maxWidth: .infinity, maxHeight: 75) // controls width behavior
-//                    .background(Color.blue)
-//                    .cornerRadius(8)
-//                
-//                    Button ("Hi from button", role: .destructive) {
-//                        print("Item deleted")
-//                    }
-//                
-//                LazyVStack {
-//                    ForEach(items, id: \.self) { item in ComponentProjectElement(
-//                        image: Image(systemName: "house"),
-//                        title: "My Title",
-//                        date: "05/01/2026",
-//                        size: "1024MB",
-//                        duration: "01:23:45",
-//                        onMoreTapped: { print("More tapped") }
-//                    )
-//                        
-//
-//
-//                            .padding() .frame(maxWidth: .infinity) .background(Color.blue.opacity(0.2)) .cornerRadius(8)
-//                    }
-//                }
-//                Spacer();
-//            }
-//            .padding()
-        HomeView()
+            HomeView()
                 .tabItem {
                     Label("Home", systemImage: "house")
                 }
                 .tag(Tab.home)
+            
             TemplateView()
                 .tabItem {
                     Label("Template", systemImage: "tray")
                 }
                 .tag(Tab.template)
+            
             Text("Search Screen")
                 .tabItem {
                     Label("Search", systemImage: "magnifyingglass")
                 }
-                .badge(3)
                 .tag(Tab.search)
+            
             Text("Inbox Screen")
                 .tabItem {
                     Label("Storage", systemImage: "server.rack")
                 }
-                .badge(3)
                 .tag(Tab.storage)
+            
             ProfileView()
                 .tabItem {
                     Label("Profile", systemImage: "person")
                 }
-                .badge(3)
                 .tag(Tab.profile)
         }
-        
-
+        // Swipe left/right to change tabs, just like Android ViewPager.
+        // We use a simultaneous DragGesture so vertical scrolling inside
+        // child views (ScrollView, List, etc.) is NOT blocked.
+        .gesture(
+            DragGesture(minimumDistance: 30, coordinateSpace: .local)
+                .onEnded { value in
+                    // Only trigger on clearly horizontal swipes
+                    // (horizontal translation must be > 2x the vertical)
+                    let horizontal = value.translation.width
+                    let vertical = value.translation.height
+                    guard abs(horizontal) > abs(vertical) * 2 else { return }
+                    
+                    guard let currentIndex = tabOrder.firstIndex(of: selection) else { return }
+                    
+                    if horizontal < -30, currentIndex < tabOrder.count - 1 {
+                        // Swipe left → next tab
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            selection = tabOrder[currentIndex + 1]
+                        }
+                    } else if horizontal > 30, currentIndex > 0 {
+                        // Swipe right → previous tab
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            selection = tabOrder[currentIndex - 1]
+                        }
+                    }
+                }
+        )
     }
 }
 
