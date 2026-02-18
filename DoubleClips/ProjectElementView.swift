@@ -54,15 +54,49 @@ struct ProjectElementView: View {
             
             Spacer()
             
-            // More Button
-            Button(action: {
-                // Trigger More Action
-            }) {
+            
+            
+            // More Options Button (Menu)
+            Menu {
+                Button(action: onEdit) {
+                    Label("Edit", systemImage: "pencil")
+                }
+                Button(action: onShare) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+                Button(action: onClone) {
+                    Label("Clone", systemImage: "doc.on.doc")
+                }
+                if #available(iOS 15.0, *) {
+                    Button(role: .destructive, action: onDelete) {
+                        Label("Delete", systemImage: "trash")
+                    }
+                } else {
+                    Button(action: onDelete) {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 20))
+                    .rotationEffect(.degrees(90))
                     .foregroundColor(.mdOnSurfaceVariant)
-                    .frame(width: 48, height: 48) // Touch target
+                    .frame(width: Dimens.touchTargetMin, height: Dimens.touchTargetMin)
+                    .contentShape(Rectangle())
             }
+    
+            
+//            // More Button
+//            Button(action: {
+//                // Trigger More Action
+//            }) {
+//                Image(systemName: "ellipsis")
+//                    .font(.system(size: 20))
+//                    .foregroundColor(.mdOnSurfaceVariant)
+//                    .frame(width: 48, height: 48) // Touch target
+//            }
+            
+            
+            
         }
         .padding(12) // Internal Padding 12dp
         .background(.ultraThinMaterial) // Liquid Glass Effect
