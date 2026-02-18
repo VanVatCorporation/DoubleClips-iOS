@@ -5,48 +5,9 @@ struct TemplateView: View {
     @State private var isLoading: Bool = false
     @State private var searchText: String = ""
     
-    // Grid Setup
-    let columns = [
-        GridItem(.flexible(), spacing: Dimens.spacingSm),
-        GridItem(.flexible(), spacing: Dimens.spacingSm)
-    ]
+    @State private var navigationPath = NavigationPath()
     
-    // Data Loader
-    func loadTemplates() {
-        isLoading = true
-        
-        guard let url = URL(string: "https://app.vanvatcorp.com/doubleclips/api/fetch-templates") else {
-            print("Invalid URL")
-            isLoading = false
-            return
-        }
-        
-        URLSession.shared.dataTask(with: url) { data, response, error in
-            DispatchQueue.main.async {
-                isLoading = false
-                
-                if let error = error {
-                    print("Error fetching templates: \(error.localizedDescription)")
-                    return
-                }
-                
-                guard let data = data else {
-                    print("No data received")
-                    return
-                }
-                
-                do {
-                    // Java: new Gson().fromJson(response.toString(), TemplateData[].class)
-                    // Swift: JSONDecoder().decode([TemplateData].self, from: data)
-                    let decodedTemplates = try JSONDecoder().decode([TemplateData].self, from: data)
-                    self.templates = decodedTemplates
-                } catch {
-                    print("Error decoding templates: \(error)")
-                }
-            }
-        }.resume()
-    }
-    
+    // Masonry Grid Helpers
     var filteredTemplates: [TemplateData] {
         if searchText.isEmpty {
             return templates
@@ -55,7 +16,6 @@ struct TemplateView: View {
         }
     }
     
-    // Masonry Grid Helpers
     var leftColumnTemplates: [TemplateData] {
         filteredTemplates.enumerated().filter { $0.offset % 2 == 0 }.map { $0.element }
     }
@@ -64,58 +24,57 @@ struct TemplateView: View {
         filteredTemplates.enumerated().filter { $0.offset % 2 != 0 }.map { $0.element }
     }
     
-    @State private var navigationPath = NavigationPath()
-    
     var body: some View {
         NavigationStack(path: $navigationPath) {
             ZStack {
                 Color.mdBackground.edgesIgnoringSafeArea(.all)
                 
-                VStack(spacing: 0) {
-                    // Header (150dp equivalent)
-                    ZStack(alignment: .topLeading) {
-                        // Background
-                        Color.mdSecondaryContainer
-                            .edgesIgnoringSafeArea(.top)
-                            .frame(height: 150)
-                        
-                        VStack(alignment: .leading, spacing: 0) {
-                            // Title Panel
-                            HStack {
-                                Text("Material Template")
-                                    .font(.mdHeadlineSmall)
-                                    .foregroundColor(.mdSecondaryContainer)
-                                    .padding(.leading, 25)
-                                Spacer()
-                            }
-                            .frame(height: 50)
-                            
-                            // Search Panel
-                            HStack {
-                                Image(systemName: "magnifyingglass")
-                                    .foregroundColor(.mdOnSurfaceVariant)
-                                
-                                TextField("Search for template", text: $searchText)
-                                    .foregroundColor(.mdOnSurface)
-                                    .textFieldStyle(PlainTextFieldStyle())
-                            }
-                            .padding(Dimens.spacingBase)
-                            .background(Color.mdSurface)
-                            .cornerRadius(Dimens.cornerFull)
-                            .padding(.horizontal, Dimens.spacingSm)
-                            .padding(.top, Dimens.spacingSm)
-                        }
-                        .padding(.top, 0)
-                    }
-                    .frame(height: 150)
-                    .zIndex(1)
+                VStack(alignment: .leading, spacing: 0) {
                     
-                    // Content (Staggered Grid / Masonry Layout)
+                    // ── Header Title ─────────────────────────────────────────
+                    // Matches: android:textSize="32sp" android:textStyle="bold"
+                    // android:layout_marginStart="24dp" android:layout_marginTop="24dp"
+                    Text("Template")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 24)
+                        .padding(.bottom, 8)
+                    
+                    // ── Search Bar ────────────────────────────────────────────
+                    // Matches: MaterialCardView with cardCornerRadius="24dp",
+                    // cardBackgroundColor="colorSurfaceContainerHigh", SearchView inside
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 16))
+                        
+                        TextField("Search templates...", text: $searchText)
+                            .foregroundColor(.primary)
+                            .textFieldStyle(PlainTextFieldStyle())
+                        
+                        if !searchText.isEmpty {
+                            Button(action: { searchText = "" }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.mdSurfaceContainerHigh)
+                    .clipShape(Capsule()) // cardCornerRadius="24dp" → Capsule
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.mdOutlineVariant, lineWidth: 0.5)
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                    
+                    // ── Template List ─────────────────────────────────────────
+                    // Matches: SwipeRefreshLayout + StaggeredGridLayoutManager(2 cols)
                     GeometryReader { geometry in
-                        // Android uses 3dp margins approx. We use spacingXs (4dp).
-                        // Calculation: ScreenWidth - LeftPad - MiddleSpace - RightPad
-                        let spacing = Dimens.spacingXs
-                        // Total spacing deduction = Padding Leading + Spacing Middle + Padding Trailing = 3 * spacing
+                        let spacing: CGFloat = 4 // ~3dp like Android
                         let itemWidth = (geometry.size.width - (spacing * 3)) / 2
                         
                         ScrollView {
@@ -140,17 +99,17 @@ struct TemplateView: View {
                                     }
                                 }
                             }
-                            .padding(.horizontal, spacing) // Padding on sides
-                            .padding(.top, spacing) // Padding on top
+                            .padding(.horizontal, spacing)
+                            .padding(.bottom, 80) // Match Android paddingBottom="80dp" for nav bar
                         }
-                        .background(Color.mdBackground)
                         .refreshable {
                             loadTemplates()
                         }
-                    }    
+                    }
                 }
                 
-                // Loading Indicator
+                // ── Center Progress Bar ───────────────────────────────────────
+                // Matches: ProgressBar android:layout_centerInParent="true"
                 if isLoading && templates.isEmpty {
                     ProgressView()
                         .scaleEffect(1.5)
@@ -160,12 +119,32 @@ struct TemplateView: View {
                 loadTemplates()
             }
             .navigationDestination(for: TemplateData.self) { template in
-                // Find index
                 if let index = templates.firstIndex(where: { $0.id == template.id }) {
                     TemplatePreviewView(templates: templates, initialScrollIndex: index)
                 }
             }
         }
+    }
+    
+    // MARK: - Data Loading
+    
+    func loadTemplates() {
+        isLoading = true
+        
+        guard let url = URL(string: "https://app.vanvatcorp.com/doubleclips/api/fetch-templates") else {
+            isLoading = false
+            return
+        }
+        
+        URLSession.shared.dataTask(with: url) { data, _, error in
+            DispatchQueue.main.async {
+                isLoading = false
+                guard let data = data, error == nil else { return }
+                if let decoded = try? JSONDecoder().decode([TemplateData].self, from: data) {
+                    self.templates = decoded
+                }
+            }
+        }.resume()
     }
 }
 
