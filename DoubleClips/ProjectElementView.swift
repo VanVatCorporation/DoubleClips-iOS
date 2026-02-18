@@ -13,18 +13,9 @@ struct ProjectElementView: View {
     var body: some View {
         HStack(spacing: 16) {
             // Preview Image (80dp x 80dp)
-            if let image = image {
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 80, height: 80)
-                    .clipShape(RoundedRectangle(cornerRadius: 12)) // ShapeAppearance.Material3.Corner.Medium approx 12dp
-            } else {
-                Rectangle()
-                    .fill(Color.mdSurfaceContainerHigh)
-                    .frame(width: 80, height: 80)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
+            thumbnailView
+                .frame(width: 80, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             
             // Title and Details
             VStack(alignment: .leading, spacing: 4) {
@@ -54,28 +45,9 @@ struct ProjectElementView: View {
             
             Spacer()
             
-            
-            
             // More Options Button (Menu)
             Menu {
-                Button(action: onEdit) {
-                    Label("Edit", systemImage: "pencil")
-                }
-                Button(action: onShare) {
-                    Label("Share", systemImage: "square.and.arrow.up")
-                }
-                Button(action: onClone) {
-                    Label("Clone", systemImage: "doc.on.doc")
-                }
-                if #available(iOS 15.0, *) {
-                    Button(role: .destructive, action: onDelete) {
-                        Label("Delete", systemImage: "trash")
-                    }
-                } else {
-                    Button(action: onDelete) {
-                        Label("Delete", systemImage: "trash")
-                    }
-                }
+                menuActions
             } label: {
                 Image(systemName: "ellipsis")
                     .rotationEffect(.degrees(90))
@@ -83,32 +55,116 @@ struct ProjectElementView: View {
                     .frame(width: Dimens.touchTargetMin, height: Dimens.touchTargetMin)
                     .contentShape(Rectangle())
             }
-    
-            
-//            // More Button
-//            Button(action: {
-//                // Trigger More Action
-//            }) {
-//                Image(systemName: "ellipsis")
-//                    .font(.system(size: 20))
-//                    .foregroundColor(.mdOnSurfaceVariant)
-//                    .frame(width: 48, height: 48) // Touch target
-//            }
-            
-            
-            
         }
-        .padding(12) // Internal Padding 12dp
-        .background(.ultraThinMaterial) // Liquid Glass Effect
-        .cornerRadius(16) // Card Corner Radius
+        .padding(12)
+        .background(.ultraThinMaterial)
+        .cornerRadius(16)
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.mdOutline.opacity(0.2), lineWidth: 0.5) // Stroke 0.5dp
+                .stroke(Color.mdOutline.opacity(0.2), lineWidth: 0.5)
         )
-        // External margins handled by container (List/VStack)
+        // ── Context Menu (Long Press Preview) ──────────────────────────────
+        // Equivalent to Safari link preview / Messenger conversation preview.
+        // Shows a rich preview card + the same actions as the 3-dot menu.
+        .contextMenu {
+            menuActions
+        } preview: {
+            projectPreviewCard
+        }
     }
     
-    // Helpers
+    // MARK: - Shared Menu Actions
+    // Defined once, used in both the 3-dot Menu and the context menu
+    @ViewBuilder
+    private var menuActions: some View {
+        Button(action: onEdit) {
+            Label("Edit", systemImage: "pencil")
+        }
+        Button(action: onShare) {
+            Label("Share", systemImage: "square.and.arrow.up")
+        }
+        Button(action: onClone) {
+            Label("Clone", systemImage: "doc.on.doc")
+        }
+        Button(role: .destructive, action: onDelete) {
+            Label("Delete", systemImage: "trash")
+        }
+    }
+    
+    // MARK: - Context Menu Preview Card
+    // This is the rich preview shown when the user long-presses the card.
+    // Shows the project thumbnail (large), title, date, duration, and size.
+    private var projectPreviewCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Large Thumbnail
+            ZStack {
+                if let image = image {
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    Color.mdSurfaceContainerHigh
+                    VStack(spacing: 8) {
+                        Image(systemName: "film.stack")
+                            .font(.system(size: 48))
+                            .foregroundColor(.secondary)
+                        Text("No Preview")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .frame(width: 320, height: 180)
+            .clipped()
+            
+            // Project Info
+            VStack(alignment: .leading, spacing: 6) {
+                Text(project.projectTitle)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                
+                HStack(spacing: 12) {
+                    Label(formatDate(project.projectTimestamp), systemImage: "calendar")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                }
+                
+                HStack(spacing: 16) {
+                    Label(formatDuration(project.projectDuration), systemImage: "clock")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                    
+                    Label(formatSize(project.projectSize), systemImage: "internaldrive")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(16)
+            .frame(width: 320, alignment: .leading)
+            .background(Color.mdBackground)
+        }
+        .frame(width: 320)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+    
+    // MARK: - Thumbnail Helper
+    @ViewBuilder
+    private var thumbnailView: some View {
+        if let image = image {
+            image
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else {
+            Color.mdSurfaceContainerHigh
+                .overlay(
+                    Image(systemName: "film.stack")
+                        .foregroundColor(.secondary)
+                )
+        }
+    }
+    
+    // MARK: - Formatters
     func formatDate(_ timestamp: Int64) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp) / 1000)
         let formatter = DateFormatter()
