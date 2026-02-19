@@ -8,6 +8,14 @@ struct HomeView: View {
     @State private var showAddProjectPopup: Bool = false
     @State private var editingProject: ProjectData? = nil
     
+    // Alert States
+    @State private var showingRenameAlert = false
+    @State private var projectToRename: ProjectData?
+    @State private var newProjectTitle = ""
+    
+    @State private var showingDeleteAlert = false
+    @State private var projectToDelete: ProjectData?
+    
     // Real Project Loader — equivalent of MainAreaScreen.reloadingProject()
     func loadProjects() {
         isLoading = true
@@ -114,26 +122,37 @@ struct HomeView: View {
                 // Project List (Scrollable)
                 List {
                     ForEach(projects) { project in
-                        ProjectElementView(
-                            project: project,
-                            image: Image(systemName: "photo"), // Placeholder
-                            onEdit: { editingProject = project },
-                            onDelete: {
-                                if let index = projects.firstIndex(where: { $0.id == project.id }) {
-                                    projects.remove(at: index)
+                            ProjectElementView(
+                                project: project,
+                                image: Image(systemName: "photo"), // Placeholder
+                                onEdit: { editingProject = project },
+                                onEditTitle: {
+                                    projectToRename = project
+                                    newProjectTitle = project.projectTitle
+                                    showingRenameAlert = true
+                                },
+                                onShare: { print("Share \(project.projectTitle)") },
+                                onClone: {
+                                    if let cloned = project.clone() {
+                                        withAnimation {
+                                            projects.insert(cloned, at: 0)
+                                        }
+                                    }
+                                },
+                                onUpload: { print("Upload \(project.projectTitle)") },
+                                onDelete: {
+                                    projectToDelete = project
+                                    showingDeleteAlert = true
                                 }
-                            },
-                            onShare: { print("Share \(project.projectTitle)") },
-                            onClone: { print("Clone \(project.projectTitle)") }
-                        )
-                        .listRowInsets(EdgeInsets()) // Remove default padding
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .padding(.horizontal, 5) // match android layout margin
-                        .padding(.top, 5)
-                        .onTapGesture {
-                            editingProject = project
-                        }
+                            )
+                            .listRowInsets(EdgeInsets()) // Remove default padding
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .padding(.horizontal, 5) // match android layout margin
+                            .padding(.top, 5)
+                            .onTapGesture {
+                                editingProject = project
+                            }
                     }
                 }
                 .listStyle(PlainListStyle())
@@ -175,6 +194,38 @@ struct HomeView: View {
                     showAddProjectPopup = false
                 }
             )
+        }
+        // Rename Alert
+        .alert("Rename Project", isPresented: $showingRenameAlert) {
+            TextField("New Title", text: $newProjectTitle)
+            Button("Cancel", role: .cancel) { }
+            Button("Rename") {
+                if var project = projectToRename {
+                    let oldId = project.id
+                    if project.rename(to: newProjectTitle) {
+                        // Refresh list to show new title
+                        if let index = projects.firstIndex(where: { $0.id == oldId }) {
+                            projects[index] = project
+                        }
+                    }
+                }
+            }
+        }
+        // Delete Alert
+        .alert("Delete Project?", isPresented: $showingDeleteAlert, presenting: projectToDelete) { project in
+             Button("Delete", role: .destructive) {
+                 if let index = projects.firstIndex(where: { $0.id == project.id }) {
+                     // Delete directory
+                     IOHelper.deleteDir(project.projectPath)
+                     // Remove from list
+                     withAnimation {
+                         projects.remove(at: index)
+                     }
+                 }
+             }
+             Button("Cancel", role: .cancel) { }
+        } message: { project in
+            Text("Are you sure you want to delete '\(project.projectTitle)'? This action cannot be undone.")
         }
     }
         } // NavigationStack

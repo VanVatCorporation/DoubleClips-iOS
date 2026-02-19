@@ -18,4 +18,8 @@ struct TemplateData: Identifiable, Codable, Hashable {
     var heartCount: Int
     // var comments: [TemplateComment] // Deferred for now as per "handle later" instruction
     var bookmarkCount: Int
+    
+    // User Interaction State
+    var isLiked: Bool?
+    var isBookmarked: Bool?
 }

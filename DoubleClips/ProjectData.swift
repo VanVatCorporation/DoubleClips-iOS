@@ -50,6 +50,72 @@ struct ProjectData: Identifiable, Codable, Hashable {
               let data = json.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(ProjectData.self, from: data)
     }
+    
+    // MARK: - Operations (Rename, Clone)
+    
+    /// Renames the project directory and updates the internal title.
+    /// Equivalent of `ProjectData.setProjectTitle(context, title, true)`
+    mutating func rename(to newTitle: String) -> Bool {
+        let cleanTitle = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else { return false }
+        
+        // 1. Determine new directory path
+        // Parent folder of current project
+        let parentDir = URL(fileURLWithPath: projectPath).deletingLastPathComponent().path
+        // New project folder name (Title is used as folder name in Android implementation logic, though create uses project_N)
+        // Android logic: IOHelper.CombinePath(Constants.DEFAULT_PROJECT_DIRECTORY(context), projectTitle);
+        // We should follow the same pattern if we want 1:1 sync, or just keep project_N and change title in json.
+        // Android SPECIFICALLY renames the directory:
+        // String newDir = IOHelper.CombinePath(Constants.DEFAULT_PROJECT_DIRECTORY(context), projectTitle);
+        // So we must rename the directory too.
+        
+        let newPath = IOHelper.combinePath(Constants.DEFAULT_PROJECT_DIRECTORY, cleanTitle)
+        
+        // Avoid overwriting existing folder
+        if IOHelper.isFileExist(newPath) && newPath != projectPath {
+            return false 
+        }
+        
+        // 2. Rename Directory
+        do {
+            try FileManager.default.moveItem(atPath: projectPath, toPath: newPath)
+        } catch {
+            print("Rename failed: \(error)")
+            return false
+        }
+        
+        // 3. Update properties
+        self.projectPath = newPath
+        self.projectTitle = cleanTitle
+        self.savePropertiesAtProject()
+        
+        return true
+    }
+    
+    /// Clones the project to a new directory.
+    func clone() -> ProjectData? {
+        // Generate new project path
+        let newPath = IOHelper.getNextIndexPathInFolder(
+            folderPath: Constants.DEFAULT_PROJECT_DIRECTORY,
+            prefix: "project_",
+            extension: "",
+            createEmptyFile: false
+        )
+        
+        // Copy directory
+        IOHelper.copyDir(from: projectPath, to: newPath)
+        
+        // Update properties in the new project
+        var clonedData = self
+        clonedData.projectPath = newPath
+        clonedData.projectTitle = "\(self.projectTitle) (Copy)"
+        clonedData.projectTimestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        
+        // Save new properties to the new location
+        clonedData.savePropertiesAtProject()
+        
+        return clonedData
+    }
 
     // MARK: - Formatting Helpers
 

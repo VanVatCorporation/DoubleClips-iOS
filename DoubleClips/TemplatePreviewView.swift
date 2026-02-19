@@ -86,6 +86,112 @@ struct TemplatePreviewItemView: View {
     @State private var isBookmarked: Bool = false
     @State private var bookmarkCount: Int = 0
     
+    @State private var showLoginAlert: Bool = false
+    
+    // API Function
+    func toggleLike() {
+        guard let user = AuthRepository.shared.currentUser else {
+            showLoginAlert = true
+            return
+        }
+        
+        // Optimistic Update
+        let wasLiked = isLiked
+        isLiked.toggle()
+        likeCount += isLiked ? 1 : -1
+        
+        // API Call
+        guard let url = URL(string: "https://app.vanvatcorp.com/doubleclips/api/toggle-like") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body: [String: Any] = [
+            "username": user.username,
+            "templateId": template.templateId
+        ]
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            print("Failed to encode like body: \(error)")
+            return
+        }
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("Like API Error: \(error)")
+                DispatchQueue.main.async {
+                    // Revert on error
+                    isLiked = wasLiked
+                    likeCount += isLiked ? 1 : -1
+                }
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                print("Like API Failed Status: \(httpResponse.statusCode)")
+                DispatchQueue.main.async {
+                    // Revert on failure
+                    isLiked = wasLiked
+                    likeCount += isLiked ? 1 : -1
+                }
+            }
+        }.resume()
+    }
+    
+    // Bookmark Function
+    func toggleBookmark() {
+        guard let user = AuthRepository.shared.currentUser else {
+            showLoginAlert = true
+            return
+        }
+        
+        // Optimistic Update
+        let wasBookmarked = isBookmarked
+        isBookmarked.toggle()
+        bookmarkCount += isBookmarked ? 1 : -1
+        
+        // API Call
+        guard let url = URL(string: "https://app.vanvatcorp.com/doubleclips/api/toggle-bookmark") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body: [String: Any] = [
+            "username": user.username,
+            "templateId": template.templateId
+        ]
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            print("Failed to encode bookmark body: \(error)")
+            return
+        }
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("Bookmark API Error: \(error)")
+                DispatchQueue.main.async {
+                    // Revert on error
+                    isBookmarked = wasBookmarked
+                    bookmarkCount += isBookmarked ? 1 : -1
+                }
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                print("Bookmark API Failed Status: \(httpResponse.statusCode)")
+                DispatchQueue.main.async {
+                    // Revert on failure
+                    isBookmarked = wasBookmarked
+                    bookmarkCount += isBookmarked ? 1 : -1
+                }
+            }
+        }.resume()
+    }
+    
     var body: some View {
         ZStack {
             // 1. Media Layer (Thumbnail / Video Mock)
@@ -179,11 +285,10 @@ struct TemplatePreviewItemView: View {
                     // Heart
                     ActionItem(
                         icon: isLiked ? "heart.fill" : "heart",
-                        label: "\(isLiked ? likeCount + 1 : likeCount)",
+                        label: "\(/*isLiked ? likeCount + 1 : */likeCount)",
                         color: isLiked ? .red : .white
                     ) {
-                        isLiked.toggle()
-                        // Mock API call: toggle-like
+                        toggleLike()
                     }
                     
                     // Comment
@@ -198,11 +303,10 @@ struct TemplatePreviewItemView: View {
                     // Bookmark
                     ActionItem(
                         icon: isBookmarked ? "bookmark.fill" : "bookmark",
-                        label: "\(isBookmarked ? bookmarkCount + 1 : bookmarkCount)",
+                        label: "\(/*isBookmarked ? bookmarkCount + 1 : */bookmarkCount)",
                         color: isBookmarked ? .yellow : .white
                     ) {
-                        isBookmarked.toggle()
-                         // Mock API call: toggle-bookmark
+                        toggleBookmark()
                     }
                     
                     // Other/Menu
@@ -243,10 +347,22 @@ struct TemplatePreviewItemView: View {
                 .padding(.bottom, 20) // Safe area
             }
         }
+        
         .onAppear {
             // Init mock counts
             likeCount = template.heartCount
             bookmarkCount = template.bookmarkCount
+            isLiked = template.isLiked ?? false
+            isBookmarked = template.isBookmarked ?? false
+        }
+        .alert("Login Required", isPresented: $showLoginAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Login") {
+                // Navigate to login? Or just dismiss for now.
+                // In Android it just shows "Please login to like this template"
+            }
+        } message: {
+            Text("Please login to like this template")
         }
     }
     

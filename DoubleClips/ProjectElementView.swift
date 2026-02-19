@@ -5,10 +5,12 @@ struct ProjectElementView: View {
     var image: Image? // In a real app this might be a URL or AsyncImage loaded from projectPath/preview.png
     
     // Actions
-    var onEdit: () -> Void
-    var onDelete: () -> Void
+    var onEdit: () -> Void      // Enter Editor
+    var onEditTitle: () -> Void // Rename Project
     var onShare: () -> Void
     var onClone: () -> Void
+    var onUpload: () -> Void    // Upload to Cloud
+    var onDelete: () -> Void
     
     var body: some View {
         HStack(spacing: 16) {
@@ -23,6 +25,12 @@ struct ProjectElementView: View {
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.primary)
                     .lineLimit(1)
+                    // Disable the parent context menu for this specific element
+                    // so the long press triggers onEditTitle instead of the preview.
+                    .contextMenu(menuItems: { EmptyView() })
+                    .onLongPressGesture {
+                        onEditTitle()
+                    }
                 
                 Text(formatDate(project.projectTimestamp))
                     .font(.system(size: 14))
@@ -77,15 +85,22 @@ struct ProjectElementView: View {
     // Defined once, used in both the 3-dot Menu and the context menu
     @ViewBuilder
     private var menuActions: some View {
-        Button(action: onEdit) {
-            Label("Edit", systemImage: "pencil")
+        Button(action: onEditTitle) {
+            Label("Edit title", systemImage: "pencil")
         }
+        
         Button(action: onShare) {
             Label("Share", systemImage: "square.and.arrow.up")
         }
+        
+        Button(action: onUpload) {
+            Label("Upload", systemImage: "icloud.and.arrow.up")
+        }
+        
         Button(action: onClone) {
             Label("Clone", systemImage: "doc.on.doc")
         }
+        
         Button(role: .destructive, action: onDelete) {
             Label("Delete", systemImage: "trash")
         }
@@ -168,7 +183,7 @@ struct ProjectElementView: View {
     func formatDate(_ timestamp: Int64) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp) / 1000)
         let formatter = DateFormatter()
-        formatter.dateFormat = "dd/MM/yyyy"
+        formatter.dateFormat = "dd/MM/yyyy hh:mm:ss"
         return formatter.string(from: date)
     }
     
