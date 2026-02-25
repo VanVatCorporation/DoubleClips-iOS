@@ -1,4 +1,6 @@
 import SwiftUI
+import _AVKit_SwiftUI
+import Combine
 
 /// iOS equivalent of EditingActivity + layout-port/layout_editing.xml
 /// Portrait layout with 3 main zones:
@@ -8,14 +10,23 @@ struct EditingView: View {
     let project: ProjectData
     @Environment(\.dismiss) var dismiss
     
-    // Playback state
-    @State private var isPlaying: Bool = false
-    @State private var currentTime: Double = 0.0
+    // Playback engine
+    @StateObject private var engine = EditingPlayer()
     @State private var totalDuration: Double = 30.0 // placeholder
     
     // Timeline state
-    @State private var tracks: [TrackModel] = []
+    @StateObject private var timeline: Timeline = Timeline()
     @State private var selectedToolbar: ToolbarMode = .default
+    @State private var selectedTrackID: UUID?
+    @State private var selectedClipID: UUID?
+    @State private var activeOverlay: OverlayType?
+    
+    // Zoom state
+    @State private var pixelsPerSecond: CGFloat = 50.0
+    @GestureState private var pinchScale: CGFloat = 1.0
+    
+    // File Importer state
+    @State private var showFileImporter = false
     
     // Canvas paused alert
     @State private var isCanvasPaused: Bool = false
@@ -35,14 +46,19 @@ struct EditingView: View {
                     
                     // ── Video Preview Area ─────────────────────────────────
                     ZStack {
-                        // Placeholder for actual video renderer
-                        VStack(spacing: 12) {
-                            Image(systemName: "film.stack")
-                                .font(.system(size: 56))
-                                .foregroundColor(.white.opacity(0.3))
-                            Text("Video Preview")
-                                .font(.system(size: 16))
-                                .foregroundColor(.white.opacity(0.4))
+                        // Native AVPlayer Renderer
+                        if engine.player.currentItem != nil {
+                            VideoPlayer(player: engine.player)
+                                .disabled(true) // Hide native controls
+                        } else {
+                            VStack(spacing: 12) {
+                                Image(systemName: "film.stack")
+                                    .font(.system(size: 56))
+                                    .foregroundColor(.white.opacity(0.3))
+                                Text("Add media to begin")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white.opacity(0.4))
+                            }
                         }
                         
                         // Paused canvas alert (android:id="pausedCanvasAlertPanel")
@@ -126,8 +142,8 @@ struct EditingView: View {
                             Spacer()
                             
                             // Play/Pause (android:id="playPauseButton", centered)
-                            Button(action: { isPlaying.toggle() }) {
-                                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            Button(action: { engine.togglePlayPause() }) {
+                                Image(systemName: engine.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                                     .font(.system(size: 36))
                                     .foregroundColor(.white)
                                     .frame(width: 40, height: 40)
@@ -151,7 +167,8 @@ struct EditingView: View {
                 
                 // ── EDITING ZONE (300dp) ──────────────────────────────────────
                 // android:id="editingZone" height=300dp, alignParentBottom
-                VStack(spacing: 0) {
+                ZStack(alignment: .bottom) {
+                    VStack(spacing: 0) {
                     
                     // ── Editing Track Zone ─────────────────────────────────
                     // android:id="editingTrackZone" fills above editingToolsZone
@@ -160,7 +177,7 @@ struct EditingView: View {
                         // ── Timestamp Bar (20dp) ───────────────────────────
                         // android:id="timestampBar"
                         HStack {
-                            Text(formatTime(currentTime))
+                            Text(formatTime(engine.currentTime))
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.8))
                             Spacer()
@@ -189,7 +206,7 @@ struct EditingView: View {
                                 
                                 ScrollView(.vertical, showsIndicators: false) {
                                     LazyVStack(spacing: 0) {
-                                        ForEach(tracks) { track in
+                                        ForEach(timeline.tracks) { track in
                                             TrackLabelView(track: track)
                                         }
                                     }
@@ -200,27 +217,51 @@ struct EditingView: View {
                             
                             // Timeline Wrapper — ruler + tracks + playhead
                             ZStack(alignment: .top) {
-                                VStack(spacing: 0) {
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    VStack(spacing: 0) {
                                     // Ruler (15sp height) — android:id="ruler_scroll"
-                                    TimelineRulerView(
-                                        currentTime: currentTime,
-                                        totalDuration: totalDuration
-                                    )
-                                    .frame(height: 20)
-                                    
-                                    // Tracks scroll area — android:id="trackVerticalScrollView"
-                                    ScrollView([.vertical, .horizontal], showsIndicators: false) {
-                                        LazyVStack(spacing: 0) {
-                                            ForEach(tracks) { track in
-                                                TrackRowView(track: track)
+                                        TimelineRulerView(
+                                            currentTime: engine.currentTime,
+                                            totalDuration: totalDuration,
+                                            pps: pixelsPerSecond * pinchScale
+                                        )
+                                        .frame(height: 20)
+                                        
+                                        // Tracks scroll area — android:id="trackVerticalScrollView"
+                                        ScrollView(.vertical, showsIndicators: false) {
+                                            LazyVStack(spacing: 0) {
+                                                ForEach(timeline.tracks) { track in
+                                                    TrackRowView(
+                                                        track: track,
+                                                        isSelected: selectedTrackID == track.id,
+                                                        selectedClipID: selectedClipID,
+                                                        pps: pixelsPerSecond * pinchScale,
+                                                        onClipTap: { clip in selectingClip(clip) },
+                                                        onTap: { selectingTrack(track) }
+                                                    )
+                                                }
+                                                // Blank spacer track (addNewTrackBlankTrackSpacer)
+                                                Color(hex: "#222222")
+                                                    .frame(height: 100)
+                                                    .onTapGesture {
+                                                        addTrack()
+                                                    }
                                             }
-                                            // Blank spacer track (addNewTrackBlankTrackSpacer)
-                                            Color(hex: "#222222")
-                                                .frame(height: 100)
                                         }
-                                        .frame(minWidth: geo.size.width - 50)
+                                        .background(Color(hex: "#111111"))
                                     }
-                                    .background(Color(hex: "#111111"))
+                                    .frame(minWidth: geo.size.width - 50)
+                                    .gesture(
+                                        MagnificationGesture()
+                                            .updating($pinchScale) { currentState, gestureState, _ in
+                                                gestureState = currentState
+                                            }
+                                            .onEnded { scale in
+                                                // Clamp zoom level to prevent absurd scaling
+                                                let newScale = pixelsPerSecond * scale
+                                                pixelsPerSecond = max(10, min(newScale, 800))
+                                            }
+                                    )
                                 }
                                 
                                 // Playhead — android:id="playhead" (red, centered)
@@ -235,7 +276,7 @@ struct EditingView: View {
                     }
                     .frame(maxHeight: .infinity)
                     
-                    // ── Editing Tools Zone (60dp) ──────────────────────────
+                    // Editing Tools Zone (60dp) ──────────────────────────
                     // android:id="editingToolsZone" height=60dp, alignParentBottom
                     // Toolbar switches based on selection context
                     Group {
@@ -243,9 +284,11 @@ struct EditingView: View {
                         case .default:
                             DefaultToolbarView()
                         case .clip:
-                            ClipToolbarView()
+                            ClipToolbarView(
+                                onEdit: { withAnimation { activeOverlay = .videoProperties } }
+                            )
                         case .track:
-                            TrackToolbarView()
+                            TrackToolbarView(onAddMedia: { showFileImporter = true })
                         case .clips:
                             ClipsToolbarView()
                         }
@@ -253,8 +296,17 @@ struct EditingView: View {
                     .frame(height: 60)
                     .background(Color(hex: "#1A1A1A"))
                 }
-                .frame(height: 300)
-                .background(Color(hex: "#111111"))
+                
+                // Specific Edit Overlays (slides up over editingZone)
+                if let overlayType = activeOverlay {
+                    let selectedClip = timeline.tracks.flatMap({ $0.clips }).first(where: { $0.id == selectedClipID })
+                    SpecificEditOverlay(type: overlayType, clip: selectedClip) {
+                        withAnimation { activeOverlay = nil }
+                    }
+                }
+            }
+            .frame(height: 300)
+            .background(Color(hex: "#111111"))
             }
         }
         
@@ -266,16 +318,110 @@ struct EditingView: View {
         .navigationBarHidden(true)
         .statusBarHidden(true)
         .onAppear {
-            // Add one default track on open
-            if tracks.isEmpty { addTrack() }
+            setupPreview()
+            setupTimelinePinchAndZoom()
+            setupSpecificEdit()
+            setupToolbars()
+            handleEditZoneInteraction()
         }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.audiovisualContent, .image],
+            allowsMultipleSelection: true
+        ) { result in
+            handleFileImport(result)
+        }
+    }
+    
+    // MARK: - Activity Lifecycle Mimic (onCreate flow)
+    
+    private func setupPreview() {
+        // Initialize preview dimensions/state
+        if timeline.tracks.isEmpty { addTrack() }
+    }
+    
+    private func setupTimelinePinchAndZoom() {
+        // Future: Attach magnification gesture logic to scale pixelsPerSecond
+    }
+    
+    private func setupSpecificEdit() {
+        // Future: specific edit screens init (TextEdit, EffectEdit, etc.)
+    }
+    
+    private func setupToolbars() {
+        // Set initial toolbar states
+        updateToolbarState()
+    }
+    
+    private func handleEditZoneInteraction() {
+        // Future: Setup overall interaction states (e.g. tap to deselect)
     }
     
     // MARK: - Actions
     
+    private func selectingTrack(_ track: EditingView.Track) {
+        if selectedTrackID == track.id {
+            selectedTrackID = nil
+        } else {
+            selectedTrackID = track.id
+            selectedClipID = nil
+        }
+        updateToolbarState()
+    }
+    
+    private func selectingClip(_ clip: EditingView.Clip) {
+        if selectedClipID == clip.id {
+            selectedClipID = nil
+        } else {
+            selectedClipID = clip.id
+            selectedTrackID = nil
+        }
+        updateToolbarState()
+    }
+    
+    private func updateToolbarState() {
+        if selectedClipID != nil {
+            selectedToolbar = .clip
+        } else if selectedTrackID != nil {
+            selectedToolbar = .track
+        } else {
+            selectedToolbar = .default
+        }
+    }
+    
+    private func handleFileImport(_ result: Result<[URL], Error>) {
+        guard let trackID = selectedTrackID,
+              let trackIndex = timeline.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        
+        switch result {
+        case .success(let urls):
+            for url in urls {
+                let defaultDuration: Float = 3.0
+                let newClip = Clip(
+                    clipName: url.lastPathComponent,
+                    startTime: Float(engine.currentTime),
+                    duration: defaultDuration,
+                    trackIndex: trackIndex,
+                    type: .video,
+                    isClipHasAudio: true,
+                    width: 1920,
+                    height: 1080
+                )
+                timeline.tracks[trackIndex].clips.append(newClip)
+                // Advance playhead sequentially
+                engine.seek(to: engine.currentTime + Double(defaultDuration))
+                totalDuration = max(totalDuration, engine.currentTime)
+            }
+            // Trigger rebuilding AVFoundation composition
+            engine.rebuildComposition(from: timeline, projectDir: URL(fileURLWithPath: project.projectPath))
+        case .failure(let error):
+            print("Failed to import media: \(error)")
+        }
+    }
+    
     private func addTrack() {
-        let newTrack = TrackModel(index: tracks.count)
-        withAnimation { tracks.append(newTrack) }
+        let newTrack = Track(timelineIndex: timeline.tracks.count)
+        withAnimation { timeline.tracks.append(newTrack) }
     }
     
     // MARK: - Helpers
@@ -288,29 +434,14 @@ struct EditingView: View {
     }
 }
 
-// MARK: - Data Models
-
-struct TrackModel: Identifiable {
-    let id = UUID()
-    var index: Int
-    var clips: [ClipModel] = []
-}
-
-struct ClipModel: Identifiable {
-    let id = UUID()
-    var name: String
-    var startTime: Double
-    var duration: Double
-}
-
 // MARK: - Sub-Views
 
 /// Track label shown in the left 50dp column
 private struct TrackLabelView: View {
-    let track: TrackModel
+    @ObservedObject var track: EditingView.Track
     var body: some View {
         VStack(spacing: 2) {
-            Text("T\(track.index + 1)")
+            Text("T\(track.timelineIndex + 1)")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundColor(.white.opacity(0.7))
         }
@@ -325,13 +456,27 @@ private struct TrackLabelView: View {
 
 /// One track row in the timeline scroll area
 private struct TrackRowView: View {
-    let track: TrackModel
+    @ObservedObject var track: EditingView.Track
+    var isSelected: Bool = false
+    var selectedClipID: UUID?
+    var pps: CGFloat
+    
+    var onClipTap: (EditingView.Clip) -> Void
+    var onTap: () -> Void
+    
     var body: some View {
         ZStack(alignment: .leading) {
-            Color(hex: "#1A1A1A")
+            Color(hex: isSelected ? "#333333" : "#1A1A1A")
             HStack(spacing: 2) {
                 ForEach(track.clips) { clip in
-                    ClipBlockView(clip: clip)
+                    ClipBlockView(
+                        clip: clip,
+                        isSelected: selectedClipID == clip.id,
+                        pps: pps
+                    )
+                    .onTapGesture {
+                        onClipTap(clip)
+                    }
                 }
             }
             .padding(.horizontal, 4)
@@ -339,26 +484,108 @@ private struct TrackRowView: View {
         .frame(height: 100)
         .overlay(
             Rectangle()
-                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                .stroke(isSelected ? Color.mdPrimary : Color.white.opacity(0.08), lineWidth: isSelected ? 2 : 0.5)
         )
+        .onTapGesture {
+            onTap()
+        }
     }
 }
 
 /// A single clip block on the timeline
 private struct ClipBlockView: View {
-    let clip: ClipModel
+    @ObservedObject var clip: EditingView.Clip
+    var isSelected: Bool
+    var pps: CGFloat
+    
+    @State private var dragInitialDuration: Float = 0
+    @State private var dragInitialStartTime: Float = 0
+    @State private var dragInitialStartTrim: Float = 0
+    @State private var dragInitialEndTrim: Float = 0
+    
+    // Derived values for the clip block
+    var blockWidth: CGFloat {
+        max(20, CGFloat(clip.duration) * pps)
+    }
+    
     var body: some View {
-        RoundedRectangle(cornerRadius: 4)
-            .fill(Color.mdPrimary.opacity(0.8))
-            .frame(width: max(40, CGFloat(clip.duration) * 100), height: 88)
-            .overlay(
-                Text(clip.name)
-                    .font(.system(size: 10))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .padding(.horizontal, 4),
-                alignment: .leading
-            )
+        ZStack {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.mdPrimary.opacity(0.8))
+            
+            Text(clip.clipName)
+                .font(.system(size: 10))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            if isSelected {
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.white, lineWidth: 2)
+                
+                // Left Handle
+                HStack {
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.white)
+                            .frame(width: 12)
+                        Image(systemName: "chevron.compact.left")
+                            .font(.system(size: 10))
+                            .foregroundColor(.black)
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                if dragInitialDuration == 0 {
+                                    dragInitialDuration = clip.duration
+                                    dragInitialStartTime = clip.startTime
+                                    dragInitialStartTrim = clip.startClipTrim
+                                }
+                                let delta = Float(value.translation.width / pps)
+                                let newDuration = max(0.5, dragInitialDuration - delta)
+                                let actualDelta = dragInitialDuration - newDuration
+                                
+                                clip.duration = newDuration
+                                clip.startTime = dragInitialStartTime + actualDelta
+                                clip.startClipTrim = max(0, dragInitialStartTrim + actualDelta)
+                            }
+                            .onEnded { _ in dragInitialDuration = 0 }
+                    )
+                    
+                    Spacer()
+                    
+                    // Right Handle
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.white)
+                            .frame(width: 12)
+                        Image(systemName: "chevron.compact.right")
+                            .font(.system(size: 10))
+                            .foregroundColor(.black)
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                if dragInitialDuration == 0 {
+                                    dragInitialDuration = clip.duration
+                                    dragInitialEndTrim = clip.endClipTrim
+                                }
+                                let delta = Float(value.translation.width / pps)
+                                let newDuration = max(0.5, dragInitialDuration + delta)
+                                
+                                clip.duration = newDuration
+                                clip.endClipTrim = max(0, clip.originalDuration - clip.duration - clip.startClipTrim)
+                            }
+                            .onEnded { _ in dragInitialDuration = 0 }
+                    )
+                }
+            }
+        }
+        .frame(width: blockWidth, height: 88)
+        .clipped()
     }
 }
 
@@ -366,17 +593,17 @@ private struct ClipBlockView: View {
 private struct TimelineRulerView: View {
     let currentTime: Double
     let totalDuration: Double
+    let pps: CGFloat
     
     var body: some View {
         GeometryReader { geo in
             Canvas { context, size in
-                let pixelsPerSecond: CGFloat = 100
-                let totalWidth = max(size.width, CGFloat(totalDuration) * pixelsPerSecond + size.width)
+                let totalWidth = max(size.width, CGFloat(totalDuration) * pps + size.width)
                 
                 // Draw tick marks every second
                 var t: CGFloat = 0
-                while t * pixelsPerSecond < totalWidth {
-                    let x = size.width / 2 + t * pixelsPerSecond - CGFloat(currentTime) * pixelsPerSecond
+                while t * pps < totalWidth {
+                    let x = size.width / 2 + t * pps - CGFloat(currentTime) * pps
                     let isMajor = Int(t) % 5 == 0
                     let tickHeight: CGFloat = isMajor ? 12 : 6
                     
@@ -427,13 +654,14 @@ private struct DefaultToolbarView: View {
 /// Clip toolbar — view_toolbar_clip.xml
 /// Buttons: Delete, Split, Clone, Edit, Keyframe, SelectMultiple, AllKeyframe, Restate, Export
 private struct ClipToolbarView: View {
+    var onEdit: () -> Void
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 ToolbarButton(icon: "trash", label: "Delete") {}
                 ToolbarButton(icon: "scissors", label: "Split") {}
                 ToolbarButton(icon: "doc.on.doc", label: "Clone") {}
-                ToolbarButton(icon: "pencil.and.outline", label: "Edit") {}
+                ToolbarButton(icon: "pencil.and.outline", label: "Edit") { onEdit() }
                 ToolbarButton(icon: "sparkles", label: "Keyframe") {}
                 ToolbarButton(icon: "list.bullet", label: "Multi") {}
                 ToolbarButton(icon: "arrow.triangle.merge", label: "AllKey") {}
@@ -447,9 +675,12 @@ private struct ClipToolbarView: View {
 
 /// Track toolbar — view_toolbar_track.xml (placeholder)
 private struct TrackToolbarView: View {
+    var onAddMedia: () -> Void
+    
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
+                ToolbarButton(icon: "photo.badge.plus", label: "Add media") { onAddMedia() }
                 ToolbarButton(icon: "trash", label: "Delete") {}
                 ToolbarButton(icon: "square.and.arrow.up", label: "Export") {}
                 ToolbarButton(icon: "square.and.arrow.down", label: "Import") {}

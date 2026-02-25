@@ -113,23 +113,24 @@ struct ProjectElementView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Large Thumbnail
             ZStack {
-                if let image = image {
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    Color.mdSurfaceContainerHigh
-                    VStack(spacing: 8) {
-                        Image(systemName: "film.stack")
-                            .font(.system(size: 48))
-                            .foregroundColor(.secondary)
-                        Text("No Preview")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                    }
-                }
+//                if let image = image {
+//                    image
+//                        .resizable()
+//                        .aspectRatio(contentMode: .fill)
+//                } else {
+//                    Color.mdSurfaceContainerHigh
+//                    VStack(spacing: 8) {
+//                        Image(systemName: "film.stack")
+//                            .font(.system(size: 48))
+//                            .foregroundColor(.secondary)
+//                        Text("No Preview")
+//                            .font(.system(size: 14))
+//                            .foregroundColor(.secondary)
+//                    }
+//                }
+                EditingView(project: project)
             }
-            .frame(width: 320, height: 180)
+            .frame(width: 320, height: 480)
             .clipped()
             
             // Project Info
