@@ -8,6 +8,7 @@ import Combine
 ///   2. editingZone  – timeline tracks + toolbar (300dp)
 struct EditingView: View {
     let project: ProjectData
+    let isPreview: Bool
     @Environment(\.dismiss) var dismiss
     
     // Playback engine
@@ -80,51 +81,59 @@ struct EditingView: View {
                         }
                     }
                     
-                    VStack {
-                        // ── Top Bar (50dp) ─────────────────────────────────
-                        // android:id="top_bar" height=50dp
-                        HStack(spacing: 0) {
-                            // Back button (android:id="backButton")
-                            Button(action: { dismiss() }) {
-                                Image(systemName: "chevron.backward")
-                                    .font(.system(size: 20, weight: .medium))
+
+                    if(!isPreview)
+                    {
+                        VStack {
+                            // ── Top Bar (50dp) ─────────────────────────────────
+                            // android:id="top_bar" height=50dp
+                            HStack(spacing: 0) {
+                                // Back button (android:id="backButton")
+                                Button(action: { dismiss() }) {
+                                    Image(systemName: "chevron.backward")
+                                        .font(.system(size: 20, weight: .medium))
+                                        .foregroundColor(.white)
+                                        .frame(width: 50, height: 50)
+                                }
+                                
+                                // Settings button (android:id="settingsButton")
+                                Button(action: { /* Open video properties */ }) {
+                                    Image(systemName: "display")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(.white)
+                                        .frame(width: 50, height: 50)
+                                }
+                                
+                                Spacer()
+                                
+                                // Center canvas info (android:id="textCanvasControllerInfo")
+                                Text(project.projectTitle)
+                                    .font(.system(size: 15, weight: .bold))
                                     .foregroundColor(.white)
-                                    .frame(width: 50, height: 50)
+                                    .lineLimit(1)
+                                
+                                Spacer()
+                                
+                                // Export button (android:id="exportButton")
+                                Button(action: { /* Launch export */ }) {
+                                    Text("EXPORT")
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 8)
+                                        .background(Color.mdPrimary)
+                                        .cornerRadius(8)
+                                }
+                                .padding(.trailing, 12)
                             }
+                            .frame(height: 50)
+                            .background(Color.black.opacity(0.5))
                             
-                            // Settings button (android:id="settingsButton")
-                            Button(action: { /* Open video properties */ }) {
-                                Image(systemName: "display")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.white)
-                                    .frame(width: 50, height: 50)
-                            }
-                            
-                            Spacer()
-                            
-                            // Center canvas info (android:id="textCanvasControllerInfo")
-                            Text(project.projectTitle)
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                            
-                            Spacer()
-                            
-                            // Export button (android:id="exportButton")
-                            Button(action: { /* Launch export */ }) {
-                                Text("EXPORT")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 8)
-                                    .background(Color.mdPrimary)
-                                    .cornerRadius(8)
-                            }
-                            .padding(.trailing, 12)
-                        }
-                        .frame(height: 50)
-                        .background(Color.black.opacity(0.5))
                         
+                    }
+                    
+                    
+                    
                         Spacer()
                         
                         // ── Controller Bar (40dp) ──────────────────────────
@@ -279,22 +288,27 @@ struct EditingView: View {
                     // Editing Tools Zone (60dp) ──────────────────────────
                     // android:id="editingToolsZone" height=60dp, alignParentBottom
                     // Toolbar switches based on selection context
-                    Group {
-                        switch selectedToolbar {
-                        case .default:
-                            DefaultToolbarView()
-                        case .clip:
-                            ClipToolbarView(
-                                onEdit: { withAnimation { activeOverlay = .videoProperties } }
-                            )
-                        case .track:
-                            TrackToolbarView(onAddMedia: { showFileImporter = true })
-                        case .clips:
-                            ClipsToolbarView()
+                        
+                        if(!isPreview)
+                        {
+                            Group {
+                                switch selectedToolbar {
+                                case .default:
+                                    DefaultToolbarView()
+                                case .clip:
+                                    ClipToolbarView(
+                                        onEdit: { withAnimation { activeOverlay = .videoProperties } }
+                                    )
+                                case .track:
+                                    TrackToolbarView(onAddMedia: { showFileImporter = true })
+                                case .clips:
+                                    ClipsToolbarView()
+                                }
+                            }
+                            .frame(height: 60)
+                            .background(Color(hex: "#1A1A1A"))
                         }
-                    }
-                    .frame(height: 60)
-                    .background(Color(hex: "#1A1A1A"))
+                        
                 }
                 
                 // Specific Edit Overlays (slides up over editingZone)
@@ -733,5 +747,5 @@ private struct ToolbarButton: View {
         projectTimestamp: 1700000000000,
         projectSize: 0,
         projectDuration: 0
-    ))
+    ), isPreview: false)
 }

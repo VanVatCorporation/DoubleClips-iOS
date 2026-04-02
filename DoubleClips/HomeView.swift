@@ -172,7 +172,7 @@ struct HomeView: View {
             loadProjects()
         }
         .navigationDestination(item: $editingProject) { project in
-            EditingView(project: project)
+            EditingView(project: project, isPreview: false)
                 .onAppear { isBlockingGestures = true }
                 .onDisappear { isBlockingGestures = false }
         }

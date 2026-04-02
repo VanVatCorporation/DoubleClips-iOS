@@ -147,6 +147,7 @@ struct ProfileView: View {
                                 Divider().padding(.leading, 56)
                                 SettingsRow(icon: "heart.fill", title: "Saved Templates", height: 50)
                                 Divider().padding(.leading, 56)
+                                SettingsRow(icon: "questionmark.circle.dashed", title: "Legal information", height: 50)
                                 
                                 // Log Out
                                 Button(action: performLogout) {
@@ -170,7 +171,7 @@ struct ProfileView: View {
                                 // Android structure shows these options but likely requires login to access.
                                 // For visual parity with xml (it handles visibility dynamically), let's show items but protected.
                                 // But keeping it simple: Android hides Log Out.
-                                SettingsRow(icon: "info.circle.fill", title: "About App", height: 50)
+                                SettingsRow(icon: "questionmark.circle.dashed", title: "Legal information", height: 50)
                             }
                         }
                         .background(.ultraThinMaterial)

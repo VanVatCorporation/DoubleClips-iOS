@@ -128,7 +128,7 @@ struct ProjectElementView: View {
 //                            .foregroundColor(.secondary)
 //                    }
 //                }
-                EditingView(project: project)
+                EditingView(project: project, isPreview: true)
             }
             .frame(width: 320, height: 480)
             .clipped()
