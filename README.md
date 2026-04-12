@@ -26,21 +26,11 @@ DoubleClips is an open-source, ready-to-use video editor with functionality simi
 
 iOS installation isn’t currently possible, so please wait. (I’m a bit short on cash for the $99.99 annual fee)
 
-## 🧧 Happy Lunar New Year
-
-Project development will be on hold until the 10th day of the Lunar New Year (February 26) in celebration of the holiday.  
-Thank you for your understanding, and Happy New Year! 🍻
-
-
 ## 🚜 Current Features
 
-- 5% of all Android features.
+- 6% of all Android features.
   
 ## ✅ Requirements
-
-### 👨‍💻 Windows / MacOS / Linux
-
-- We’re currently developing the Android and iOS versions, so they’re not available just yet.
    
 ### 📱 iOS
 
@@ -117,5 +107,5 @@ Send me a cup of coffee via:
 ---
 ## ⭐️ Star History
 
-![Star History Chart](https://api.star-history.com/svg?repos=VanVatCorporation/DoubleClips&type=Date)
+![Star History Chart](https://api.star-history.com/svg?repos=VanVatCorporation/DoubleClips-iOS&type=Date)
 
