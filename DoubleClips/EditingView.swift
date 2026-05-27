@@ -26,6 +26,9 @@ struct EditingView: View {
     @State private var pixelsPerSecond: CGFloat = 50.0
     @GestureState private var pinchScale: CGFloat = 1.0
     
+    // Sync Timeline Scroll Offset
+    @State private var trackScrollOffset: CGFloat = 0
+    
     // File Importer state
     @State private var showFileImporter = false
     
@@ -196,88 +199,88 @@ struct EditingView: View {
                         
                         // ── Timeline Area ──────────────────────────────────
                         // android:id="timelineArea"
-                        HStack(spacing: 0) {
-                            
-                            // Track Info Column (50dp) — android:id="trackInfoScroll"
-                            // Contains add-track button + track labels
-                            VStack(spacing: 0) {
-                                Button(action: { addTrack() }) {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 20, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .frame(width: 50, height: 50)
-                                        .background(Color(hex: "#222222"))
+                        // Layout: fixed ruler on top, then ONE vertical scroll
+                        // containing HStack(labels col | horizontal tracks scroll)
+                        // This mirrors Android: trackInfoLayout and timelineTracksContainer
+                        // share the same vertical ScrollView parent.
+                        VStack(spacing: 0) {
+                            // ── Ruler row — fixed, not part of vertical scroll ──
+                            HStack(spacing: 0) {
+                                Color(hex: "#1A1A1A").frame(width: 50, height: 20) // blank spacer under label col
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    TimelineRulerView(
+                                        currentTime: engine.currentTime,
+                                        totalDuration: totalDuration,
+                                        pps: pixelsPerSecond * pinchScale
+                                    )
                                 }
-                                
-                                ScrollView(.vertical, showsIndicators: false) {
-                                    LazyVStack(spacing: 0) {
+                                .disabled(true) // ruler scrolls via the track scroll below
+                            }
+                            .frame(height: 20)
+                            
+                            // ── Shared vertical scroll ──────────────────────────
+                            // Both label col and track rows scroll together
+                            ScrollView(.vertical, showsIndicators: false) {
+                                HStack(spacing: 0) {
+                                    // Track Info Column (50dp) — android:id="trackInfoScroll" / trackInfoLayout
+                                    VStack(spacing: 0) {
                                         ForEach(timeline.tracks) { track in
                                             TrackLabelView(track: track)
                                         }
-                                    }
-                                }
-                            }
-                            .frame(width: 50)
-                            .background(Color(hex: "#1A1A1A"))
-                            
-                            // Timeline Wrapper — ruler + tracks + playhead
-                            ZStack(alignment: .top) {
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    VStack(spacing: 0) {
-                                    // Ruler (15sp height) — android:id="ruler_scroll"
-                                        TimelineRulerView(
-                                            currentTime: engine.currentTime,
-                                            totalDuration: totalDuration,
-                                            pps: pixelsPerSecond * pinchScale
-                                        )
-                                        .frame(height: 20)
-                                        
-                                        // Tracks scroll area — android:id="trackVerticalScrollView"
-                                        ScrollView(.vertical, showsIndicators: false) {
-                                            LazyVStack(spacing: 0) {
-                                                ForEach(timeline.tracks) { track in
-                                                    TrackRowView(
-                                                        track: track,
-                                                        isSelected: selectedTrackID == track.id,
-                                                        selectedClipID: selectedClipID,
-                                                        pps: pixelsPerSecond * pinchScale,
-                                                        onClipTap: { clip in selectingClip(clip) },
-                                                        onTap: { selectingTrack(track) }
-                                                    )
-                                                }
-                                                // Blank spacer track (addNewTrackBlankTrackSpacer)
-                                                Color(hex: "#222222")
-                                                    .frame(height: 100)
-                                                    .onTapGesture {
-                                                        addTrack()
-                                                    }
-                                            }
+                                        // Add-track button at bottom — matches Android addNewTrackButton position
+                                        Button(action: { addTrack() }) {
+                                            Image(systemName: "plus")
+                                                .font(.system(size: 20, weight: .bold))
+                                                .foregroundColor(.white)
+                                                .frame(width: 50, height: 100)
+                                                .background(Color(hex: "#222222"))
                                         }
-                                        .background(Color(hex: "#111111"))
                                     }
-                                    .frame(minWidth: geo.size.width - 50)
-                                    .gesture(
-                                        MagnificationGesture()
-                                            .updating($pinchScale) { currentState, gestureState, _ in
-                                                gestureState = currentState
+                                    .frame(width: 50)
+                                    .background(Color(hex: "#1A1A1A"))
+                                    
+                                    // Horizontal scroll for clip rows — android:id="trackHorizontalScrollView"
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        LazyVStack(spacing: 0) {
+                                            ForEach(timeline.tracks) { track in
+                                                TrackRowView(
+                                                    track: track,
+                                                    isSelected: selectedTrackID == track.id,
+                                                    selectedClipID: selectedClipID,
+                                                    pps: pixelsPerSecond * pinchScale,
+                                                    onClipTap: { clip in selectingClip(clip) },
+                                                    onTap: { selectingTrack(track) }
+                                                )
                                             }
-                                            .onEnded { scale in
-                                                // Clamp zoom level to prevent absurd scaling
-                                                let newScale = pixelsPerSecond * scale
-                                                pixelsPerSecond = max(10, min(newScale, 800))
-                                            }
-                                    )
+                                            // Blank spacer track — android:id="addNewTrackBlankTrackSpacer"
+                                            Color(hex: "#222222")
+                                                .frame(height: 100)
+                                                .onTapGesture { addTrack() }
+                                        }
+                                        .frame(minWidth: geo.size.width - 50)
+                                        .gesture(
+                                            MagnificationGesture()
+                                                .updating($pinchScale) { currentState, gestureState, _ in
+                                                    gestureState = currentState
+                                                }
+                                                .onEnded { scale in
+                                                    let newScale = pixelsPerSecond * scale
+                                                    pixelsPerSecond = max(10, min(newScale, 800))
+                                                }
+                                        )
+                                    }
+                                    .background(Color(hex: "#111111"))
                                 }
-                                
-                                // Playhead — android:id="playhead" (red, centered)
-                                Rectangle()
-                                    .fill(Color.red)
-                                    .frame(width: 2)
-                                    .frame(maxHeight: .infinity)
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                                    .allowsHitTesting(false)
                             }
                         }
+                        // Overlay playhead on top of the whole timeline area
+                        .overlay(
+                            Rectangle()
+                                .fill(Color.red)
+                                .frame(width: 2)
+                                .allowsHitTesting(false),
+                            alignment: .center
+                        )
                     }
                     .frame(maxHeight: .infinity)
                     
@@ -804,4 +807,11 @@ private struct ToolbarButton: View {
         projectSize: 0,
         projectDuration: 0
     ), isPreview: false)
+}
+
+struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }
