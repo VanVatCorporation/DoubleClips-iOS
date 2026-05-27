@@ -24,5 +24,6 @@ jobs:
       run: |
         xcodebuild -project DoubleClips.xcodeproj \
                    -scheme DoubleClips \
-                   -destination 'platform=iOS Simulator,arch=arm64,OS=26.2,name=iPhone 17 Pro' \
+                   -destination 'generic/platform=iOS Simulator' \
+                   IPHONEOS_DEPLOYMENT_TARGET=18.0 \
                    build
