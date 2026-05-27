@@ -405,25 +405,85 @@ struct EditingView: View {
         
         switch result {
         case .success(let urls):
-            for url in urls {
-                let defaultDuration: Float = 3.0
-                let newClip = Clip(
-                    clipName: url.lastPathComponent,
-                    startTime: Float(engine.currentTime),
-                    duration: defaultDuration,
-                    trackIndex: trackIndex,
-                    type: .video,
-                    isClipHasAudio: true,
-                    width: 1920,
-                    height: 1080
-                )
-                timeline.tracks[trackIndex].clips.append(newClip)
-                // Advance playhead sequentially
-                engine.seek(to: engine.currentTime + Double(defaultDuration))
-                totalDuration = max(totalDuration, engine.currentTime)
+            Task {
+                for url in urls {
+                    guard url.startAccessingSecurityScopedResource() else { continue }
+                    
+                    let filename = url.lastPathComponent
+                    let ext = url.pathExtension.lowercased()
+                    let isImage = ["png", "jpg", "jpeg"].contains(ext)
+                    
+                    let clipDir = IOHelper.combinePath(project.projectPath, Constants.DEFAULT_CLIP_DIRECTORY)
+                    IOHelper.createEmptyDirectories(clipDir)
+                    let targetPath = IOHelper.combinePath(clipDir, filename)
+                    let targetUrl = URL(fileURLWithPath: targetPath)
+                    
+                    if !FileManager.default.fileExists(atPath: targetPath) {
+                        do {
+                            try FileManager.default.copyItem(at: url, to: targetUrl)
+                        } catch {
+                            print("File copy error: \(error)")
+                            url.stopAccessingSecurityScopedResource()
+                            continue
+                        }
+                    }
+                    url.stopAccessingSecurityScopedResource()
+                    
+                    var durationSeconds: Float = 3.0
+                    var trackWidth: Int = 1920
+                    var trackHeight: Int = 1080
+                    var hasAudio = false
+                    
+                    if isImage {
+                        durationSeconds = 3.0
+                    } else {
+                        let asset = AVURLAsset(url: targetUrl)
+                        if #available(iOS 15.0, *) {
+                            if let duration = try? await asset.load(.duration) {
+                                durationSeconds = Float(duration.seconds)
+                            }
+                            if let videoTrack = try? await asset.loadTracks(withMediaType: .video).first,
+                               let size = try? await videoTrack.load(.naturalSize) {
+                                trackWidth = Int(size.width)
+                                trackHeight = Int(size.height)
+                            }
+                            if let _ = try? await asset.loadTracks(withMediaType: .audio).first {
+                                hasAudio = true
+                            }
+                        } else {
+                            durationSeconds = Float(asset.duration.seconds)
+                            if let videoTrack = asset.tracks(withMediaType: .video).first {
+                                trackWidth = Int(videoTrack.naturalSize.width)
+                                trackHeight = Int(videoTrack.naturalSize.height)
+                            }
+                            hasAudio = asset.tracks(withMediaType: .audio).first != nil
+                        }
+                    }
+                    
+                    let finalDuration = max(0.5, durationSeconds) // Guard against 0 duration
+                    let type: EditingView.ClipType = isImage ? .image : .video
+
+                    await MainActor.run {
+                        let newClip = Clip(
+                            clipName: filename,
+                            startTime: Float(engine.currentTime),
+                            duration: Float(finalDuration),
+                            trackIndex: trackIndex,
+                            type: type,
+                            isClipHasAudio: hasAudio,
+                            width: trackWidth,
+                            height: trackHeight
+                        )
+                        timeline.tracks[trackIndex].clips.append(newClip)
+                        engine.seek(to: engine.currentTime + Double(finalDuration))
+                        totalDuration = max(totalDuration, engine.currentTime)
+                    }
+                }
+                
+                await MainActor.run {
+                    engine.rebuildComposition(from: timeline, projectDir: URL(fileURLWithPath: project.projectPath))
+                }
             }
-            // Trigger rebuilding AVFoundation composition
-            engine.rebuildComposition(from: timeline, projectDir: URL(fileURLWithPath: project.projectPath))
         case .failure(let error):
             print("Failed to import media: \(error)")
         }
