@@ -26,7 +26,5 @@ jobs:
                    -scheme DoubleClips \
                    -destination 'generic/platform=iOS Simulator' \
                    IPHONEOS_DEPLOYMENT_TARGET=18.0 \
-                   ASSETCATALOG_COMPILER_APPICON_NAME=icon-ios-white \
-                   "DoubleClips/Assets.xcassets" \
-                   "DoubleClips/icon-ios-white.icon" \
+                   ASSETCATALOG_COMPILER_APPICON_NAME=icon-ios-white.icon \
                    build
