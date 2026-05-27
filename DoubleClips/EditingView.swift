@@ -81,10 +81,8 @@ struct EditingView: View {
                         }
                     }
                     
-
-                    if(!isPreview)
-                    {
-                        VStack {
+                    VStack {
+                        if !isPreview {
                             // ── Top Bar (50dp) ─────────────────────────────────
                             // android:id="top_bar" height=50dp
                             HStack(spacing: 0) {
@@ -128,49 +126,47 @@ struct EditingView: View {
                             }
                             .frame(height: 50)
                             .background(Color.black.opacity(0.5))
-                            
+                        }
                         
-                    }
-                    
-                    
-                    
                         Spacer()
                         
-                        // ── Controller Bar (40dp) ──────────────────────────
-                        // android:id="controller_bar" height=40dp
-                        // Undo | Play/Pause (center) | Redo
-                        HStack {
-                            // Undo (android:id="undoButton")
-                            Button(action: { /* Undo */ }) {
-                                Image(systemName: "arrow.uturn.backward")
-                                    .font(.system(size: 22))
-                                    .foregroundColor(.white)
-                                    .frame(width: 40, height: 40)
+                        if !isPreview {
+                            // ── Controller Bar (40dp) ──────────────────────────
+                            // android:id="controller_bar" height=40dp
+                            // Undo | Play/Pause (center) | Redo
+                            HStack {
+                                // Undo (android:id="undoButton")
+                                Button(action: { /* Undo */ }) {
+                                    Image(systemName: "arrow.uturn.backward")
+                                        .font(.system(size: 22))
+                                        .foregroundColor(.white)
+                                        .frame(width: 40, height: 40)
+                                }
+                                
+                                Spacer()
+                                
+                                // Play/Pause (android:id="playPauseButton", centered)
+                                Button(action: { engine.togglePlayPause() }) {
+                                    Image(systemName: engine.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                        .font(.system(size: 36))
+                                        .foregroundColor(.white)
+                                        .frame(width: 40, height: 40)
+                                }
+                                
+                                Spacer()
+                                
+                                // Redo (android:id="redoButton")
+                                Button(action: { /* Redo */ }) {
+                                    Image(systemName: "arrow.uturn.forward")
+                                        .font(.system(size: 22))
+                                        .foregroundColor(.white)
+                                        .frame(width: 40, height: 40)
+                                }
                             }
-                            
-                            Spacer()
-                            
-                            // Play/Pause (android:id="playPauseButton", centered)
-                            Button(action: { engine.togglePlayPause() }) {
-                                Image(systemName: engine.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                    .font(.system(size: 36))
-                                    .foregroundColor(.white)
-                                    .frame(width: 40, height: 40)
-                            }
-                            
-                            Spacer()
-                            
-                            // Redo (android:id="redoButton")
-                            Button(action: { /* Redo */ }) {
-                                Image(systemName: "arrow.uturn.forward")
-                                    .font(.system(size: 22))
-                                    .foregroundColor(.white)
-                                    .frame(width: 40, height: 40)
-                            }
+                            .frame(height: 40)
+                            .padding(.horizontal, 16)
+                            .background(Color.black.opacity(0.5))
                         }
-                        .frame(height: 40)
-                        .padding(.horizontal, 16)
-                        .background(Color.black.opacity(0.5))
                     }
                 }
                 
