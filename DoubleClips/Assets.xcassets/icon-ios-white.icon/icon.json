@@ -7,6 +7,7 @@
       "hidden" : false,
       "layers" : [
         {
+          "image-name" : "logo-transparent.png",
           "name" : "logo-transparent",
           "position" : {
             "scale" : 1.5,
