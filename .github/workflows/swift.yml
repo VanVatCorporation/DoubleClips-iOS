@@ -24,5 +24,5 @@ jobs:
       run: |
         xcodebuild -project DoubleClips.xcodeproj \
                    -scheme DoubleClips \
-                   -destination 'platform:iOS Simulator, arch:arm64, id:11BD9C44-D8FB-451C-8DB8-21EBADEABB63, OS:18.5, name:iPhone 17 Pro' \
+                   -destination 'platform=iOS Simulator, arch=arm64, id=11BD9C44-D8FB-451C-8DB8-21EBADEABB63, OS=18.5, name=iPhone 17 Pro' \
                    build
