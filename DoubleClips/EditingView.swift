@@ -209,14 +209,12 @@ struct EditingView: View {
                             // ── Ruler row — fixed, not part of vertical scroll ──
                             HStack(spacing: 0) {
                                 Color(hex: "#1A1A1A").frame(width: 50, height: 20) // blank spacer under label col
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    TimelineRulerView(
-                                        currentTime: engine.currentTime,
-                                        totalDuration: totalDuration,
-                                        pps: pixelsPerSecond * pinchScale
-                                    )
-                                }
-                                .disabled(true) // ruler scrolls via the track scroll below
+                                TimelineRulerView(
+                                    currentTime: engine.currentTime,
+                                    totalDuration: totalDuration,
+                                    pps: pixelsPerSecond * pinchScale
+                                )
+                                .frame(width: geo.size.width - 50, height: 20)
                             }
                             .frame(height: 20)
                             
@@ -282,7 +280,7 @@ struct EditingView: View {
                                                      )
                                              }
                                          )
-                                         .gesture(
+                                         .simultaneousGesture(
                                              MagnificationGesture()
                                                  .updating($pinchScale) { currentState, gestureState, _ in
                                                      gestureState = currentState
@@ -448,7 +446,16 @@ struct EditingView: View {
         case .success(let urls):
             Task {
                 for url in urls {
-                    guard url.startAccessingSecurityScopedResource() else { continue }
+                    // NOTE: startAccessingSecurityScopedResource() returning false does NOT
+                    // always mean access failed - it can simply mean the resource doesn't
+                    // require scoping. Gating on it here caused every imported file to be
+                    // silently skipped. We still track it so we only stop what we started.
+                    let didStartAccessing = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if didStartAccessing {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
                     
                     let filename = url.lastPathComponent
                     let ext = url.pathExtension.lowercased()
@@ -464,11 +471,9 @@ struct EditingView: View {
                             try FileManager.default.copyItem(at: url, to: targetUrl)
                         } catch {
                             print("File copy error: \(error)")
-                            url.stopAccessingSecurityScopedResource()
                             continue
                         }
                     }
-                    url.stopAccessingSecurityScopedResource()
                     
                     var durationSeconds: Float = 3.0
                     var trackWidth: Int = 1920
