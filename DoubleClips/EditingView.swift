@@ -26,8 +26,10 @@ struct EditingView: View {
     @State private var pixelsPerSecond: CGFloat = 50.0
     @GestureState private var pinchScale: CGFloat = 1.0
     
-    // Sync Timeline Scroll Offset
-    @State private var trackScrollOffset: CGFloat = 0
+    // Timeline scroll & center-offset (mirrors Android centerOffset mechanism)
+    // centerOffset = (trackAreaWidth / 2) so that time=0 aligns with the fixed
+    // center playhead when scrollOffset == 0.
+    @State private var timelineScrollOffset: CGFloat = 0
     
     // File Importer state
     @State private var showFileImporter = false
@@ -240,36 +242,72 @@ struct EditingView: View {
                                     .background(Color(hex: "#1A1A1A"))
                                     
                                     // Horizontal scroll for clip rows — android:id="trackHorizontalScrollView"
-                                    ScrollView(.horizontal, showsIndicators: false) {
-                                        LazyVStack(spacing: 0) {
-                                            ForEach(timeline.tracks) { track in
-                                                TrackRowView(
-                                                    track: track,
-                                                    isSelected: selectedTrackID == track.id,
-                                                    selectedClipID: selectedClipID,
-                                                    pps: pixelsPerSecond * pinchScale,
-                                                    onClipTap: { clip in selectingClip(clip) },
-                                                    onTap: { selectingTrack(track) }
-                                                )
-                                            }
-                                            // Blank spacer track — android:id="addNewTrackBlankTrackSpacer"
-                                            Color(hex: "#222222")
-                                                .frame(height: 100)
-                                                .onTapGesture { addTrack() }
-                                        }
-                                        .frame(minWidth: geo.size.width - 50)
-                                        .gesture(
-                                            MagnificationGesture()
-                                                .updating($pinchScale) { currentState, gestureState, _ in
-                                                    gestureState = currentState
-                                                }
-                                                .onEnded { scale in
-                                                    let newScale = pixelsPerSecond * scale
-                                                    pixelsPerSecond = max(10, min(newScale, 800))
-                                                }
-                                        )
-                                    }
-                                    .background(Color(hex: "#111111"))
+                                    // centerOffset = half the track-area width (geo.size.width - 50dp label col)
+                                    // Mirrors Android: prepend a leading spacer so time=0 lands under the
+                                    // fixed center playhead when scrollOffset == 0.
+                                     ScrollView(.horizontal, showsIndicators: false) {
+                                         let centerOffset = (geo.size.width - 50) / 2
+                                         LazyVStack(spacing: 0) {
+                                             ForEach(timeline.tracks) { track in
+                                                 TrackRowView(
+                                                     track: track,
+                                                     isSelected: selectedTrackID == track.id,
+                                                     selectedClipID: selectedClipID,
+                                                     pps: pixelsPerSecond * pinchScale,
+                                                     onClipTap: { clip in selectingClip(clip) },
+                                                     onTap: { selectingTrack(track) }
+                                                 )
+                                             }
+                                             // Blank spacer track — android:id="addNewTrackBlankTrackSpacer"
+                                             Color(hex: "#222222")
+                                                 .frame(height: 100)
+                                                 .onTapGesture { addTrack() }
+                                         }
+                                         // ─── centerOffset leading padding ──────────────────────────
+                                         // Equivalent to Android's startSpacer View of width=centerOffset.
+                                         // With scrollOffset=0 the LazyVStack content starts at the
+                                         // horizontal center of the viewport (== playhead position).
+                                         .padding(.leading, centerOffset)
+                                         .frame(minWidth: geo.size.width - 50)
+                                         // ─── Scroll offset tracker (PreferenceKey) ─────────────────
+                                         // A 0-height GeometryReader in .background reads its own minX
+                                         // relative to the coordinateSpace on the ScrollView, giving us
+                                         // the current scrollOffset without UIScrollView.
+                                         .background(
+                                             GeometryReader { scrollGeo in
+                                                 Color.clear
+                                                     .preference(
+                                                         key: TimelineScrollOffsetKey.self,
+                                                         value: -scrollGeo.frame(in: .named("timelineHScroll")).minX
+                                                     )
+                                             }
+                                         )
+                                         .gesture(
+                                             MagnificationGesture()
+                                                 .updating($pinchScale) { currentState, gestureState, _ in
+                                                     gestureState = currentState
+                                                 }
+                                                 .onEnded { scale in
+                                                     let newScale = pixelsPerSecond * scale
+                                                     pixelsPerSecond = max(10, min(newScale, 800))
+                                                 }
+                                         )
+                                     }
+                                     // ─── coordinateSpace + offset → time linkage ───────────────
+                                     // The GeometryReader above reports minX in this named space.
+                                     // scrollOffset / pps == currentTime  (same formula as Android:
+                                     // currentTime = scrollX / pixelsPerSecond, because the leading
+                                     // padding shifts content so offset=0 → time=0).
+                                     .coordinateSpace(name: "timelineHScroll")
+                                     .onPreferenceChange(TimelineScrollOffsetKey.self) { offset in
+                                         let clampedOffset = max(0, offset)
+                                         timelineScrollOffset = clampedOffset
+                                         if !engine.isPlaying {
+                                             let effectivePPS = pixelsPerSecond * pinchScale
+                                             engine.seek(to: Double(clampedOffset / effectivePPS))
+                                         }
+                                     }
+                                     .background(Color(hex: "#111111"))
                                 }
                             }
                         }
@@ -810,6 +848,16 @@ private struct ToolbarButton: View {
 }
 
 struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// PreferenceKey for tracking the horizontal scroll offset of the timeline track area.
+/// Reported as a positive offset (pixels scrolled from leading edge).
+/// Used to derive currentTime = scrollOffset / pixelsPerSecond — matching the Android formula.
+private struct TimelineScrollOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
