@@ -245,28 +245,38 @@ struct EditingView: View {
                                     // fixed center playhead when scrollOffset == 0.
                                      ScrollView(.horizontal, showsIndicators: false) {
                                          let centerOffset = (geo.size.width - 50) / 2
-                                         LazyVStack(spacing: 0) {
+                                         let effectivePPS = pixelsPerSecond * pinchScale
+                                         // Content width tied to totalDuration (same basis the ruler uses),
+                                         // NOT to however wide the clips happen to be. This keeps the
+                                         // scrollable range and the ruler in sync, and guarantees there's
+                                         // always enough width to scroll to the actual end of the timeline.
+                                         let trackContentWidth = max(geo.size.width - 50, CGFloat(totalDuration) * effectivePPS)
+                                         LazyVStack(alignment: .leading, spacing: 0) {
                                              ForEach(timeline.tracks) { track in
                                                  TrackRowView(
                                                      track: track,
                                                      isSelected: selectedTrackID == track.id,
                                                      selectedClipID: selectedClipID,
-                                                     pps: pixelsPerSecond * pinchScale,
+                                                     pps: effectivePPS,
+                                                     rowWidth: trackContentWidth,
                                                      onClipTap: { clip in selectingClip(clip) },
                                                      onTap: { selectingTrack(track) }
                                                  )
                                              }
                                              // Blank spacer track — android:id="addNewTrackBlankTrackSpacer"
                                              Color(hex: "#222222")
-                                                 .frame(height: 100)
+                                                 .frame(width: trackContentWidth, height: 100)
                                                  .onTapGesture { addTrack() }
                                          }
-                                         // ─── centerOffset leading padding ──────────────────────────
-                                         // Equivalent to Android's startSpacer View of width=centerOffset.
-                                         // With scrollOffset=0 the LazyVStack content starts at the
-                                         // horizontal center of the viewport (== playhead position).
+                                         // ─── centerOffset leading + trailing padding ───────────────
+                                         // Equivalent to Android's start/end spacer Views of width=centerOffset.
+                                         // Leading padding means scrollOffset==0 puts time=0 at the center
+                                         // playhead; matching trailing padding means you can keep scrolling
+                                         // until the very end of the timeline reaches the center playhead too
+                                         // (without it, the ScrollView ran out of content halfway there).
                                          .padding(.leading, centerOffset)
-                                         .frame(minWidth: geo.size.width - 50)
+                                         .padding(.trailing, centerOffset)
+                                         .frame(minWidth: geo.size.width - 50, alignment: .leading)
                                          // ─── Scroll offset tracker (PreferenceKey) ─────────────────
                                          // A 0-height GeometryReader in .background reads its own minX
                                          // relative to the coordinateSpace on the ScrollView, giving us
@@ -309,13 +319,19 @@ struct EditingView: View {
                                 }
                             }
                         }
-                        // Overlay playhead on top of the whole timeline area
+                        // Overlay playhead on top of the whole timeline area.
+                        // NOTE: alignment: .center here would center the line over the FULL
+                        // width including the 50pt label column on the left — but the ruler
+                        // and track content only occupy the area to the right of that column,
+                        // whose true center is 50 + (trackAreaWidth / 2), not width / 2. That
+                        // mismatch (25pt off with a 50pt column) was the playhead misalignment.
                         .overlay(
                             Rectangle()
                                 .fill(Color.red)
                                 .frame(width: 2)
+                                .offset(x: 50 + (geo.size.width - 50) / 2)
                                 .allowsHitTesting(false),
-                            alignment: .center
+                            alignment: .leading
                         )
                     }
                     .frame(maxHeight: .infinity)
@@ -576,6 +592,12 @@ private struct TrackRowView: View {
     var isSelected: Bool = false
     var selectedClipID: UUID?
     var pps: CGFloat
+    /// Full scrollable width of the timeline (tied to totalDuration), NOT just
+    /// however wide this track's clips happen to be. Without this, each row's
+    /// background/scroll-content only extends as far as its own clips, so the
+    /// ScrollView runs out of content to scroll through well before the ruler's
+    /// actual end — this is what caused scrolling to get "blocked halfway".
+    var rowWidth: CGFloat
     
     var onClipTap: (EditingView.Clip) -> Void
     var onTap: () -> Void
@@ -597,7 +619,7 @@ private struct TrackRowView: View {
             }
             .padding(.horizontal, 4)
         }
-        .frame(height: 100)
+        .frame(width: rowWidth, height: 100, alignment: .leading)
         .overlay(
             Rectangle()
                 .stroke(isSelected ? Color.mdPrimary : Color.white.opacity(0.08), lineWidth: isSelected ? 2 : 0.5)
