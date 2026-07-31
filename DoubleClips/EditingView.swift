@@ -1,6 +1,7 @@
 import SwiftUI
 import _AVKit_SwiftUI
 import Combine
+import UIKit
 
 /// iOS equivalent of EditingActivity + layout-port/layout_editing.xml
 /// Portrait layout with 3 main zones:
@@ -243,79 +244,84 @@ struct EditingView: View {
                                     // centerOffset = half the track-area width (geo.size.width - 50dp label col)
                                     // Mirrors Android: prepend a leading spacer so time=0 lands under the
                                     // fixed center playhead when scrollOffset == 0.
-                                     ScrollView(.horizontal, showsIndicators: false) {
-                                         let centerOffset = (geo.size.width - 50) / 2
-                                         let effectivePPS = pixelsPerSecond * pinchScale
-                                         // Content width tied to totalDuration (same basis the ruler uses),
-                                         // NOT to however wide the clips happen to be. This keeps the
-                                         // scrollable range and the ruler in sync, and guarantees there's
-                                         // always enough width to scroll to the actual end of the timeline.
-                                         let trackContentWidth = max(geo.size.width - 50, CGFloat(totalDuration) * effectivePPS)
-                                         LazyVStack(alignment: .leading, spacing: 0) {
-                                             ForEach(timeline.tracks) { track in
-                                                 TrackRowView(
-                                                     track: track,
-                                                     isSelected: selectedTrackID == track.id,
-                                                     selectedClipID: selectedClipID,
-                                                     pps: effectivePPS,
-                                                     rowWidth: trackContentWidth,
-                                                     onClipTap: { clip in selectingClip(clip) },
-                                                     onTap: { selectingTrack(track) }
-                                                 )
-                                             }
-                                             // Blank spacer track — android:id="addNewTrackBlankTrackSpacer"
-                                             Color(hex: "#222222")
-                                                 .frame(width: trackContentWidth, height: 100)
-                                                 .onTapGesture { addTrack() }
-                                         }
-                                         // ─── centerOffset leading + trailing padding ───────────────
-                                         // Equivalent to Android's start/end spacer Views of width=centerOffset.
-                                         // Leading padding means scrollOffset==0 puts time=0 at the center
-                                         // playhead; matching trailing padding means you can keep scrolling
-                                         // until the very end of the timeline reaches the center playhead too
-                                         // (without it, the ScrollView ran out of content halfway there).
-                                         .padding(.leading, centerOffset)
-                                         .padding(.trailing, centerOffset)
-                                         .frame(minWidth: geo.size.width - 50, alignment: .leading)
-                                         // ─── Scroll offset tracker (PreferenceKey) ─────────────────
-                                         // A 0-height GeometryReader in .background reads its own minX
-                                         // relative to the coordinateSpace on the ScrollView, giving us
-                                         // the current scrollOffset without UIScrollView.
-                                         .background(
-                                             GeometryReader { scrollGeo in
-                                                 Color.clear
-                                                     .preference(
-                                                         key: TimelineScrollOffsetKey.self,
-                                                         value: -scrollGeo.frame(in: .named("timelineHScroll")).minX
-                                                     )
-                                             }
-                                         )
-                                         .simultaneousGesture(
-                                             MagnificationGesture()
-                                                 .updating($pinchScale) { currentState, gestureState, _ in
-                                                     gestureState = currentState
-                                                 }
-                                                 .onEnded { scale in
-                                                     let newScale = pixelsPerSecond * scale
-                                                     pixelsPerSecond = max(10, min(newScale, 800))
-                                                 }
-                                         )
-                                     }
-                                     // ─── coordinateSpace + offset → time linkage ───────────────
-                                     // The GeometryReader above reports minX in this named space.
-                                     // scrollOffset / pps == currentTime  (same formula as Android:
-                                     // currentTime = scrollX / pixelsPerSecond, because the leading
-                                     // padding shifts content so offset=0 → time=0).
-                                     .coordinateSpace(name: "timelineHScroll")
-                                     .onPreferenceChange(TimelineScrollOffsetKey.self) { offset in
-                                         let clampedOffset = max(0, offset)
-                                         timelineScrollOffset = clampedOffset
-                                         if !engine.isPlaying {
-                                             let effectivePPS = pixelsPerSecond * pinchScale
-                                             engine.seek(to: Double(clampedOffset / effectivePPS))
-                                         }
-                                     }
-                                     .background(Color(hex: "#111111"))
+                                    //
+                                    // NOTE: previously this used SwiftUI's ScrollView + a GeometryReader/
+                                    // PreferenceKey trick to read the scroll offset. That combo does not
+                                    // reliably re-fire on every frame of an interactive drag (especially
+                                    // nested inside another ScrollView), which is why the time readout and
+                                    // ruler appeared frozen while the content visibly scrolled. Swapped for
+                                    // a thin UIScrollView wrapper (TrackingHScrollView below), whose
+                                    // scrollViewDidScroll fires every frame, guaranteed.
+                                    let centerOffset = (geo.size.width - 50) / 2
+                                    let effectivePPS = pixelsPerSecond * pinchScale
+                                    // Content width tied to totalDuration (same basis the ruler uses),
+                                    // NOT to however wide the clips happen to be. This keeps the
+                                    // scrollable range and the ruler in sync, and guarantees there's
+                                    // always enough width to scroll to the actual end of the timeline.
+                                    let trackContentWidth = max(geo.size.width - 50, CGFloat(totalDuration) * effectivePPS)
+                                    let scrollableContentWidth = trackContentWidth + centerOffset * 2
+                                    let contentHeight = CGFloat(timeline.tracks.count + 1) * 100
+
+                                    TrackingHScrollView(
+                                        offset: Binding(
+                                            get: { timelineScrollOffset },
+                                            set: { newValue in
+                                                // Raw contentOffset.x already lines up correctly with
+                                                // time=0 at the fixed center playhead: the leading
+                                                // centerOffset padding on the content does that job, so
+                                                // no further +/- centerOffset adjustment belongs here.
+                                                // (An earlier version of this code subtracted centerOffset,
+                                                // which created a dead zone where the readout clamped to
+                                                // 00:00 before the content had actually scrolled that far —
+                                                // the playhead would sit inside the first clip instead of
+                                                // at its left edge.)
+                                                let clampedOffset = max(0, newValue)
+                                                timelineScrollOffset = clampedOffset
+                                                if !engine.isPlaying {
+                                                    engine.seek(to: Double(clampedOffset / effectivePPS))
+                                                }
+                                            }
+                                        ),
+                                        contentWidth: scrollableContentWidth,
+                                        contentHeight: contentHeight
+                                    ) {
+                                        LazyVStack(alignment: .leading, spacing: 0) {
+                                            ForEach(timeline.tracks) { track in
+                                                TrackRowView(
+                                                    track: track,
+                                                    isSelected: selectedTrackID == track.id,
+                                                    selectedClipID: selectedClipID,
+                                                    pps: effectivePPS,
+                                                    rowWidth: trackContentWidth,
+                                                    onClipTap: { clip in selectingClip(clip) },
+                                                    onTap: { selectingTrack(track) }
+                                                )
+                                            }
+                                            // Blank spacer track — android:id="addNewTrackBlankTrackSpacer"
+                                            Color(hex: "#222222")
+                                                .frame(width: trackContentWidth, height: 100)
+                                                .onTapGesture { addTrack() }
+                                        }
+                                        // ─── centerOffset leading + trailing padding ───────────────
+                                        // Equivalent to Android's start/end spacer Views of width=centerOffset.
+                                        // Leading padding means scrollOffset==0 puts time=0 at the center
+                                        // playhead; matching trailing padding means you can keep scrolling
+                                        // until the very end of the timeline reaches the center playhead too.
+                                        .padding(.leading, centerOffset)
+                                        .padding(.trailing, centerOffset)
+                                    }
+                                    .frame(width: geo.size.width - 50, height: contentHeight)
+                                    .simultaneousGesture(
+                                        MagnificationGesture()
+                                            .updating($pinchScale) { currentState, gestureState, _ in
+                                                gestureState = currentState
+                                            }
+                                            .onEnded { scale in
+                                                let newScale = pixelsPerSecond * scale
+                                                pixelsPerSecond = max(10, min(newScale, 800))
+                                            }
+                                    )
+                                    .background(Color(hex: "#111111"))
                                 }
                             }
                         }
@@ -563,6 +569,79 @@ struct EditingView: View {
         let s = Int(seconds) % 60
         let cs = Int((seconds.truncatingRemainder(dividingBy: 1)) * 100)
         return String(format: "%02d:%02d.%02d", m, s, cs)
+    }
+}
+
+// MARK: - Tracking Horizontal ScrollView
+
+/// A UIScrollView-backed horizontal scroll wrapper.
+///
+/// SwiftUI's `ScrollView` + a `GeometryReader`/`PreferenceKey` in `.background()` is a common
+/// trick for reading scroll offset, but it does not reliably re-run on every frame of an
+/// interactive drag — especially when nested inside another ScrollView, as the timeline is here
+/// (vertical ScrollView containing this horizontal one). That gap is what caused the time
+/// readout and ruler to look frozen while the timeline content visibly scrolled: the content
+/// moved via the ScrollView's own rendering, but `offset` (and therefore `engine.currentTime`)
+/// never got updated to match.
+///
+/// `UIScrollView.scrollViewDidScroll(_:)` fires on every scroll frame, guaranteed, so driving
+/// the offset binding from there keeps the ruler/readout in sync with the actual scroll position.
+struct TrackingHScrollView<Content: View>: UIViewRepresentable {
+    @Binding var offset: CGFloat
+    let contentWidth: CGFloat
+    let contentHeight: CGFloat
+    let content: Content
+
+    init(offset: Binding<CGFloat>, contentWidth: CGFloat, contentHeight: CGFloat, @ViewBuilder content: () -> Content) {
+        self._offset = offset
+        self.contentWidth = contentWidth
+        self.contentHeight = contentHeight
+        self.content = content()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.delegate = context.coordinator
+        scrollView.backgroundColor = .clear
+
+        let hosting = UIHostingController(rootView: content)
+        hosting.view.backgroundColor = .clear
+        scrollView.addSubview(hosting.view)
+        context.coordinator.hostingController = hosting
+        return scrollView
+    }
+
+    func updateUIView(_ uiView: UIScrollView, context: Context) {
+        context.coordinator.parent = self
+        context.coordinator.hostingController?.rootView = content
+
+        let size = CGSize(width: contentWidth, height: contentHeight)
+        context.coordinator.hostingController?.view.frame = CGRect(origin: .zero, size: size)
+        if uiView.contentSize != size {
+            uiView.contentSize = size
+        }
+        // Only push programmatic changes (e.g. playback-driven seeks) into the UIScrollView;
+        // avoid fighting the user's own finger during an active drag.
+        if abs(uiView.contentOffset.x - offset) > 0.5 {
+            uiView.contentOffset.x = offset
+        }
+    }
+
+    class Coordinator: NSObject, UIScrollViewDelegate {
+        var parent: TrackingHScrollView
+        var hostingController: UIHostingController<Content>?
+        init(_ parent: TrackingHScrollView) { self.parent = parent }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            let newOffset = scrollView.contentOffset.x
+            DispatchQueue.main.async {
+                self.parent.offset = newOffset
+            }
+        }
     }
 }
 

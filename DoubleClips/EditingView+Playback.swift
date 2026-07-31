@@ -41,21 +41,31 @@ extension EditingView {
             let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
             timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
                 guard let self = self else { return }
-                self.currentTime = time.seconds
                 
-                // If the player stopped but we aren't at the end, or if we reached the end
-                if self.player.timeControlStatus != .playing {
-                    self.isPlaying = false
-                } else {
+                // Only trust the player's own reported time while actually playing.
+                // While paused/scrubbing, `currentTime` is driven manually by seek(to:)
+                // from timeline scrolling — letting this observer overwrite it every
+                // 50ms fought that, making the ruler/readout appear frozen no matter
+                // how far you scrolled.
+                if self.player.timeControlStatus == .playing {
+                    self.currentTime = time.seconds
                     self.isPlaying = true
+                } else {
+                    self.isPlaying = false
                 }
             }
         }
         
         func seek(to seconds: Double) {
-            let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
-            player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
+            // Update immediately so the ruler/readout track scrolling in real time,
+            // independent of how long the underlying AVPlayer seek takes.
             self.currentTime = seconds
+            let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
+            // A small tolerance lets AVPlayer coalesce rapid successive seek calls
+            // (many per second while scrubbing/scrolling) instead of each one
+            // cancelling the last and never letting the player's time settle.
+            let tolerance = CMTime(seconds: 0.1, preferredTimescale: 600)
+            player.seek(to: targetTime, toleranceBefore: tolerance, toleranceAfter: tolerance)
         }
         
         /// Rebuilds the AVPlayerItem composition when timeline changes.
