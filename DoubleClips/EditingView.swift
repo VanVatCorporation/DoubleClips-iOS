@@ -283,7 +283,15 @@ struct EditingView: View {
                                             }
                                         ),
                                         contentWidth: scrollableContentWidth,
-                                        contentHeight: contentHeight
+                                        contentHeight: contentHeight,
+                                        onDragBegin: {
+                                            // Android equivalent: handleEditZoneInteraction's
+                                            // ACTION_MOVE handler calling stopPlayback(true) the
+                                            // instant the user starts dragging the timeline while
+                                            // playing. Scrubbing takes over from playback rather
+                                            // than being silently ignored.
+                                            engine.pause()
+                                        }
                                     ) {
                                         LazyVStack(alignment: .leading, spacing: 0) {
                                             ForEach(timeline.tracks) { track in
@@ -590,12 +598,18 @@ struct TrackingHScrollView<Content: View>: UIViewRepresentable {
     @Binding var offset: CGFloat
     let contentWidth: CGFloat
     let contentHeight: CGFloat
+    /// Fired from `scrollViewWillBeginDragging`, which UIKit calls only for a genuine
+    /// user touch-drag — never for the programmatic `contentOffset.x` writes this same
+    /// view makes in `updateUIView`. Safe hook for "user grabbed the timeline" logic
+    /// (e.g. pausing playback) without misfiring on our own scroll-syncing.
+    var onDragBegin: (() -> Void)? = nil
     let content: Content
 
-    init(offset: Binding<CGFloat>, contentWidth: CGFloat, contentHeight: CGFloat, @ViewBuilder content: () -> Content) {
+    init(offset: Binding<CGFloat>, contentWidth: CGFloat, contentHeight: CGFloat, onDragBegin: (() -> Void)? = nil, @ViewBuilder content: () -> Content) {
         self._offset = offset
         self.contentWidth = contentWidth
         self.contentHeight = contentHeight
+        self.onDragBegin = onDragBegin
         self.content = content()
     }
 
@@ -635,6 +649,10 @@ struct TrackingHScrollView<Content: View>: UIViewRepresentable {
         var parent: TrackingHScrollView
         var hostingController: UIHostingController<Content>?
         init(_ parent: TrackingHScrollView) { self.parent = parent }
+
+        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            parent.onDragBegin?()
+        }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             let newOffset = scrollView.contentOffset.x

@@ -37,6 +37,18 @@ extension EditingView {
             }
         }
         
+        /// Explicit stop, distinct from the toggle above — this is what timeline
+        /// scrubbing calls. Android's equivalent is `stopPlayback(true)`, invoked
+        /// from `handleEditZoneInteraction`'s ACTION_MOVE handler the instant the
+        /// user starts dragging the timeline while playing. Idempotent: safe to
+        /// call even when already paused.
+        func pause() {
+            if player.timeControlStatus == .playing {
+                player.pause()
+            }
+            isPlaying = false
+        }
+        
         private func setupTimeObserver() {
             let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
             timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
