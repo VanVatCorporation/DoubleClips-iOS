@@ -28,6 +28,32 @@ extension EditingView.Timeline {
         self.duration = 0
     }
     
+    /// Recomputes `duration` as the furthest clip end time across all tracks —
+    /// matching Android's `Timeline.recalculateDuration()` / `Track.getTrackEndTime()`
+    /// (`max(startTime + duration)`). This is the single source of truth the ruler,
+    /// the duration readout, and the scrollable track width all derive from; nothing
+    /// here is inferred from playhead position or view state.
+    func recalculateDuration() {
+        var maxEnd: Float = 0
+        for track in tracks {
+            let trackEnd = track.clips.map { $0.startTime + $0.duration }.max() ?? 0
+            if trackEnd > maxEnd { maxEnd = trackEnd }
+        }
+        self.duration = maxEnd
+    }
+    
+    /// Mutates this timeline's own @Published properties in place from a freshly
+    /// decoded instance, rather than reassigning the @StateObject itself.
+    /// @StateObject is meant to keep a stable object identity across the view's
+    /// lifetime (SwiftUI's observation wiring is attached to that identity);
+    /// swapping in a whole new Timeline instance from onAppear works in the
+    /// simple case but is the wrong pattern for a load path that may run again
+    /// later (e.g. reverting to a saved version).
+    func load(from other: EditingView.Timeline) {
+        self.tracks = other.tracks
+        self.duration = other.duration
+    }
+    
     // MARK: - Serialization
     
     func saveTimeline(to url: URL) throws {

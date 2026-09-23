@@ -14,7 +14,6 @@ struct EditingView: View {
     
     // Playback engine
     @StateObject private var engine = EditingPlayer()
-    @State private var totalDuration: Double = 30.0 // placeholder
     
     // Timeline state
     @StateObject private var timeline: Timeline = Timeline()
@@ -192,7 +191,7 @@ struct EditingView: View {
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.8))
                             Spacer()
-                            Text(formatTime(totalDuration))
+                            Text(formatTime(Double(timeline.duration)))
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.8))
                         }
@@ -212,7 +211,7 @@ struct EditingView: View {
                                 Color(hex: "#1A1A1A").frame(width: 50, height: 20) // blank spacer under label col
                                 TimelineRulerView(
                                     currentTime: engine.currentTime,
-                                    totalDuration: totalDuration,
+                                    totalDuration: Double(timeline.duration),
                                     pps: pixelsPerSecond * pinchScale
                                 )
                                 .frame(width: geo.size.width - 50, height: 20)
@@ -254,11 +253,11 @@ struct EditingView: View {
                                     // scrollViewDidScroll fires every frame, guaranteed.
                                     let centerOffset = (geo.size.width - 50) / 2
                                     let effectivePPS = pixelsPerSecond * pinchScale
-                                    // Content width tied to totalDuration (same basis the ruler uses),
+                                    // Content width tied to timeline.duration (same basis the ruler uses),
                                     // NOT to however wide the clips happen to be. This keeps the
                                     // scrollable range and the ruler in sync, and guarantees there's
                                     // always enough width to scroll to the actual end of the timeline.
-                                    let trackContentWidth = max(geo.size.width - 50, CGFloat(totalDuration) * effectivePPS)
+                                    let trackContentWidth = max(geo.size.width - 50, CGFloat(timeline.duration) * effectivePPS)
                                     let scrollableContentWidth = trackContentWidth + centerOffset * 2
                                     let contentHeight = CGFloat(timeline.tracks.count + 1) * 100
 
@@ -552,7 +551,12 @@ struct EditingView: View {
                         )
                         timeline.tracks[trackIndex].clips.append(newClip)
                         engine.seek(to: engine.currentTime + Double(finalDuration))
-                        totalDuration = max(totalDuration, engine.currentTime)
+                        // Recompute from actual clip end times (max of startTime + duration
+                        // across every track), matching Android's Track.getTrackEndTime() /
+                        // Timeline.recalculateDuration() — NOT the old placeholder, which only
+                        // tracked how far the playhead had moved and had no real relationship
+                        // to where clips actually end.
+                        timeline.recalculateDuration()
                     }
                 }
                 
@@ -689,7 +693,7 @@ private struct TrackRowView: View {
     var isSelected: Bool = false
     var selectedClipID: UUID?
     var pps: CGFloat
-    /// Full scrollable width of the timeline (tied to totalDuration), NOT just
+    /// Full scrollable width of the timeline (tied to timeline.duration), NOT just
     /// however wide this track's clips happen to be. Without this, each row's
     /// background/scroll-content only extends as far as its own clips, so the
     /// ScrollView runs out of content to scroll through well before the ruler's
@@ -700,21 +704,27 @@ private struct TrackRowView: View {
     var onTap: () -> Void
     
     var body: some View {
-        ZStack(alignment: .leading) {
+        ZStack(alignment: .topLeading) {
             Color(hex: isSelected ? "#333333" : "#1A1A1A")
-            HStack(spacing: 2) {
-                ForEach(track.clips) { clip in
-                    ClipBlockView(
-                        clip: clip,
-                        isSelected: selectedClipID == clip.id,
-                        pps: pps
-                    )
-                    .onTapGesture {
-                        onClipTap(clip)
-                    }
+            // Absolute positioning by startTime — NOT an HStack. An HStack packs
+            // clips left-to-right in array order with a fixed gap, which silently
+            // ignores clip.startTime; it only looked right when there happened to
+            // be a single clip starting at 0. Real (loaded, or multi-clip) data
+            // needs each block placed at its actual time, including gaps, exactly
+            // like Android's clipView.setX(getTimeInX(data.startTime)).
+            ForEach(track.clips) { clip in
+                ClipBlockView(
+                    clip: clip,
+                    isSelected: selectedClipID == clip.id,
+                    pps: pps
+                )
+                // Vertical inset centers the 88pt-tall block in the 100pt row,
+                // matching the HStack's previous default .center alignment.
+                .offset(x: CGFloat(clip.startTime) * pps, y: 6)
+                .onTapGesture {
+                    onClipTap(clip)
                 }
             }
-            .padding(.horizontal, 4)
         }
         .frame(width: rowWidth, height: 100, alignment: .leading)
         .overlay(
