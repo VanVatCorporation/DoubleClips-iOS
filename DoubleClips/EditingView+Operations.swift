@@ -42,6 +42,71 @@ extension EditingView.Timeline {
         self.duration = maxEnd
     }
     
+    /// Equivalent of Android's `Timeline.getClipsAtCurrentTime(currentTime)` — every clip,
+    /// across all tracks, whose range strictly contains `time`. Used by both the default
+    /// and track toolbars' Split button to split "whatever's under the playhead".
+    func clipsAtCurrentTime(_ time: Float) -> [EditingView.Clip] {
+        tracks.flatMap { $0.clips }.filter { time > $0.startTime && time < $0.startTime + $0.duration }
+    }
+    
+    /// Reassigns `clip` to a different track. Equivalent of the drop handling in Android's
+    /// `EditingActivity.handleClipInteraction` ACTION_UP branch (remove from old track,
+    /// update trackIndex, add to new track).
+    func moveClip(_ clip: EditingView.Clip, toTrackIndex newIndex: Int) {
+        guard newIndex >= 0 && newIndex < tracks.count else { return }
+        guard clip.trackIndex >= 0 && clip.trackIndex < tracks.count else { return }
+        guard newIndex != clip.trackIndex else { return }
+        let oldTrack = tracks[clip.trackIndex]
+        oldTrack.removeClip(clip)
+        clip.trackIndex = newIndex
+        tracks[newIndex].addClip(clip)
+    }
+    
+    /// Snaps a proposed drag start-time to the playhead and to neighboring clips' edges.
+    /// Equivalent of the ACTION_MOVE snap logic in Android's
+    /// `EditingActivity.handleClipInteraction`: snap targets are the playhead and clips on
+    /// the current ± 1 neighboring tracks only (Android: "only snap in neighbors track"),
+    /// within `TRACK_CLIPS_SNAP_THRESHOLD_PIXEL` converted to seconds at the current zoom
+    /// (Android compares in raw pixels since it snaps view X positions directly; we work in
+    /// seconds throughout, so the pixel threshold is converted using the live pixels-per-second).
+    func snappedStartTime(for clip: EditingView.Clip, proposedStartTime: Float, candidateTrackIndex: Int, currentTime: Float, pixelsPerSecond: CGFloat) -> Float {
+        var newStart = max(0, proposedStartTime)
+        let thresholdSeconds = Float(Double(Constants.TRACK_CLIPS_SNAP_THRESHOLD_PIXEL) / Double(max(pixelsPerSecond, 1)))
+        let duration = clip.duration
+        
+        // Snap to playhead — either edge of the clip landing on it.
+        if abs(newStart - currentTime) < thresholdSeconds {
+            newStart = currentTime
+        } else if abs((newStart + duration) - currentTime) < thresholdSeconds {
+            newStart = currentTime - duration
+        }
+        
+        // Snap to neighboring clips' edges, current ± 1 track only.
+        if !tracks.isEmpty {
+            let lo = max(0, candidateTrackIndex - 1)
+            let hi = min(tracks.count - 1, candidateTrackIndex + 1)
+            if lo <= hi {
+                snapSearch: for idx in lo...hi {
+                    for other in tracks[idx].clips where other.id != clip.id {
+                        let otherStart = other.startTime
+                        let otherEnd = other.startTime + other.duration
+                        let start = newStart
+                        let end = newStart + duration
+                        if abs(start - otherEnd) <= thresholdSeconds {
+                            newStart = otherEnd
+                            break snapSearch
+                        }
+                        if abs(end - otherStart) <= thresholdSeconds {
+                            newStart = otherStart - duration
+                            break snapSearch
+                        }
+                    }
+                }
+            }
+        }
+        return max(0, newStart)
+    }
+    
     /// Mutates this timeline's own @Published properties in place from a freshly
     /// decoded instance, rather than reassigning the @StateObject itself.
     /// @StateObject is meant to keep a stable object identity across the view's
@@ -78,6 +143,13 @@ extension EditingView.Track {
     
     func removeClip(_ clip: EditingView.Clip) {
         self.clips.removeAll(where: { $0.id == clip.id })
+    }
+    
+    /// Equivalent of Android's `Track.sortClips()` — keeps clips in start-time order
+    /// after a move/drag, so index-based neighbor lookups (e.g. auto-snap, transition
+    /// bridging) stay valid.
+    func sortClips() {
+        clips.sort { $0.startTime < $1.startTime }
     }
 }
 

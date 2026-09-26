@@ -15,11 +15,17 @@ struct EditingView: View {
     // Playback engine
     @StateObject private var engine = EditingPlayer()
     
+    // Undo/Redo — equivalent of EditingActivity's static `actionManager` (CommandManager)
+    @StateObject private var commandManager = CommandManager()
+    
     // Timeline state
     @StateObject private var timeline: Timeline = Timeline()
     @State private var selectedToolbar: ToolbarMode = .default
     @State private var selectedTrackID: UUID?
     @State private var selectedClipID: UUID?
+    // Multi-select — equivalent of Android's `isClipSelectMultiple` + `selectedClips`
+    @State private var isMultiSelectMode: Bool = false
+    @State private var selectedClipIDs: Set<UUID> = []
     @State private var activeOverlay: OverlayType?
     
     // Zoom state
@@ -141,12 +147,13 @@ struct EditingView: View {
                             // Undo | Play/Pause (center) | Redo
                             HStack {
                                 // Undo (android:id="undoButton")
-                                Button(action: { /* Undo */ }) {
+                                Button(action: { performUndo() }) {
                                     Image(systemName: "arrow.uturn.backward")
                                         .font(.system(size: 22))
-                                        .foregroundColor(.white)
+                                        .foregroundColor(commandManager.canUndo ? .white : .white.opacity(0.3))
                                         .frame(width: 40, height: 40)
                                 }
+                                .disabled(!commandManager.canUndo)
                                 
                                 Spacer()
                                 
@@ -161,12 +168,13 @@ struct EditingView: View {
                                 Spacer()
                                 
                                 // Redo (android:id="redoButton")
-                                Button(action: { /* Redo */ }) {
+                                Button(action: { performRedo() }) {
                                     Image(systemName: "arrow.uturn.forward")
                                         .font(.system(size: 22))
-                                        .foregroundColor(.white)
+                                        .foregroundColor(commandManager.canRedo ? .white : .white.opacity(0.3))
                                         .frame(width: 40, height: 40)
                                 }
+                                .disabled(!commandManager.canRedo)
                             }
                             .frame(height: 40)
                             .padding(.horizontal, 16)
@@ -298,10 +306,15 @@ struct EditingView: View {
                                                     track: track,
                                                     isSelected: selectedTrackID == track.id,
                                                     selectedClipID: selectedClipID,
+                                                    selectedClipIDs: selectedClipIDs,
                                                     pps: effectivePPS,
                                                     rowWidth: trackContentWidth,
+                                                    timeline: timeline,
+                                                    currentTime: Float(engine.currentTime),
                                                     onClipTap: { clip in selectingClip(clip) },
-                                                    onTap: { selectingTrack(track) }
+                                                    onTap: { selectingTrack(track) },
+                                                    onClipMoved: { rebuildPreview() },
+                                                    onClipDragBegin: { engine.pause() }
                                                 )
                                             }
                                             // Blank spacer track — android:id="addNewTrackBlankTrackSpacer"
@@ -358,15 +371,34 @@ struct EditingView: View {
                             Group {
                                 switch selectedToolbar {
                                 case .default:
-                                    DefaultToolbarView()
+                                    DefaultToolbarView(
+                                        onAddTrack: { addTrack() },
+                                        onSplit: { splitAtPlayhead() }
+                                    )
                                 case .clip:
                                     ClipToolbarView(
-                                        onEdit: { withAnimation { activeOverlay = .videoProperties } }
+                                        onDelete: { deleteSelectedClip() },
+                                        onSplit: { splitSelectedClip() },
+                                        onClone: { cloneSelectedClip() },
+                                        onEdit: { withAnimation { activeOverlay = .videoProperties } },
+                                        onMultiToggle: { toggleMultiSelect() }
                                     )
                                 case .track:
-                                    TrackToolbarView(onAddMedia: { showFileImporter = true })
+                                    TrackToolbarView(
+                                        onAddMedia: { showFileImporter = true },
+                                        onDeleteTrack: { deleteSelectedTrack() },
+                                        onSplit: { splitAtPlayhead() },
+                                        onAddText: { addTextClip() },
+                                        onAddEffect: { addEffectClip() },
+                                        onSelectAll: { selectAllInTrack() },
+                                        onAutoSnap: { autoSnapTrack() }
+                                    )
                                 case .clips:
-                                    ClipsToolbarView()
+                                    ClipsToolbarView(
+                                        onDelete: { deleteSelectedClips() },
+                                        onClone: { cloneSelectedClips() },
+                                        onMultiToggle: { toggleMultiSelect() }
+                                    )
                                 }
                             }
                             .frame(height: 60)
@@ -448,7 +480,16 @@ struct EditingView: View {
     }
     
     private func selectingClip(_ clip: EditingView.Clip) {
-        if selectedClipID == clip.id {
+        // Equivalent of Android's `selectingClip(Clip)`: while multi-select is on, a tap
+        // toggles the clip in/out of `selectedClips` instead of replacing a single selection.
+        if isMultiSelectMode {
+            selectedClipID = nil
+            if selectedClipIDs.contains(clip.id) {
+                selectedClipIDs.remove(clip.id)
+            } else {
+                selectedClipIDs.insert(clip.id)
+            }
+        } else if selectedClipID == clip.id {
             selectedClipID = nil
         } else {
             selectedClipID = clip.id
@@ -458,13 +499,217 @@ struct EditingView: View {
     }
     
     private func updateToolbarState() {
-        if selectedClipID != nil {
+        if isMultiSelectMode {
+            selectedToolbar = .clips
+        } else if selectedClipID != nil {
             selectedToolbar = .clip
         } else if selectedTrackID != nil {
             selectedToolbar = .track
         } else {
             selectedToolbar = .default
         }
+    }
+    
+    /// Equivalent of Android's `setClipSelectMultiple(!getClipSelectMultiple())`, which the
+    /// "Multi" button on both the Clip and Clips toolbars calls to flip multi-select mode —
+    /// converting the current single selection into the multi set, or vice-versa.
+    private func toggleMultiSelect() {
+        isMultiSelectMode.toggle()
+        if isMultiSelectMode {
+            if let id = selectedClipID {
+                selectedClipIDs = [id]
+                selectedClipID = nil
+            }
+        } else {
+            selectedClipID = selectedClipIDs.first
+            selectedClipIDs.removeAll()
+        }
+        updateToolbarState()
+    }
+    
+    /// Rebuilds the AVPlayer composition so the preview reflects the timeline's current
+    /// state — called after every structural edit (move/split/delete/clone/undo/redo),
+    /// since none of those otherwise touch the player.
+    private func rebuildPreview() {
+        engine.rebuildComposition(from: timeline, projectDir: URL(fileURLWithPath: project.projectPath))
+    }
+    
+    private func performUndo() {
+        commandManager.undo()
+        timeline.recalculateDuration()
+        rebuildPreview()
+    }
+    
+    private func performRedo() {
+        commandManager.redo()
+        timeline.recalculateDuration()
+        rebuildPreview()
+    }
+    
+    private func allClips() -> [EditingView.Clip] {
+        timeline.tracks.flatMap { $0.clips }
+    }
+    
+    /// Duplicates `source`, placing the clone immediately after it on the same track —
+    /// equivalent of Android's `new Clip(selectedClip)` + `cloneClip.startTime = ...`.
+    private func makeClone(of source: EditingView.Clip) -> EditingView.Clip {
+        let clone = Clip(
+            clipName: source.clipName,
+            startTime: source.startTime + source.duration,
+            duration: source.duration,
+            trackIndex: source.trackIndex,
+            type: source.type,
+            isClipHasAudio: source.isClipHasAudio,
+            width: source.width,
+            height: source.height
+        )
+        clone.startClipTrim = source.startClipTrim
+        clone.endClipTrim = source.endClipTrim
+        clone.originalDuration = source.originalDuration
+        clone.videoProperties = source.videoProperties
+        clone.keyframes = source.keyframes
+        clone.textContent = source.textContent
+        clone.fontSize = source.fontSize
+        clone.effect = source.effect
+        return clone
+    }
+    
+    // MARK: - Clip Toolbar Actions (single selection)
+    
+    private func deleteSelectedClip() {
+        guard let id = selectedClipID, let clip = allClips().first(where: { $0.id == id }) else { return }
+        commandManager.execute(DeleteClipCommand(timeline: timeline, clip: clip, onDeselect: {
+            selectedClipID = nil
+            updateToolbarState()
+        }))
+        timeline.recalculateDuration()
+        rebuildPreview()
+    }
+    
+    private func splitSelectedClip() {
+        guard let id = selectedClipID, let clip = allClips().first(where: { $0.id == id }) else { return }
+        let t = Float(engine.currentTime)
+        // Matches Android's guard: `affectedClips.contains(selectedClip)` before splitting.
+        guard t > clip.startTime && t < clip.startTime + clip.duration else { return }
+        commandManager.execute(SplitClipCommand(timeline: timeline, clip: clip, globalSplitTime: t))
+        timeline.recalculateDuration()
+        rebuildPreview()
+    }
+    
+    private func cloneSelectedClip() {
+        guard let id = selectedClipID, let clip = allClips().first(where: { $0.id == id }) else { return }
+        guard clip.trackIndex >= 0 && clip.trackIndex < timeline.tracks.count else { return }
+        let track = timeline.tracks[clip.trackIndex]
+        commandManager.execute(AddClipCommand(track: track, clip: makeClone(of: clip)))
+        timeline.recalculateDuration()
+        rebuildPreview()
+    }
+    
+    // MARK: - Clips Toolbar Actions (multi-select)
+    
+    private func deleteSelectedClips() {
+        let clips = allClips().filter { selectedClipIDs.contains($0.id) }
+        guard !clips.isEmpty else { return }
+        let batch = BatchCommand("Delete Multiple Clips")
+        for clip in clips { batch.add(DeleteClipCommand(timeline: timeline, clip: clip)) }
+        commandManager.execute(batch)
+        selectedClipIDs.removeAll()
+        updateToolbarState()
+        timeline.recalculateDuration()
+        rebuildPreview()
+    }
+    
+    private func cloneSelectedClips() {
+        let clips = allClips().filter { selectedClipIDs.contains($0.id) }
+        guard !clips.isEmpty else { return }
+        let batch = BatchCommand("Clone Multiple Clips")
+        for clip in clips where clip.trackIndex >= 0 && clip.trackIndex < timeline.tracks.count {
+            let track = timeline.tracks[clip.trackIndex]
+            batch.add(AddClipCommand(track: track, clip: makeClone(of: clip)))
+        }
+        commandManager.execute(batch)
+        timeline.recalculateDuration()
+        rebuildPreview()
+    }
+    
+    // MARK: - Default / Track Toolbar Actions
+    
+    /// "Cut" on the Default toolbar and "Cut" on the Track toolbar both call this — Android
+    /// wires both `toolbarDefault` and `toolbarTrack`'s `splitMediaButton` to the identical
+    /// handler: split the selected clip if the playhead is over it, else split every clip
+    /// the playhead intersects.
+    private func splitAtPlayhead() {
+        let t = Float(engine.currentTime)
+        let affected = timeline.clipsAtCurrentTime(t)
+        if let id = selectedClipID, let clip = affected.first(where: { $0.id == id }) {
+            commandManager.execute(SplitClipCommand(timeline: timeline, clip: clip, globalSplitTime: t))
+        } else if !affected.isEmpty {
+            let batch = BatchCommand("Split Clips at Playhead")
+            for clip in affected { batch.add(SplitClipCommand(timeline: timeline, clip: clip, globalSplitTime: t)) }
+            commandManager.execute(batch)
+        } else {
+            return
+        }
+        timeline.recalculateDuration()
+        rebuildPreview()
+    }
+    
+    private func deleteSelectedTrack() {
+        guard let id = selectedTrackID, let track = timeline.tracks.first(where: { $0.id == id }) else { return }
+        timeline.removeTrack(track)
+        selectedTrackID = nil
+        updateToolbarState()
+        timeline.recalculateDuration()
+        rebuildPreview()
+    }
+    
+    /// Equivalent of Android's `addTextButton` handler — adds a default "Simple text" clip
+    /// to the selected track at the playhead. Preview compositing for text clips isn't
+    /// implemented yet (that's the AVFoundation/Core Animation overlay work tracked
+    /// separately), so the clip appears on the timeline but won't render in the player.
+    private func addTextClip() {
+        guard let id = selectedTrackID, let trackIndex = timeline.tracks.firstIndex(where: { $0.id == id }) else { return }
+        let clip = Clip(clipName: "TEXT", startTime: Float(engine.currentTime), duration: 3, trackIndex: trackIndex, type: .text, isClipHasAudio: false, width: 0, height: 0)
+        clip.textContent = "Simple text"
+        clip.fontSize = 30
+        commandManager.execute(AddClipCommand(track: timeline.tracks[trackIndex], clip: clip))
+        timeline.recalculateDuration()
+        rebuildPreview()
+    }
+    
+    /// Equivalent of Android's `addEffectButton` handler. As with text clips, this places
+    /// an EFFECT clip on the timeline; it doesn't yet composite into the preview.
+    private func addEffectClip() {
+        guard let id = selectedTrackID, let trackIndex = timeline.tracks.firstIndex(where: { $0.id == id }) else { return }
+        let clip = Clip(clipName: "EFFECT", startTime: Float(engine.currentTime), duration: 3, trackIndex: trackIndex, type: .effect, isClipHasAudio: false, width: 0, height: 0)
+        clip.effect = EffectTemplate(type: nil, style: "glitch-pulse", duration: 1.2, offset: 4.0)
+        commandManager.execute(AddClipCommand(track: timeline.tracks[trackIndex], clip: clip))
+        timeline.recalculateDuration()
+        rebuildPreview()
+    }
+    
+    /// Equivalent of Android's `selectAllButton` — enters multi-select and selects every
+    /// clip on the currently-selected track.
+    private func selectAllInTrack() {
+        guard let id = selectedTrackID, let track = timeline.tracks.first(where: { $0.id == id }) else { return }
+        isMultiSelectMode = true
+        selectedClipID = nil
+        selectedClipIDs = Set(track.clips.map { $0.id })
+        updateToolbarState()
+    }
+    
+    /// Equivalent of Android's `autoSnapButton` — lines clips up back-to-back in start-time
+    /// order, removing gaps and overlaps within the selected track.
+    private func autoSnapTrack() {
+        guard let id = selectedTrackID, let track = timeline.tracks.first(where: { $0.id == id }) else { return }
+        track.sortClips()
+        guard track.clips.count > 1 else { return }
+        for i in 1..<track.clips.count {
+            let prev = track.clips[i - 1]
+            track.clips[i].startTime = prev.startTime + prev.duration
+        }
+        timeline.recalculateDuration()
+        rebuildPreview()
     }
     
     private func handleFileImport(_ result: Result<[URL], Error>) {
@@ -561,7 +806,7 @@ struct EditingView: View {
                 }
                 
                 await MainActor.run {
-                    engine.rebuildComposition(from: timeline, projectDir: URL(fileURLWithPath: project.projectPath))
+                    rebuildPreview()
                 }
             }
         case .failure(let error):
@@ -692,6 +937,7 @@ private struct TrackRowView: View {
     @ObservedObject var track: EditingView.Track
     var isSelected: Bool = false
     var selectedClipID: UUID?
+    var selectedClipIDs: Set<UUID> = []
     var pps: CGFloat
     /// Full scrollable width of the timeline (tied to timeline.duration), NOT just
     /// however wide this track's clips happen to be. Without this, each row's
@@ -699,9 +945,19 @@ private struct TrackRowView: View {
     /// ScrollView runs out of content to scroll through well before the ruler's
     /// actual end — this is what caused scrolling to get "blocked halfway".
     var rowWidth: CGFloat
+    /// Needed by ClipBlockView for whole-clip move: snapping looks at sibling clips
+    /// across the whole timeline, and cross-track drops need every track to reassign into.
+    @ObservedObject var timeline: EditingView.Timeline
+    var currentTime: Float
+    var trackRowHeight: CGFloat = 100
     
     var onClipTap: (EditingView.Clip) -> Void
     var onTap: () -> Void
+    /// Fired after a move/resize commits — parent uses this to rebuild the preview.
+    var onClipMoved: () -> Void = {}
+    /// Fired the instant a whole-clip move drag begins — parent pauses playback,
+    /// matching the timeline-scroll drag's same behavior.
+    var onClipDragBegin: () -> Void = {}
     
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -715,8 +971,14 @@ private struct TrackRowView: View {
             ForEach(track.clips) { clip in
                 ClipBlockView(
                     clip: clip,
+                    timeline: timeline,
                     isSelected: selectedClipID == clip.id,
-                    pps: pps
+                    isMultiSelected: selectedClipIDs.contains(clip.id),
+                    pps: pps,
+                    currentTime: currentTime,
+                    trackRowHeight: trackRowHeight,
+                    onMoved: onClipMoved,
+                    onDragBegin: onClipDragBegin
                 )
                 // Vertical inset centers the 88pt-tall block in the 100pt row,
                 // matching the HStack's previous default .center alignment.
@@ -740,17 +1002,54 @@ private struct TrackRowView: View {
 /// A single clip block on the timeline
 private struct ClipBlockView: View {
     @ObservedObject var clip: EditingView.Clip
+    /// Needed for whole-clip move: snapping against sibling clips, and reassigning
+    /// tracks on drop. Equivalent of Android's access to the shared `timeline` field
+    /// from inside `handleClipInteraction`.
+    @ObservedObject var timeline: EditingView.Timeline
     var isSelected: Bool
+    var isMultiSelected: Bool = false
     var pps: CGFloat
+    var currentTime: Float
+    var trackRowHeight: CGFloat = 100
+    /// Fired once a move/resize commits, so the parent can rebuild the preview.
+    var onMoved: () -> Void = {}
+    /// Fired the instant a whole-clip move drag begins (not on trim-handle drags),
+    /// matching Android's `stopPlayback` call the moment a clip drag starts.
+    var onDragBegin: () -> Void = {}
     
     @State private var dragInitialDuration: Float = 0
     @State private var dragInitialStartTime: Float = 0
     @State private var dragInitialStartTrim: Float = 0
     @State private var dragInitialEndTrim: Float = 0
     
+    // Whole-clip move — equivalent of Android's ghost-drag in `handleClipInteraction`'s
+    // DragContext, simplified for SwiftUI: horizontal movement mutates `clip.startTime`
+    // live (snapped, same as Android's ACTION_MOVE), which is safe mid-gesture since the
+    // clip stays in the same track's array the whole time. Vertical movement (dragging to
+    // a different track) is visual-only until release: reassigning `clip.trackIndex` moves
+    // it into a *different* Track's `clips` array, which would unmount/remount this view
+    // mid-drag (it's a member of a different ForEach) and kill the gesture recognizer —
+    // exactly the kind of mid-gesture surprise Android's ghost-view approach sidesteps by
+    // never touching the real view's parent until ACTION_UP. Deferring the actual
+    // `timeline.moveClip` call to `.onEnded` gets the same effect without that risk.
+    @State private var isDraggingBody = false
+    @State private var dragBodyInitialStartTime: Float = 0
+    @State private var dragBodyInitialTrackIndex: Int = 0
+    @State private var dragVerticalOffset: CGFloat = 0
+    
     // Derived values for the clip block
     var blockWidth: CGFloat {
         max(20, CGFloat(clip.duration) * pps)
+    }
+    
+    private var borderColor: Color {
+        if isMultiSelected { return .orange }
+        if isSelected { return .white }
+        return .clear
+    }
+    
+    private func clampedTrackIndex(_ index: Int) -> Int {
+        min(max(index, 0), max(timeline.tracks.count - 1, 0))
     }
     
     var body: some View {
@@ -765,10 +1064,15 @@ private struct ClipBlockView: View {
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity, alignment: .leading)
             
-            if isSelected {
+            if isSelected || isMultiSelected {
                 RoundedRectangle(cornerRadius: 4)
-                    .stroke(Color.white, lineWidth: 2)
-                
+                    .stroke(borderColor, lineWidth: 2)
+            }
+            
+            // Trim handles — only for a true single selection, and hidden mid-move
+            // (Android: `dragContext.clip.toggleHandlesVisibility(false)` on ACTION_MOVE
+            // of the clip body, restored on ACTION_UP).
+            if isSelected && !isMultiSelected && !isDraggingBody {
                 // Left Handle
                 HStack {
                     ZStack {
@@ -796,7 +1100,10 @@ private struct ClipBlockView: View {
                                 clip.startTime = dragInitialStartTime + actualDelta
                                 clip.startClipTrim = max(0, dragInitialStartTrim + actualDelta)
                             }
-                            .onEnded { _ in dragInitialDuration = 0 }
+                            .onEnded { _ in
+                                dragInitialDuration = 0
+                                onMoved()
+                            }
                     )
                     
                     Spacer()
@@ -824,13 +1131,63 @@ private struct ClipBlockView: View {
                                 clip.duration = newDuration
                                 clip.endClipTrim = max(0, clip.originalDuration - clip.duration - clip.startClipTrim)
                             }
-                            .onEnded { _ in dragInitialDuration = 0 }
+                            .onEnded { _ in
+                                dragInitialDuration = 0
+                                onMoved()
+                            }
                     )
                 }
             }
         }
         .frame(width: blockWidth, height: 88)
         .clipped()
+        .offset(y: dragVerticalOffset)
+        .zIndex(isDraggingBody ? 10 : 0)
+        // Whole-clip move. minimumDistance keeps this from stealing the plain tap
+        // (handled by the caller's separate `.onTapGesture`) that selects the clip —
+        // Android distinguishes the two the same way, via ACTION_MOVE vs. a bare click.
+        .gesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { value in
+                    if !isDraggingBody {
+                        isDraggingBody = true
+                        dragBodyInitialStartTime = clip.startTime
+                        dragBodyInitialTrackIndex = clip.trackIndex
+                        onDragBegin()
+                    }
+                    let proposedStart = dragBodyInitialStartTime + Float(value.translation.width / pps)
+                    let trackDelta = Int((value.translation.height / trackRowHeight).rounded())
+                    let candidateTrackIndex = clampedTrackIndex(dragBodyInitialTrackIndex + trackDelta)
+                    
+                    clip.startTime = timeline.snappedStartTime(
+                        for: clip,
+                        proposedStartTime: proposedStart,
+                        candidateTrackIndex: candidateTrackIndex,
+                        currentTime: currentTime,
+                        pixelsPerSecond: pps
+                    )
+                    // Visual-only cross-track indicator — see the note on
+                    // `dragVerticalOffset` above for why the actual track reassignment
+                    // waits for `.onEnded`.
+                    dragVerticalOffset = CGFloat(candidateTrackIndex - dragBodyInitialTrackIndex) * trackRowHeight
+                }
+                .onEnded { value in
+                    let trackDelta = Int((value.translation.height / trackRowHeight).rounded())
+                    let candidateTrackIndex = clampedTrackIndex(dragBodyInitialTrackIndex + trackDelta)
+                    
+                    if candidateTrackIndex != clip.trackIndex {
+                        timeline.moveClip(clip, toTrackIndex: candidateTrackIndex)
+                    }
+                    if clip.trackIndex >= 0 && clip.trackIndex < timeline.tracks.count {
+                        timeline.tracks[clip.trackIndex].sortClips()
+                    }
+                    timeline.recalculateDuration()
+                    
+                    isDraggingBody = false
+                    dragVerticalOffset = 0
+                    onMoved()
+                }
+        )
     }
 }
 
@@ -880,14 +1237,17 @@ private struct TimelineRulerView: View {
 // MARK: - Toolbar Views
 
 /// Default toolbar — view_toolbar_default.xml
-/// Buttons: Add, Delete, Cut, Files, Import
+/// Android buttons: addTrackButton, splitMediaButton, projectFilesViewerButton, importTrackButton.
+/// Files/Import stay no-ops here — they open screens (Project Files viewer, track import)
+/// that are a separate piece of work from clip editing.
 private struct DefaultToolbarView: View {
+    var onAddTrack: () -> Void = {}
+    var onSplit: () -> Void = {}
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
-                ToolbarButton(icon: "photo.badge.plus", label: "Add") {}
-                ToolbarButton(icon: "trash", label: "Delete") {}
-                ToolbarButton(icon: "scissors", label: "Cut") {}
+                ToolbarButton(icon: "rectangle.stack.badge.plus", label: "Add Track") { onAddTrack() }
+                ToolbarButton(icon: "scissors", label: "Cut") { onSplit() }
                 ToolbarButton(icon: "folder", label: "Files") {}
                 ToolbarButton(icon: "square.and.arrow.down", label: "Import") {}
             }
@@ -897,18 +1257,23 @@ private struct DefaultToolbarView: View {
 }
 
 /// Clip toolbar — view_toolbar_clip.xml
-/// Buttons: Delete, Split, Clone, Edit, Keyframe, SelectMultiple, AllKeyframe, Restate, Export
+/// Buttons: Delete, Split, Clone, Edit, Keyframe, SelectMultiple, AllKeyframe, Restate, Export.
+/// Keyframe/AllKeyframe/Restate/Export stay no-ops — keyframe UI and export are separate work.
 private struct ClipToolbarView: View {
-    var onEdit: () -> Void
+    var onDelete: () -> Void = {}
+    var onSplit: () -> Void = {}
+    var onClone: () -> Void = {}
+    var onEdit: () -> Void = {}
+    var onMultiToggle: () -> Void = {}
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
-                ToolbarButton(icon: "trash", label: "Delete") {}
-                ToolbarButton(icon: "scissors", label: "Split") {}
-                ToolbarButton(icon: "doc.on.doc", label: "Clone") {}
+                ToolbarButton(icon: "trash", label: "Delete") { onDelete() }
+                ToolbarButton(icon: "scissors", label: "Split") { onSplit() }
+                ToolbarButton(icon: "doc.on.doc", label: "Clone") { onClone() }
                 ToolbarButton(icon: "pencil.and.outline", label: "Edit") { onEdit() }
                 ToolbarButton(icon: "sparkles", label: "Keyframe") {}
-                ToolbarButton(icon: "list.bullet", label: "Multi") {}
+                ToolbarButton(icon: "list.bullet", label: "Multi") { onMultiToggle() }
                 ToolbarButton(icon: "arrow.triangle.merge", label: "AllKey") {}
                 ToolbarButton(icon: "arrow.counterclockwise", label: "Restate") {}
                 ToolbarButton(icon: "square.and.arrow.up", label: "Export") {}
@@ -918,31 +1283,49 @@ private struct ClipToolbarView: View {
     }
 }
 
-/// Track toolbar — view_toolbar_track.xml (placeholder)
+/// Track toolbar — view_toolbar_track.xml
+/// Android buttons: addMediaButton, deleteTrackButton, splitMediaButton, addTextButton,
+/// addEffectButton, selectAllButton, autoSnapButton, importClipButton, exportTrackButton.
+/// Import/Export clip stay no-ops here.
 private struct TrackToolbarView: View {
     var onAddMedia: () -> Void
+    var onDeleteTrack: () -> Void = {}
+    var onSplit: () -> Void = {}
+    var onAddText: () -> Void = {}
+    var onAddEffect: () -> Void = {}
+    var onSelectAll: () -> Void = {}
+    var onAutoSnap: () -> Void = {}
     
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 ToolbarButton(icon: "photo.badge.plus", label: "Add media") { onAddMedia() }
-                ToolbarButton(icon: "trash", label: "Delete") {}
-                ToolbarButton(icon: "square.and.arrow.up", label: "Export") {}
-                ToolbarButton(icon: "square.and.arrow.down", label: "Import") {}
+                ToolbarButton(icon: "trash", label: "Delete") { onDeleteTrack() }
+                ToolbarButton(icon: "scissors", label: "Cut") { onSplit() }
+                ToolbarButton(icon: "textformat", label: "Text") { onAddText() }
+                ToolbarButton(icon: "wand.and.stars", label: "Effect") { onAddEffect() }
+                ToolbarButton(icon: "checklist", label: "Select All") { onSelectAll() }
+                ToolbarButton(icon: "arrow.left.and.line.vertical.and.arrow.right", label: "Auto-snap") { onAutoSnap() }
             }
             .padding(.horizontal, 4)
         }
     }
 }
 
-/// Clips (multi-select) toolbar — view_toolbar_clips.xml (placeholder)
+/// Clips (multi-select) toolbar — view_toolbar_clips.xml
+/// Android buttons: deleteMediaButton, cloneMediaButton, editMediaButton, selectMultipleButton,
+/// applyKeyframeToAllClip, restateButton. Edit/AllKeyframe/Restate for a multi-selection stay
+/// no-ops here (batch keyframe UI is separate work); "Done" exits multi-select mode.
 private struct ClipsToolbarView: View {
+    var onDelete: () -> Void = {}
+    var onClone: () -> Void = {}
+    var onMultiToggle: () -> Void = {}
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
-                ToolbarButton(icon: "trash", label: "Delete") {}
-                ToolbarButton(icon: "scissors", label: "Split") {}
-                ToolbarButton(icon: "doc.on.doc", label: "Clone") {}
+                ToolbarButton(icon: "trash", label: "Delete") { onDelete() }
+                ToolbarButton(icon: "doc.on.doc", label: "Clone") { onClone() }
+                ToolbarButton(icon: "checkmark.circle", label: "Done") { onMultiToggle() }
             }
             .padding(.horizontal, 4)
         }
