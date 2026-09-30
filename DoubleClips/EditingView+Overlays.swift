@@ -13,11 +13,14 @@ extension EditingView {
     struct SpecificEditOverlay: View {
         let type: OverlayType
         let clip: EditingView.Clip?
+        let commandManager: CommandManager
+        let playhead: Float
+        let frameRate: Int
+        let onChanged: () -> Void
         let onClose: () -> Void
         
         var body: some View {
             VStack(spacing: 0) {
-                // Top Action Bar
                 HStack {
                     Text(title(for: type))
                         .font(.system(size: 14, weight: .bold))
@@ -32,18 +35,18 @@ extension EditingView {
                 .padding()
                 .background(Color(hex: "#1A1A1A"))
                 
-                // Content
                 ScrollView {
                     VStack {
-                        switch type {
-                        case .videoProperties:
-                            if let clip = clip {
-                                VideoPropertiesEditor(clip: clip)
-                            } else {
-                                Text("No clip selected").foregroundColor(.white)
+                        if let clip = clip {
+                            switch type {
+                            case .videoProperties:
+                                ClipPropertiesEditor(clip: clip, commandManager: commandManager,
+                                                     playhead: playhead, frameRate: frameRate, onChanged: onChanged)
+                            case .textEdit:
+                                TextClipEditor(clip: clip, commandManager: commandManager, onChanged: onChanged)
                             }
-                        case .textEdit:
-                            Text("Text Editor placeholder").foregroundColor(.white)
+                        } else {
+                            Text("No clip selected").foregroundColor(.white)
                         }
                     }
                     .padding()
@@ -57,50 +60,8 @@ extension EditingView {
         
         private func title(for type: OverlayType) -> String {
             switch type {
-            case .videoProperties: return "Video Properties"
+            case .videoProperties: return "Clip Properties"
             case .textEdit: return "Edit Text"
-            }
-        }
-    }
-    
-    // MARK: - Video Properties Editor
-    
-    struct VideoPropertiesEditor: View {
-        @ObservedObject var clip: EditingView.Clip
-        
-        var body: some View {
-            VStack(spacing: 20) {
-                PropertySlider(label: "Opacity", value: $clip.videoProperties.valueOpacity, range: 0...1)
-                PropertySlider(label: "Speed", value: $clip.videoProperties.valueSpeed, range: 0.1...4.0)
-                PropertySlider(label: "Scale X", value: $clip.videoProperties.valueScaleX, range: 0...5)
-                PropertySlider(label: "Scale Y", value: $clip.videoProperties.valueScaleY, range: 0...5)
-                PropertySlider(label: "Rotation", value: $clip.videoProperties.valueRot, range: -360...360)
-            }
-        }
-    }
-    
-    struct PropertySlider: View {
-        let label: String
-        @Binding var value: Float
-        let range: ClosedRange<Float>
-        
-        var body: some View {
-            HStack {
-                Text(label)
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.8))
-                    .frame(width: 80, alignment: .leading)
-                
-                Slider(value: Binding(
-                    get: { Double(value) },
-                    set: { value = Float($0) }
-                ), in: Double(range.lowerBound)...Double(range.upperBound))
-                .accentColor(Color.mdPrimary)
-                
-                Text(String(format: "%.2f", value))
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.white)
-                    .frame(width: 40, alignment: .trailing)
             }
         }
     }

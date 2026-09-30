@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 // MARK: - Command Pattern (Undo/Redo)
 //
@@ -163,6 +164,8 @@ final class SplitClipCommand: EditCommand {
     private var secondaryClip: EditingView.Clip?
     private let originalEndClipTrim: Float
     private let originalDuration: Float
+    private let originalEndTransition: EditingView.TransitionClip?
+    private let originalEndTransitionEnabled: Bool
     private var wasSplit = false
 
     init(timeline: EditingView.Timeline, clip: EditingView.Clip, globalSplitTime: Float) {
@@ -172,6 +175,8 @@ final class SplitClipCommand: EditCommand {
         self.splitTime = globalSplitTime
         self.originalEndClipTrim = clip.endClipTrim
         self.originalDuration = clip.duration
+        self.originalEndTransition = clip.endTransition
+        self.originalEndTransitionEnabled = clip.endTransitionEnabled
     }
 
     var description: String { "Split Clip: \(originalClip.clipName)" }
@@ -188,6 +193,8 @@ final class SplitClipCommand: EditCommand {
         track.removeClip(secondaryClip)
         originalClip.endClipTrim = originalEndClipTrim
         originalClip.duration = originalDuration
+        originalClip.endTransition = originalEndTransition
+        originalClip.endTransitionEnabled = originalEndTransitionEnabled
         wasSplit = false
         self.secondaryClip = nil
     }

@@ -65,6 +65,24 @@ extension EditingView {
         case text = "TEXT"
         case transition = "TRANSITION"
         case effect = "EFFECT"
+        case scene3D = "SCENE_3D"
+    }
+
+    /// Equivalent of EditingActivity.AnimationClip (in / out / combo animation slot).
+    struct AnimationClip: Codable, Equatable {
+        var type: String = "none"
+        var duration: Float = 0.5
+
+        init(type: String = "none", duration: Float = 0.5) {
+            self.type = type
+            self.duration = duration
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.type = try c.decodeIfPresent(String.self, forKey: .type) ?? "none"
+            self.duration = try c.decodeIfPresent(Float.self, forKey: .duration) ?? 0.5
+        }
     }
 
     class Clip: Codable, Identifiable, ObservableObject {
@@ -95,6 +113,15 @@ extension EditingView {
         @Published var isMute: Bool
         @Published var isLockedForTemplate: Bool
         @Published var isReverse: Bool
+        @Published var removeBackground: Bool = false
+        
+        @Published var additionalFFmpegCommand: String?
+        @Published var sceneConfig: String?        // SCENE_3D
+        @Published var textureClipName: String?    // SCENE_3D
+        
+        @Published var inAnimation: AnimationClip = AnimationClip()
+        @Published var outAnimation: AnimationClip = AnimationClip()
+        @Published var comboAnimation: AnimationClip = AnimationClip()
         
         enum CodingKeys: String, CodingKey {
             case type
@@ -118,6 +145,13 @@ extension EditingView {
             case isMute
             case isLockedForTemplate
             case isReverse
+            case removeBackground
+            case additionalFFmpegCommand
+            case sceneConfig
+            case textureClipName
+            case inAnimation
+            case outAnimation
+            case comboAnimation
         }
         
         init(clipName: String, startTime: Float, duration: Float, trackIndex: Int, type: ClipType, isClipHasAudio: Bool, width: Int, height: Int) {
@@ -165,6 +199,13 @@ extension EditingView {
             self.isMute = try container.decodeIfPresent(Bool.self, forKey: .isMute) ?? false
             self.isLockedForTemplate = try container.decodeIfPresent(Bool.self, forKey: .isLockedForTemplate) ?? false
             self.isReverse = try container.decodeIfPresent(Bool.self, forKey: .isReverse) ?? false
+            self.removeBackground = try container.decodeIfPresent(Bool.self, forKey: .removeBackground) ?? false
+            self.additionalFFmpegCommand = try container.decodeIfPresent(String.self, forKey: .additionalFFmpegCommand)
+            self.sceneConfig = try container.decodeIfPresent(String.self, forKey: .sceneConfig)
+            self.textureClipName = try container.decodeIfPresent(String.self, forKey: .textureClipName)
+            self.inAnimation = try container.decodeIfPresent(AnimationClip.self, forKey: .inAnimation) ?? AnimationClip()
+            self.outAnimation = try container.decodeIfPresent(AnimationClip.self, forKey: .outAnimation) ?? AnimationClip()
+            self.comboAnimation = try container.decodeIfPresent(AnimationClip.self, forKey: .comboAnimation) ?? AnimationClip()
         }
         
         func encode(to encoder: Encoder) throws {
@@ -190,24 +231,58 @@ extension EditingView {
             try container.encode(isMute, forKey: .isMute)
             try container.encode(isLockedForTemplate, forKey: .isLockedForTemplate)
             try container.encode(isReverse, forKey: .isReverse)
+            try container.encode(removeBackground, forKey: .removeBackground)
+            try container.encodeIfPresent(additionalFFmpegCommand, forKey: .additionalFFmpegCommand)
+            try container.encodeIfPresent(sceneConfig, forKey: .sceneConfig)
+            try container.encodeIfPresent(textureClipName, forKey: .textureClipName)
+            try container.encode(inAnimation, forKey: .inAnimation)
+            try container.encode(outAnimation, forKey: .outAnimation)
+            try container.encode(comboAnimation, forKey: .comboAnimation)
         }
     }
     
-    struct VideoProperties: Codable {
+    struct VideoProperties: Codable, Equatable {
         var valuePosX: Float = 0
         var valuePosY: Float = 0
         var valueRot: Float = 0
         var valueScaleX: Float = 1
         var valueScaleY: Float = 1
+        /// Normalized pivot within the scaled clip [0 = left/top ... 1 = right/bottom].
+        var valuePivotX: Float = 0
+        var valuePivotY: Float = 0
         var valueOpacity: Float = 1
         var valueSpeed: Float = 1
+        var valueVolume: Float = 1
         var valueHue: Float = 0
         var valueSaturation: Float = 1
         var valueBrightness: Float = 0
         var valueTemperature: Float = 6500
         
-        enum ValueType {
-            case posX, posY, rot, rotInRadians, scaleX, scaleY, opacity, speed, hue, saturation, brightness, temperature
+        /// Same order/cases as Android's VideoProperties.ValueType.
+        enum ValueType: CaseIterable {
+            case posX, posY, rot, rotInRadians, scaleX, scaleY, pivotX, pivotY, opacity, speed, volume, hue, saturation, brightness, temperature
+        }
+        
+        init() {}
+        
+        // Old Android project JSON may lack newer fields (pivot, volume): fall back to defaults,
+        // exactly what Gson does by leaving the field at its constructor value.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            valuePosX = try c.decodeIfPresent(Float.self, forKey: .valuePosX) ?? 0
+            valuePosY = try c.decodeIfPresent(Float.self, forKey: .valuePosY) ?? 0
+            valueRot = try c.decodeIfPresent(Float.self, forKey: .valueRot) ?? 0
+            valueScaleX = try c.decodeIfPresent(Float.self, forKey: .valueScaleX) ?? 1
+            valueScaleY = try c.decodeIfPresent(Float.self, forKey: .valueScaleY) ?? 1
+            valuePivotX = try c.decodeIfPresent(Float.self, forKey: .valuePivotX) ?? 0
+            valuePivotY = try c.decodeIfPresent(Float.self, forKey: .valuePivotY) ?? 0
+            valueOpacity = try c.decodeIfPresent(Float.self, forKey: .valueOpacity) ?? 1
+            valueSpeed = try c.decodeIfPresent(Float.self, forKey: .valueSpeed) ?? 1
+            valueVolume = try c.decodeIfPresent(Float.self, forKey: .valueVolume) ?? 1
+            valueHue = try c.decodeIfPresent(Float.self, forKey: .valueHue) ?? 0
+            valueSaturation = try c.decodeIfPresent(Float.self, forKey: .valueSaturation) ?? 1
+            valueBrightness = try c.decodeIfPresent(Float.self, forKey: .valueBrightness) ?? 0
+            valueTemperature = try c.decodeIfPresent(Float.self, forKey: .valueTemperature) ?? 6500
         }
     }
     
@@ -217,11 +292,27 @@ extension EditingView {
     
     struct Keyframe: Codable {
         var time: Float // seconds in local clip time
+        var frame: Int64 = 0 // local clip frame (Android: reassignKeyframes)
         var value: VideoProperties
         var easing: EasingType
+        
+        init(time: Float, value: VideoProperties, easing: EasingType = .none, frame: Int64 = 0) {
+            self.time = time
+            self.value = value
+            self.easing = easing
+            self.frame = frame
+        }
+        
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            time = try c.decode(Float.self, forKey: .time)
+            frame = try c.decodeIfPresent(Int64.self, forKey: .frame) ?? 0
+            value = try c.decodeIfPresent(VideoProperties.self, forKey: .value) ?? VideoProperties()
+            easing = try c.decodeIfPresent(EasingType.self, forKey: .easing) ?? .none
+        }
     }
     
-    enum EasingType: String, Codable {
+    enum EasingType: String, Codable, CaseIterable {
         case none = "NONE"
         case linear = "LINEAR"
         case easeInSine = "EASE_IN_SINE"
@@ -256,13 +347,49 @@ extension EditingView {
         case easeInOutBounce = "EASE_IN_OUT_BOUNCE"
     }
 
+    /// Minimal JSON value so EffectTemplate.params (Java `Map<String, Object>`) round-trips
+    /// instead of being silently dropped when iOS re-saves an Android-authored project.
+    enum JSONValue: Codable, Equatable {
+        case string(String), number(Double), bool(Bool), array([JSONValue]), object([String: JSONValue]), null
+        
+        init(from decoder: Decoder) throws {
+            let c = try decoder.singleValueContainer()
+            if c.decodeNil() { self = .null }
+            else if let v = try? c.decode(Bool.self) { self = .bool(v) }
+            else if let v = try? c.decode(Double.self) { self = .number(v) }
+            else if let v = try? c.decode(String.self) { self = .string(v) }
+            else if let v = try? c.decode([JSONValue].self) { self = .array(v) }
+            else if let v = try? c.decode([String: JSONValue].self) { self = .object(v) }
+            else { throw DecodingError.dataCorruptedError(in: c, debugDescription: "Unsupported JSON value") }
+        }
+        
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.singleValueContainer()
+            switch self {
+            case .string(let v): try c.encode(v)
+            case .number(let v): try c.encode(v)
+            case .bool(let v): try c.encode(v)
+            case .array(let v): try c.encode(v)
+            case .object(let v): try c.encode(v)
+            case .null: try c.encodeNil()
+            }
+        }
+    }
+
     struct EffectTemplate: Codable {
-        var type: String? // Optional in Android, usually not serialized
-        var style: String
+        var type: String?   // "transition", "overlay", etc
+        var style: String   // "fade", "zoom", "glitch"
         var duration: Double
         var offset: Double
-        // Map<String, Object> params not modeled fully here to avoid AnyCodable overhead if unused
-        // We will default to empty dict if needed or drop it if not critical
+        var params: [String: JSONValue]?
+        
+        init(type: String? = nil, style: String, duration: Double, offset: Double, params: [String: JSONValue]? = nil) {
+            self.style = style
+            self.duration = duration
+            self.offset = offset
+            self.type = type
+            self.params = params
+        }
     }
     
     struct TransitionClip: Codable {
@@ -285,9 +412,39 @@ extension EditingView {
         var videoHeight: Int
         var frameRate: Int
         var crf: Int
+        var bitrate: Int = 15
         var clipCap: Int
         var preset: String
         var tune: String
         var isStretchToFull: Bool
+        var useHardwareAccel: Bool = true
+        /// "ffmpeg" or "opengl". Old project JSON has no such field -> "ffmpeg" (matches Android loadSettings).
+        var renderEngine: String = "ffmpeg"
+        
+        init(videoWidth: Int, videoHeight: Int, frameRate: Int, crf: Int, clipCap: Int, preset: String, tune: String, isStretchToFull: Bool) {
+            self.videoWidth = videoWidth
+            self.videoHeight = videoHeight
+            self.frameRate = frameRate
+            self.crf = crf
+            self.clipCap = clipCap
+            self.preset = preset
+            self.tune = tune
+            self.isStretchToFull = isStretchToFull
+        }
+        
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            videoWidth = try c.decode(Int.self, forKey: .videoWidth)
+            videoHeight = try c.decode(Int.self, forKey: .videoHeight)
+            frameRate = try c.decode(Int.self, forKey: .frameRate)
+            crf = try c.decode(Int.self, forKey: .crf)
+            bitrate = try c.decodeIfPresent(Int.self, forKey: .bitrate) ?? 15
+            clipCap = try c.decode(Int.self, forKey: .clipCap)
+            preset = try c.decode(String.self, forKey: .preset)
+            tune = try c.decode(String.self, forKey: .tune)
+            isStretchToFull = try c.decodeIfPresent(Bool.self, forKey: .isStretchToFull) ?? false
+            useHardwareAccel = try c.decodeIfPresent(Bool.self, forKey: .useHardwareAccel) ?? true
+            renderEngine = try c.decodeIfPresent(String.self, forKey: .renderEngine) ?? "ffmpeg"
+        }
     }
 }

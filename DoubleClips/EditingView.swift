@@ -380,8 +380,11 @@ struct EditingView: View {
                                         onDelete: { deleteSelectedClip() },
                                         onSplit: { splitSelectedClip() },
                                         onClone: { cloneSelectedClip() },
-                                        onEdit: { withAnimation { activeOverlay = .videoProperties } },
-                                        onMultiToggle: { toggleMultiSelect() }
+                                        onEdit: { openClipEditor() },
+                                        onMultiToggle: { toggleMultiSelect() },
+                                        onKeyframe: { addKeyframeToSelectedClip() },
+                                        onAllKeyframe: { applyKeyframesToAllClips(selectedOnly: false) },
+                                        onRestate: { restateSelectedClip() }
                                     )
                                 case .track:
                                     TrackToolbarView(
@@ -397,7 +400,9 @@ struct EditingView: View {
                                     ClipsToolbarView(
                                         onDelete: { deleteSelectedClips() },
                                         onClone: { cloneSelectedClips() },
-                                        onMultiToggle: { toggleMultiSelect() }
+                                        onMultiToggle: { toggleMultiSelect() },
+                                        onAllKeyframe: { applyKeyframesToAllClips(selectedOnly: true) },
+                                        onRestate: { restateSelectedClips() }
                                     )
                                 }
                             }
@@ -410,7 +415,14 @@ struct EditingView: View {
                 // Specific Edit Overlays (slides up over editingZone)
                 if let overlayType = activeOverlay {
                     let selectedClip = timeline.tracks.flatMap({ $0.clips }).first(where: { $0.id == selectedClipID })
-                    SpecificEditOverlay(type: overlayType, clip: selectedClip) {
+                    SpecificEditOverlay(
+                        type: overlayType,
+                        clip: selectedClip,
+                        commandManager: commandManager,
+                        playhead: Float(engine.currentTime),
+                        frameRate: projectFrameRate,
+                        onChanged: { rebuildPreview() }
+                    ) {
                         withAnimation { activeOverlay = nil }
                     }
                 }
@@ -553,24 +565,8 @@ struct EditingView: View {
     /// Duplicates `source`, placing the clone immediately after it on the same track —
     /// equivalent of Android's `new Clip(selectedClip)` + `cloneClip.startTime = ...`.
     private func makeClone(of source: EditingView.Clip) -> EditingView.Clip {
-        let clone = Clip(
-            clipName: source.clipName,
-            startTime: source.startTime + source.duration,
-            duration: source.duration,
-            trackIndex: source.trackIndex,
-            type: source.type,
-            isClipHasAudio: source.isClipHasAudio,
-            width: source.width,
-            height: source.height
-        )
-        clone.startClipTrim = source.startClipTrim
-        clone.endClipTrim = source.endClipTrim
-        clone.originalDuration = source.originalDuration
-        clone.videoProperties = source.videoProperties
-        clone.keyframes = source.keyframes
-        clone.textContent = source.textContent
-        clone.fontSize = source.fontSize
-        clone.effect = source.effect
+        let clone = source.copy()
+        clone.startTime = source.startTime + source.duration
         return clone
     }
     
@@ -602,6 +598,95 @@ struct EditingView: View {
         let track = timeline.tracks[clip.trackIndex]
         commandManager.execute(AddClipCommand(track: track, clip: makeClone(of: clip)))
         timeline.recalculateDuration()
+        rebuildPreview()
+    }
+    
+    // MARK: - Clip editing (ports of the Android toolbarClip / toolbarClips handlers)
+    
+    /// The iOS project doesn't persist VideoSettings yet; Android's default frame rate is 30.
+    private var projectFrameRate: Int { 30 }
+    
+    private var selectedClip: EditingView.Clip? {
+        guard let id = selectedClipID else { return nil }
+        return allClips().first(where: { $0.id == id })
+    }
+    
+    /// editMediaButton: TEXT clips open the text editor, everything else the property editor.
+    private func openClipEditor() {
+        guard let clip = selectedClip else { return }
+        withAnimation { activeOverlay = clip.type == .text ? .textEdit : .videoProperties }
+    }
+    
+    /// addKeyframeButton
+    private func addKeyframeToSelectedClip() {
+        guard let clip = selectedClip else { return }
+        let time = Float(engine.currentTime)
+        let before = clip.keyframes
+        let fps = projectFrameRate
+        // Probe on a copy first so an out-of-range / duplicate press doesn't push a no-op undo entry.
+        var probe = before
+        let local = time - clip.startTime
+        guard local >= 0, local <= clip.duration,
+              !probe.keyframes.contains(where: { abs($0.time - local) <= EditingView.minimumKeyframeSpacing }) else { return }
+        probe.keyframes.append(EditingView.Keyframe(time: local, value: clip.videoProperties, easing: .none))
+        probe.sortKeyframes()
+        probe.reassignKeyframes(frameRate: fps)
+        let after = probe
+        commandManager.execute(GenericCommand(
+            description: "Add Keyframe: \(clip.clipName)",
+            undo: { clip.keyframes = before },
+            redo: { clip.keyframes = after }
+        ))
+        rebuildPreview()
+    }
+    
+    /// applyKeyframeToAllClip — copy the current clip's keyframes onto every other clip
+    /// (single-select) or onto the rest of the multi-selection (multi-select).
+    private func applyKeyframesToAllClips(selectedOnly: Bool) {
+        let source: EditingView.Clip?
+        let targets: [EditingView.Clip]
+        if selectedOnly {
+            let picked = allClips().filter { selectedClipIDs.contains($0.id) }
+            source = picked.first
+            targets = Array(picked.dropFirst())
+        } else {
+            source = selectedClip
+            targets = allClips().filter { $0.id != source?.id && ($0.type == .video || $0.type == .image || $0.type == .text) }
+        }
+        guard let source, !targets.isEmpty else { return }
+        let sourceKeys = source.keyframes
+        let batch = BatchCommand("Apply keyframes to all")
+        for t in targets {
+            let old = t.keyframes
+            var new = sourceKeys
+            // Keyframes are in local clip time; drop those beyond a shorter target clip.
+            new.keyframes.removeAll { $0.time > t.duration }
+            batch.add(GenericCommand(description: "Keyframes: \(t.clipName)", undo: { t.keyframes = old }, redo: { t.keyframes = new }))
+        }
+        commandManager.execute(batch)
+        rebuildPreview()
+    }
+    
+    /// restateButton — reset a clip's properties to defaults.
+    private func restateSelectedClip() {
+        guard let clip = selectedClip else { return }
+        restate([clip])
+    }
+    
+    private func restateSelectedClips() {
+        restate(allClips().filter { selectedClipIDs.contains($0.id) })
+    }
+    
+    private func restate(_ clips: [EditingView.Clip]) {
+        guard !clips.isEmpty else { return }
+        let batch = BatchCommand("Restate")
+        for c in clips {
+            let old = c.videoProperties
+            batch.add(GenericCommand(description: "Restate: \(c.clipName)",
+                                     undo: { c.videoProperties = old },
+                                     redo: { c.videoProperties = EditingView.VideoProperties() }))
+        }
+        commandManager.execute(batch)
         rebuildPreview()
     }
     
@@ -1258,13 +1343,16 @@ private struct DefaultToolbarView: View {
 
 /// Clip toolbar — view_toolbar_clip.xml
 /// Buttons: Delete, Split, Clone, Edit, Keyframe, SelectMultiple, AllKeyframe, Restate, Export.
-/// Keyframe/AllKeyframe/Restate/Export stay no-ops — keyframe UI and export are separate work.
+/// Export stays a no-op — clip export is separate work.
 private struct ClipToolbarView: View {
     var onDelete: () -> Void = {}
     var onSplit: () -> Void = {}
     var onClone: () -> Void = {}
     var onEdit: () -> Void = {}
     var onMultiToggle: () -> Void = {}
+    var onKeyframe: () -> Void = {}
+    var onAllKeyframe: () -> Void = {}
+    var onRestate: () -> Void = {}
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
@@ -1272,10 +1360,10 @@ private struct ClipToolbarView: View {
                 ToolbarButton(icon: "scissors", label: "Split") { onSplit() }
                 ToolbarButton(icon: "doc.on.doc", label: "Clone") { onClone() }
                 ToolbarButton(icon: "pencil.and.outline", label: "Edit") { onEdit() }
-                ToolbarButton(icon: "sparkles", label: "Keyframe") {}
+                ToolbarButton(icon: "diamond", label: "Keyframe") { onKeyframe() }
                 ToolbarButton(icon: "list.bullet", label: "Multi") { onMultiToggle() }
-                ToolbarButton(icon: "arrow.triangle.merge", label: "AllKey") {}
-                ToolbarButton(icon: "arrow.counterclockwise", label: "Restate") {}
+                ToolbarButton(icon: "arrow.triangle.merge", label: "AllKey") { onAllKeyframe() }
+                ToolbarButton(icon: "arrow.counterclockwise", label: "Restate") { onRestate() }
                 ToolbarButton(icon: "square.and.arrow.up", label: "Export") {}
             }
             .padding(.horizontal, 4)
@@ -1320,11 +1408,15 @@ private struct ClipsToolbarView: View {
     var onDelete: () -> Void = {}
     var onClone: () -> Void = {}
     var onMultiToggle: () -> Void = {}
+    var onAllKeyframe: () -> Void = {}
+    var onRestate: () -> Void = {}
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 ToolbarButton(icon: "trash", label: "Delete") { onDelete() }
                 ToolbarButton(icon: "doc.on.doc", label: "Clone") { onClone() }
+                ToolbarButton(icon: "arrow.triangle.merge", label: "AllKey") { onAllKeyframe() }
+                ToolbarButton(icon: "arrow.counterclockwise", label: "Restate") { onRestate() }
                 ToolbarButton(icon: "checkmark.circle", label: "Done") { onMultiToggle() }
             }
             .padding(.horizontal, 4)

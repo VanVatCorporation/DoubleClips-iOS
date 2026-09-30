@@ -162,40 +162,44 @@ extension EditingView.Clip {
         track.removeClip(self)
     }
     
-    /// Split this clip into two clips at the specified global time
+    /// Split at a global time. Port of Clip.splitClip / SplitClipCommand: the secondary clip is a
+    /// full copy (keyframes, properties, mute, reverse, animations...) and both halves get their
+    /// trims re-derived from `originalDuration`, so the source media is never re-cut.
     func splitClip(timeline: EditingView.Timeline, currentGlobalTime: Float) -> EditingView.Clip? {
-        guard currentGlobalTime > self.startTime && currentGlobalTime < (self.startTime + self.duration) else {
-            return nil
-        }
+        guard currentGlobalTime > startTime && currentGlobalTime < (startTime + duration) else { return nil }
+        guard trackIndex >= 0 && trackIndex < timeline.tracks.count else { return nil }
         
-        let localSplitTime = currentGlobalTime - self.startTime
+        let local = localClipTime(currentGlobalTime)
+        let oldStartTrim = startClipTrim
+        let oldEndTrim = endClipTrim
+        // Clips decoded from partial JSON can have originalDuration == 0; derive it instead.
+        let base = originalDuration > 0 ? originalDuration : (oldStartTrim + duration + oldEndTrim)
         
-        // Android equivalent: Creates a new clip cloned from this one
-        let newClip = EditingView.Clip(
-            clipName: self.clipName,
-            startTime: currentGlobalTime,
-            duration: self.duration - localSplitTime,
-            trackIndex: self.trackIndex,
-            type: self.type,
-            isClipHasAudio: self.isClipHasAudio,
-            width: self.width,
-            height: self.height
-        )
-        // Adjust split trims
-        newClip.startClipTrim = self.startClipTrim + localSplitTime
-        newClip.originalDuration = self.originalDuration
+        let secondary = copy()
+        secondary.startTime = currentGlobalTime
+        secondary.originalDuration = base
         
-        self.duration = localSplitTime
+        // Primary (left) half
+        originalDuration = base
+        endClipTrim = base - (local + oldStartTrim)
+        duration = base - endClipTrim - startClipTrim
         
-        // Add new clip to the track immediately after this one
-        guard self.trackIndex >= 0 && self.trackIndex < timeline.tracks.count else { return nil }
-        let track = timeline.tracks[self.trackIndex]
-        if let idx = track.clips.firstIndex(where: { $0.id == self.id }) {
-            track.clips.insert(newClip, at: idx + 1)
+        // Secondary (right) half
+        secondary.startClipTrim = local + oldStartTrim
+        secondary.endClipTrim = oldEndTrim
+        secondary.duration = base - secondary.endClipTrim - secondary.startClipTrim
+        
+        // A transition belongs to the END of a clip, so it stays with the right half only.
+        endTransition = nil
+        endTransitionEnabled = false
+        
+        let track = timeline.tracks[trackIndex]
+        if let idx = track.clips.firstIndex(where: { $0.id == id }) {
+            track.clips.insert(secondary, at: idx + 1)
         } else {
-            track.addClip(newClip)
+            track.addClip(secondary)
         }
-        return newClip
+        return secondary
     }
 }
 
