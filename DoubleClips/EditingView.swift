@@ -14,6 +14,7 @@ struct EditingView: View {
     
     // Playback engine
     @StateObject private var engine = EditingPlayer()
+    @StateObject private var previewSession = PreviewEditSession()
     
     // Undo/Redo — equivalent of EditingActivity's static `actionManager` (CommandManager)
     @StateObject private var commandManager = CommandManager()
@@ -91,6 +92,24 @@ struct EditingView: View {
                             }
                         }
                     }
+                    // On-canvas move / pinch / twist + selection box (Android: ClipRenderer gestures)
+                    .overlay(
+                        Group {
+                            if engine.player.currentItem != nil {
+                                PreviewInteractionLayer(
+                                    timeline: timeline,
+                                    selectedClipID: selectedClipID,
+                                    playhead: Float(engine.currentTime),
+                                    settings: engine.settings,
+                                    commandManager: commandManager,
+                                    session: previewSession,
+                                    onSelect: { selectingClip($0) },
+                                    onLiveChange: { engine.refreshFrame() },
+                                    onChanged: { rebuildPreview() }
+                                )
+                            }
+                        }
+                    )
                     
                     VStack {
                         if !isPreview {
@@ -603,8 +622,8 @@ struct EditingView: View {
     
     // MARK: - Clip editing (ports of the Android toolbarClip / toolbarClips handlers)
     
-    /// The iOS project doesn't persist VideoSettings yet; Android's default frame rate is 30.
-    private var projectFrameRate: Int { 30 }
+    /// Frame rate from the project's `project.settings` (falls back to Android's default, 30).
+    private var projectFrameRate: Int { max(engine.settings.frameRate, 1) }
     
     private var selectedClip: EditingView.Clip? {
         guard let id = selectedClipID else { return nil }

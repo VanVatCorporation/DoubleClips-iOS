@@ -160,10 +160,17 @@ extension EditingView.AnimatedProperty {
     
     /// Port of AnimatedProperty.getValueAtTime (global playhead time in, single value out).
     func value(for type: EditingView.VideoProperties.ValueType, clip: EditingView.Clip, at playheadTime: Float) -> Float {
+        value(for: type, base: clip.videoProperties, clipStartTime: clip.startTime, at: playheadTime)
+    }
+    
+    /// Same maths on plain value types, so the preview compositor can call it from its render
+    /// queue with a snapshot instead of touching the (main-thread) Clip object.
+    func value(for type: EditingView.VideoProperties.ValueType, base: EditingView.VideoProperties,
+               clipStartTime: Float, at playheadTime: Float) -> Float {
         guard let first = keyframes.first, let last = keyframes.last else {
-            return clip.videoProperties.value(type)
+            return base.value(type)
         }
-        let local = playheadTime - clip.startTime
+        let local = playheadTime - clipStartTime
         
         var prev = first
         for next in keyframes {
@@ -183,10 +190,14 @@ extension EditingView.AnimatedProperty {
     
     /// All properties resolved at once — this is what the preview/export compositors consume.
     func resolved(clip: EditingView.Clip, at playheadTime: Float) -> EditingView.VideoProperties {
-        guard !keyframes.isEmpty else { return clip.videoProperties }
-        var out = clip.videoProperties
+        resolved(base: clip.videoProperties, clipStartTime: clip.startTime, at: playheadTime)
+    }
+    
+    func resolved(base: EditingView.VideoProperties, clipStartTime: Float, at playheadTime: Float) -> EditingView.VideoProperties {
+        guard !keyframes.isEmpty else { return base }
+        var out = base
         for type in EditingView.VideoProperties.ValueType.allCases where type != .rotInRadians {
-            out.setValue(value(for: type, clip: clip, at: playheadTime), type)
+            out.setValue(value(for: type, base: base, clipStartTime: clipStartTime, at: playheadTime), type)
         }
         return out
     }

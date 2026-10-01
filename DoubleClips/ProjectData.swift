@@ -43,53 +43,93 @@ struct ProjectData: Identifiable, Codable, Hashable {
     /// Loads a ProjectData from `<path>/project.properties`.
     /// Returns `nil` if the file doesn't exist or can't be decoded.
     /// Equivalent of `ProjectData.loadProperties(context, path)`
+    ///
+    /// IMPORTANT: the `projectPath` stored inside the JSON is NOT trusted. On iOS the app
+    /// sandbox path (`/var/mobile/Containers/Data/Application/<UUID>/…`) can change between
+    /// launches — app update, reinstall over existing data, backup restore — while the files
+    /// themselves are carried over. A path saved yesterday then points into a container that
+    /// no longer exists, so delete / rename / open would silently act on nothing. The folder we
+    /// actually found the project in is the source of truth, so we re-anchor to it here (and
+    /// rewrite the JSON so it stays correct).
     static func loadProperties(from path: String) -> ProjectData? {
         let propertiesPath = IOHelper.combinePath(path, Constants.DEFAULT_PROJECT_PROPERTIES_FILENAME)
         let json = IOHelper.readFromFile(propertiesPath)
         guard !json.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let data = json.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(ProjectData.self, from: data)
+              let data = json.data(using: .utf8),
+              var decoded = try? JSONDecoder().decode(ProjectData.self, from: data) else { return nil }
+        
+        let stored = URL(fileURLWithPath: decoded.projectPath).resolvingSymlinksInPath().path
+        let actual = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        if stored != actual {
+            print("[Project] Re-anchored stale projectPath\n  was: \(decoded.projectPath)\n  now: \(path)")
+            decoded.projectPath = path
+            decoded.savePropertiesAtProject()
+        }
+        return decoded
+    }
+    
+    // MARK: - Errors
+    
+    enum ProjectError: LocalizedError {
+        case emptyTitle
+        case alreadyExists(String)
+        case io(String)
+        
+        var errorDescription: String? {
+            switch self {
+            case .emptyTitle: return "The project name can't be empty."
+            case .alreadyExists(let name): return "A project named \"\(name)\" already exists."
+            case .io(let message): return message
+            }
+        }
+    }
+    
+    /// Folder-safe version of a title (no path separators or characters iOS/Android dislike).
+    static func sanitizedFolderName(_ title: String) -> String {
+        let bad = CharacterSet(charactersIn: "/\\:*?\"<>|").union(.controlCharacters)
+        var name = title.components(separatedBy: bad).joined(separator: "_")
+        name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        while name.hasPrefix(".") { name.removeFirst() }
+        return name
     }
     
     // MARK: - Operations (Rename, Clone)
     
     /// Renames the project directory and updates the internal title.
-    /// Equivalent of `ProjectData.setProjectTitle(context, title, true)`
-    mutating func rename(to newTitle: String) -> Bool {
-        let cleanTitle = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanTitle.isEmpty else { return false }
+    /// Equivalent of `ProjectData.setProjectTitle(context, title, true)`.
+    /// Throws instead of failing silently, so the UI can tell the user what went wrong.
+    mutating func rename(to newTitle: String) throws {
+        let typedTitle = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let folderName = ProjectData.sanitizedFolderName(typedTitle)
+        guard !folderName.isEmpty else { throw ProjectError.emptyTitle }
         
-        // 1. Determine new directory path
-        // Parent folder of current project
         let parentDir = URL(fileURLWithPath: projectPath).deletingLastPathComponent().path
-        // New project folder name (Title is used as folder name in Android implementation logic, though create uses project_N)
-        // Android logic: IOHelper.CombinePath(Constants.DEFAULT_PROJECT_DIRECTORY(context), projectTitle);
-        // We should follow the same pattern if we want 1:1 sync, or just keep project_N and change title in json.
-        // Android SPECIFICALLY renames the directory:
-        // String newDir = IOHelper.CombinePath(Constants.DEFAULT_PROJECT_DIRECTORY(context), projectTitle);
-        // So we must rename the directory too.
+        let newPath = IOHelper.combinePath(parentDir, folderName)
         
-        let newPath = IOHelper.combinePath(Constants.DEFAULT_PROJECT_DIRECTORY, cleanTitle)
-        
-        // Avoid overwriting existing folder
-        if IOHelper.isFileExist(newPath) && newPath != projectPath {
-            return false 
+        // APFS is case-insensitive by default: a case-only change keeps the folder as is.
+        if newPath.lowercased() != projectPath.lowercased() {
+            if IOHelper.isFileExist(newPath) { throw ProjectError.alreadyExists(folderName) }
+            do {
+                try FileManager.default.moveItem(atPath: projectPath, toPath: newPath)
+            } catch {
+                throw ProjectError.io("Couldn't rename the project: \(error.localizedDescription)")
+            }
+            projectPath = newPath
         }
         
-        // 2. Rename Directory
+        projectTitle = typedTitle
+        savePropertiesAtProject()
+    }
+    
+    /// Deletes the project folder. A folder that is already gone counts as deleted;
+    /// any real failure is reported instead of being swallowed.
+    func delete() throws {
+        guard IOHelper.isFileExist(projectPath) else { return }
         do {
-            try FileManager.default.moveItem(atPath: projectPath, toPath: newPath)
+            try FileManager.default.removeItem(atPath: projectPath)
         } catch {
-            print("Rename failed: \(error)")
-            return false
+            throw ProjectError.io("Couldn't delete the project: \(error.localizedDescription)")
         }
-        
-        // 3. Update properties
-        self.projectPath = newPath
-        self.projectTitle = cleanTitle
-        self.savePropertiesAtProject()
-        
-        return true
     }
     
     /// Clones the project to a new directory.

@@ -16,6 +16,8 @@ struct HomeView: View {
     @State private var showingDeleteAlert = false
     @State private var projectToDelete: ProjectData?
     
+    @State private var errorMessage: String?
+    
     // Real Project Loader — equivalent of MainAreaScreen.reloadingProject()
     func loadProjects() {
         isLoading = true
@@ -201,12 +203,12 @@ struct HomeView: View {
             Button("Cancel", role: .cancel) { }
             Button("Rename") {
                 if var project = projectToRename {
-                    let oldId = project.id
-                    if project.rename(to: newProjectTitle) {
-                        // Refresh list to show new title
-                        if let index = projects.firstIndex(where: { $0.id == oldId }) {
-                            projects[index] = project
-                        }
+                    do {
+                        try project.rename(to: newProjectTitle)
+                        // Re-read from disk: the list always mirrors what is really stored.
+                        loadProjects()
+                    } catch {
+                        errorMessage = error.localizedDescription
                     }
                 }
             }
@@ -214,18 +216,26 @@ struct HomeView: View {
         // Delete Alert
         .alert("Delete Project?", isPresented: $showingDeleteAlert, presenting: projectToDelete) { project in
              Button("Delete", role: .destructive) {
-                 if let index = projects.firstIndex(where: { $0.id == project.id }) {
-                     // Delete directory
-                     IOHelper.deleteDir(project.projectPath)
-                     // Remove from list
+                 do {
+                     // Only drop it from the list once it is really gone from disk.
+                     try project.delete()
                      withAnimation {
-                         projects.remove(at: index)
+                         projects.removeAll { $0.id == project.id }
                      }
+                 } catch {
+                     errorMessage = error.localizedDescription
                  }
              }
              Button("Cancel", role: .cancel) { }
         } message: { project in
             Text("Are you sure you want to delete '\(project.projectTitle)'? This action cannot be undone.")
+        }
+        // Errors from rename / delete (previously these failed silently)
+        .alert("Something went wrong",
+               isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage ?? "")
         }
     }
         } // NavigationStack
