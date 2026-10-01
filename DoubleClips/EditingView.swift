@@ -21,6 +21,12 @@ struct EditingView: View {
     
     // Timeline state
     @StateObject private var timeline: Timeline = Timeline()
+    
+    // Persistence (project.timeline) — see EditingView+Persistence.swift
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var hasLoadedProject = false
+    @State private var loadNote: String?
+    @State private var autosaveWork: DispatchWorkItem?
     @State private var selectedToolbar: ToolbarMode = .default
     @State private var selectedTrackID: UUID?
     @State private var selectedClipID: UUID?
@@ -459,11 +465,22 @@ struct EditingView: View {
         .navigationBarHidden(true)
         .statusBarHidden(true)
         .onAppear {
+            loadProjectFromDisk()   // must run first: setupPreview() adds a track to an EMPTY timeline
             setupPreview()
             setupTimelinePinchAndZoom()
             setupSpecificEdit()
             setupToolbars()
             handleEditZoneInteraction()
+            if hasLoadedProject, !timeline.tracks.isEmpty { rebuildPreview(markDirty: false) }
+        }
+        .onDisappear { saveNow() }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active { saveNow() }   // Android saves in onPause/onStop too
+        }
+        .alert("Project recovered", isPresented: Binding(get: { loadNote != nil }, set: { if !$0 { loadNote = nil } })) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(loadNote ?? "")
         }
         .fileImporter(
             isPresented: $showFileImporter,
@@ -561,8 +578,44 @@ struct EditingView: View {
     /// Rebuilds the AVPlayer composition so the preview reflects the timeline's current
     /// state — called after every structural edit (move/split/delete/clone/undo/redo),
     /// since none of those otherwise touch the player.
-    private func rebuildPreview() {
+    private func rebuildPreview(markDirty: Bool = true) {
         engine.rebuildComposition(from: timeline, projectDir: URL(fileURLWithPath: project.projectPath))
+        if markDirty { scheduleAutosave() }
+    }
+    
+    // MARK: - Persistence (Android: Timeline.loadTimeline / saveTimeline)
+    
+    /// Read project.timeline + project.settings. Runs once; never in SwiftUI previews.
+    private func loadProjectFromDisk() {
+        guard !hasLoadedProject, !isPreview else { return }
+        let result = TimelineStore.load(project: project)
+        timeline.tracks = result.timeline.tracks
+        timeline.duration = result.timeline.duration
+        engine.settings = result.settings
+        loadNote = result.recoveryNote
+        // Only after this point may anything be written — an empty timeline can never
+        // replace real data that simply hadn't been read yet.
+        hasLoadedProject = true
+    }
+    
+    /// Debounced: bursts of edits (slider drags, nudges) become a single write.
+    private func scheduleAutosave() {
+        guard hasLoadedProject, !isPreview else { return }
+        autosaveWork?.cancel()
+        let work = DispatchWorkItem { saveNow() }
+        autosaveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
+    }
+    
+    private func saveNow() {
+        guard hasLoadedProject, !isPreview else { return }
+        autosaveWork?.cancel()
+        autosaveWork = nil
+        do {
+            try TimelineStore.save(project: project, timeline: timeline, settings: engine.settings)
+        } catch {
+            print("[Project] Timeline not saved (previous file left untouched): \(error)")
+        }
     }
     
     private func performUndo() {
@@ -868,8 +921,12 @@ struct EditingView: View {
                             }
                             if let videoTrack = try? await asset.loadTracks(withMediaType: .video).first,
                                let size = try? await videoTrack.load(.naturalSize) {
-                                trackWidth = Int(size.width)
-                                trackHeight = Int(size.height)
+                                // naturalSize ignores the rotation flag: portrait iPhone video would be
+                                // stored sideways (and composited squashed). Apply preferredTransform.
+                                let transform = (try? await videoTrack.load(.preferredTransform)) ?? .identity
+                                let oriented = size.applying(transform)
+                                trackWidth = Int(abs(oriented.width))
+                                trackHeight = Int(abs(oriented.height))
                             }
                             if let _ = try? await asset.loadTracks(withMediaType: .audio).first {
                                 hasAudio = true
@@ -877,8 +934,9 @@ struct EditingView: View {
                         } else {
                             durationSeconds = Float(asset.duration.seconds)
                             if let videoTrack = asset.tracks(withMediaType: .video).first {
-                                trackWidth = Int(videoTrack.naturalSize.width)
-                                trackHeight = Int(videoTrack.naturalSize.height)
+                                let oriented = videoTrack.naturalSize.applying(videoTrack.preferredTransform)
+                                trackWidth = Int(abs(oriented.width))
+                                trackHeight = Int(abs(oriented.height))
                             }
                             hasAudio = asset.tracks(withMediaType: .audio).first != nil
                         }

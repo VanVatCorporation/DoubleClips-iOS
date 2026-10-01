@@ -127,7 +127,7 @@ extension EditingView {
                     let start = cm(clip.startTime)
                     let duration = cm(clip.duration)
                     let window = CMTimeRange(start: start, duration: duration)
-                    let clipURL = projectDir.appendingPathComponent(clip.clipName)
+                    let clipURL = clip.mediaURL(projectPath: projectDir.path)
                     
                     func snapshot(_ kind: RenderLayer.Kind) -> RenderLayer {
                         RenderLayer(kind: kind, clipID: clip.id, startTime: clip.startTime,

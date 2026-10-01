@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct HomeView: View {
     @Binding var isBlockingGestures: Bool // Controls parent TabView swipe
@@ -43,6 +44,13 @@ struct HomeView: View {
                 isLoading = false
             }
         }
+    }
+    
+    /// <project>/preview.png is written by the editor on every save (same file Android uses).
+    private func thumbnail(for project: ProjectData) -> Image {
+        let path = IOHelper.combinePath(project.projectPath, "preview.png")
+        if let ui = UIImage(contentsOfFile: path) { return Image(uiImage: ui) }
+        return Image(systemName: "photo")
     }
     
     // Real Project Creator — equivalent of MainAreaScreen.addNewProjectWithName(title)
@@ -126,7 +134,7 @@ struct HomeView: View {
                     ForEach(projects) { project in
                             ProjectElementView(
                                 project: project,
-                                image: Image(systemName: "photo"), // Placeholder
+                                image: thumbnail(for: project),
                                 onEdit: { editingProject = project },
                                 onEditTitle: {
                                     projectToRename = project

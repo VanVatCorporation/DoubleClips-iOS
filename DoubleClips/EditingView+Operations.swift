@@ -17,10 +17,9 @@ extension EditingView.Timeline {
     
     func removeTrack(_ track: EditingView.Track) {
         self.tracks.removeAll(where: { $0.id == track.id })
-        // Re-index remaining tracks to match Android's logic
-        for (index, t) in self.tracks.enumerated() {
-            t.timelineIndex = index
-        }
+        // Android's reloadTrackIndex(): tracks AND their clips' trackIndex (clone/split/move
+        // index `tracks[clip.trackIndex]`, so stale values pointed at the wrong row).
+        reloadTrackIndex()
     }
     
     func clearTimeline() {
@@ -207,9 +206,11 @@ extension EditingView {
     
     // MARK: - File Paths Equivalent
     
+    /// Clip media lives in <project>/Clips/<name> (Clip.getAbsolutePath on Android).
     func getAbsolutePath(for filename: String) -> URL {
-        let projectFolder = URL(fileURLWithPath: project.projectPath)
-        return projectFolder.appendingPathComponent(filename)
+        URL(fileURLWithPath: project.projectPath)
+            .appendingPathComponent(Constants.DEFAULT_CLIP_DIRECTORY)
+            .appendingPathComponent(filename)
     }
     
     func getAbsolutePreviewPath(for filename: String) -> URL {

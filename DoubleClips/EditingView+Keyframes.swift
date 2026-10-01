@@ -223,6 +223,7 @@ extension EditingView.Clip {
         c.isMute = isMute
         c.isReverse = isReverse
         c.removeBackground = removeBackground
+        c.audioVolume = audioVolume
         c.isLockedForTemplate = isLockedForTemplate
         c.additionalFFmpegCommand = additionalFFmpegCommand
         c.endTransition = endTransition

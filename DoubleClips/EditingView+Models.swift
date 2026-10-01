@@ -19,8 +19,8 @@ extension EditingView {
         
         required init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            self.tracks = try container.decode([Track].self, forKey: .tracks)
-            self.duration = try container.decode(Float.self, forKey: .duration)
+            self.tracks = try container.decodeIfPresent([Track].self, forKey: .tracks) ?? []
+            self.duration = try container.decodeIfPresent(Float.self, forKey: .duration) ?? 0
         }
         
         func encode(to encoder: Encoder) throws {
@@ -47,8 +47,8 @@ extension EditingView {
         
         required init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            self.timelineIndex = try container.decode(Int.self, forKey: .timelineIndex)
-            self.clips = try container.decode([Clip].self, forKey: .clips)
+            self.timelineIndex = try container.decodeIfPresent(Int.self, forKey: .timelineIndex) ?? 0
+            self.clips = try container.decodeIfPresent([Clip].self, forKey: .clips) ?? []
         }
         
         func encode(to encoder: Encoder) throws {
@@ -66,6 +66,13 @@ extension EditingView {
         case transition = "TRANSITION"
         case effect = "EFFECT"
         case scene3D = "SCENE_3D"
+        
+        /// Gson stores enums by name and yields null for names it doesn't know; the desktop then
+        /// falls back to VIDEO. Do the same instead of failing to open the whole project.
+        init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = ClipType(rawValue: raw) ?? .video
+        }
     }
 
     /// Equivalent of EditingActivity.AnimationClip (in / out / combo animation slot).
@@ -114,6 +121,9 @@ extension EditingView {
         @Published var isLockedForTemplate: Bool
         @Published var isReverse: Bool
         @Published var removeBackground: Bool = false
+        /// Desktop-only field (ClipRenderer / AudioUtils apply it). Android has no such field.
+        /// When missing: 1 for clips with audio, like the desktop constructor, instead of Gson's 0.
+        @Published var audioVolume: Float = 1
         
         @Published var additionalFFmpegCommand: String?
         @Published var sceneConfig: String?        // SCENE_3D
@@ -146,6 +156,7 @@ extension EditingView {
             case isLockedForTemplate
             case isReverse
             case removeBackground
+            case audioVolume
             case additionalFFmpegCommand
             case sceneConfig
             case textureClipName
@@ -162,6 +173,7 @@ extension EditingView {
             self.trackIndex = trackIndex
             self.type = type
             self.isClipHasAudio = isClipHasAudio
+            self.audioVolume = isClipHasAudio ? 1 : 0
             self.width = width
             self.height = height
             
@@ -177,7 +189,7 @@ extension EditingView {
         
         required init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            self.type = try container.decode(ClipType.self, forKey: .type)
+            self.type = try container.decodeIfPresent(ClipType.self, forKey: .type) ?? .video
             // Need to handle potential missing values for backward compatibility loosely
             self.clipName = try container.decodeIfPresent(String.self, forKey: .clipName) ?? ""
             self.startTime = try container.decodeIfPresent(Float.self, forKey: .startTime) ?? 0
@@ -196,6 +208,7 @@ extension EditingView {
             self.endTransition = try container.decodeIfPresent(TransitionClip.self, forKey: .endTransition)
             self.endTransitionEnabled = try container.decodeIfPresent(Bool.self, forKey: .endTransitionEnabled) ?? false
             self.isClipHasAudio = try container.decodeIfPresent(Bool.self, forKey: .isClipHasAudio) ?? false
+            self.audioVolume = try container.decodeIfPresent(Float.self, forKey: .audioVolume) ?? (self.isClipHasAudio ? 1 : 0)
             self.isMute = try container.decodeIfPresent(Bool.self, forKey: .isMute) ?? false
             self.isLockedForTemplate = try container.decodeIfPresent(Bool.self, forKey: .isLockedForTemplate) ?? false
             self.isReverse = try container.decodeIfPresent(Bool.self, forKey: .isReverse) ?? false
@@ -232,6 +245,7 @@ extension EditingView {
             try container.encode(isLockedForTemplate, forKey: .isLockedForTemplate)
             try container.encode(isReverse, forKey: .isReverse)
             try container.encode(removeBackground, forKey: .removeBackground)
+            try container.encode(audioVolume, forKey: .audioVolume)
             try container.encodeIfPresent(additionalFFmpegCommand, forKey: .additionalFFmpegCommand)
             try container.encodeIfPresent(sceneConfig, forKey: .sceneConfig)
             try container.encodeIfPresent(textureClipName, forKey: .textureClipName)
@@ -313,6 +327,11 @@ extension EditingView {
     }
     
     enum EasingType: String, Codable, CaseIterable {
+        init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = EasingType(rawValue: raw) ?? EasingType.none
+        }
+
         case none = "NONE"
         case linear = "LINEAR"
         case easeInSine = "EASE_IN_SINE"
@@ -376,19 +395,44 @@ extension EditingView {
         }
     }
 
+    /// Android writes `offset`, the desktop writes `startTime` for the same value. Read either,
+    /// and write BOTH so a project can travel between Android, desktop and iOS without losing it
+    /// (Gson ignores keys it doesn't know).
     struct EffectTemplate: Codable {
-        var type: String?   // "transition", "overlay", etc
+        var type: String?   // "transition", "overlay", etc (Android only)
         var style: String   // "fade", "zoom", "glitch"
         var duration: Double
         var offset: Double
-        var params: [String: JSONValue]?
+        var params: [String: JSONValue]?  // Android only
         
         init(type: String? = nil, style: String, duration: Double, offset: Double, params: [String: JSONValue]? = nil) {
+            self.type = type
             self.style = style
             self.duration = duration
             self.offset = offset
-            self.type = type
             self.params = params
+        }
+        
+        enum CodingKeys: String, CodingKey { case type, style, duration, offset, startTime, params }
+        
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            type = try c.decodeIfPresent(String.self, forKey: .type)
+            style = try c.decodeIfPresent(String.self, forKey: .style) ?? "none"
+            duration = try c.decodeIfPresent(Double.self, forKey: .duration) ?? 0
+            offset = try c.decodeIfPresent(Double.self, forKey: .offset)
+                ?? c.decodeIfPresent(Double.self, forKey: .startTime) ?? 0
+            params = try c.decodeIfPresent([String: JSONValue].self, forKey: .params)
+        }
+        
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encodeIfPresent(type, forKey: .type)
+            try c.encode(style, forKey: .style)
+            try c.encode(duration, forKey: .duration)
+            try c.encode(offset, forKey: .offset)
+            try c.encode(offset, forKey: .startTime)
+            try c.encodeIfPresent(params, forKey: .params)
         }
     }
     
@@ -403,6 +447,11 @@ extension EditingView {
             case endFirst = "END_FIRST"
             case overlap = "OVERLAP"
             case beginSecond = "BEGIN_SECOND"
+            
+            init(from decoder: Decoder) throws {
+                let raw = try decoder.singleValueContainer().decode(String.self)
+                self = TransitionMode(rawValue: raw) ?? .overlap
+            }
         }
     }
     
@@ -448,3 +497,22 @@ extension EditingView {
         }
     }
 }
+
+extension EditingView.TransitionClip {
+    enum CodingKeys: String, CodingKey { case trackIndex, startTime, duration, effect, mode }
+    
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let start = try c.decodeIfPresent(Float.self, forKey: .startTime) ?? 0
+        let length = try c.decodeIfPresent(Float.self, forKey: .duration) ?? 0
+        self.init(
+            trackIndex: try c.decodeIfPresent(Int.self, forKey: .trackIndex) ?? 0,
+            startTime: start,
+            duration: length,
+            effect: try c.decodeIfPresent(EditingView.EffectTemplate.self, forKey: .effect)
+                ?? EditingView.EffectTemplate(style: "none", duration: Double(length), offset: Double(start)),
+            mode: try c.decodeIfPresent(TransitionMode.self, forKey: .mode) ?? .overlap
+        )
+    }
+}
+
