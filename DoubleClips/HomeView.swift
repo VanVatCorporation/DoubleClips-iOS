@@ -6,6 +6,10 @@ struct HomeView: View {
     
     @State private var projects: [ProjectData] = []
     @State private var isLoading: Bool = false
+    // Import project (ZIP) — see ProjectImporter.swift
+    @StateObject private var importer = ProjectImportController()
+    @State private var showImporter = false
+    @State private var pendingImport = false
     @State private var showAddProjectPopup: Bool = false
     @State private var editingProject: ProjectData? = nil
     
@@ -186,7 +190,13 @@ struct HomeView: View {
                 .onAppear { isBlockingGestures = true }
                 .onDisappear { isBlockingGestures = false }
         }
-        .sheet(isPresented: $showAddProjectPopup) {
+        .sheet(isPresented: $showAddProjectPopup, onDismiss: {
+            // A file picker can't be presented while the sheet is still on its way out.
+            if pendingImport {
+                pendingImport = false
+                showImporter = true
+            }
+        }) {
             AddProjectPopup(
                 onNewProject: { newProject in
                     // Create real project on disk, then use the returned data
@@ -200,11 +210,12 @@ struct HomeView: View {
                     showAddProjectPopup = false
                 },
                 onImportProject: {
-                    print("Import Project Clicked")
+                    pendingImport = true
                     showAddProjectPopup = false
                 }
             )
         }
+        .projectImport(controller: importer, showImporter: $showImporter, onProjectsChanged: { loadProjects() })
         // Rename Alert
         .alert("Rename Project", isPresented: $showingRenameAlert) {
             TextField("New Title", text: $newProjectTitle)

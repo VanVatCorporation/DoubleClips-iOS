@@ -208,10 +208,10 @@ extension EditingView {
             self.endTransition = try container.decodeIfPresent(TransitionClip.self, forKey: .endTransition)
             self.endTransitionEnabled = try container.decodeIfPresent(Bool.self, forKey: .endTransitionEnabled) ?? false
             self.isClipHasAudio = try container.decodeIfPresent(Bool.self, forKey: .isClipHasAudio) ?? false
-            self.audioVolume = try container.decodeIfPresent(Float.self, forKey: .audioVolume) ?? (self.isClipHasAudio ? 1 : 0)
             self.isMute = try container.decodeIfPresent(Bool.self, forKey: .isMute) ?? false
             self.isLockedForTemplate = try container.decodeIfPresent(Bool.self, forKey: .isLockedForTemplate) ?? false
             self.isReverse = try container.decodeIfPresent(Bool.self, forKey: .isReverse) ?? false
+            self.audioVolume = try container.decodeIfPresent(Float.self, forKey: .audioVolume) ?? (self.isClipHasAudio ? 1 : 0)
             self.removeBackground = try container.decodeIfPresent(Bool.self, forKey: .removeBackground) ?? false
             self.additionalFFmpegCommand = try container.decodeIfPresent(String.self, forKey: .additionalFFmpegCommand)
             self.sceneConfig = try container.decodeIfPresent(String.self, forKey: .sceneConfig)
