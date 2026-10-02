@@ -43,37 +43,57 @@ extension EditingView {
         let duration: Double
     }
     
-    /// Scrub audio in the same shape as the desktop's requestAudioBurst: random access into each
-    /// active clip's audio, 50 ms, mixed, flush-and-play.
+    /// Scrub audio as a small granular engine.
     ///
-    /// The first version built an AVAssetReader over the whole composition for EVERY burst. Opening
-    /// files and spinning up a decode pipeline dozens of times per second starved the video seeks
-    /// (they share the decoders and disk) and made scrubbing stutter. Here each clip's file is
-    /// opened ONCE as an AVAudioFile and kept open: a burst is just `framePosition = x; read()`,
-    /// a few milliseconds even for AAC.
+    /// Desktop/Android get their "adapts to the scrub speed" sound from short overlapping bursts:
+    /// each burst is cut by the next one, so the result is a stream of ~20-50 ms grains read from
+    /// wherever the playhead currently is. Slow drag = the same area over and over (slow motion),
+    /// fast drag = grains far apart (fast forward), 1x = contiguous = natural audio.
+    ///
+    /// The previous iOS version triggered one burst per touch event and restarted the player node
+    /// each time (stop -> schedule -> play). A node needs an audio-hardware cycle to start rendering
+    /// and touch events come every 8-16 ms, so bursts were cut before they made a sound, and the
+    /// few that did were ~10 ms long. It only sounded right near 1x, where those fragments line up.
+    ///
+    /// Now the output is decoupled from the touch rate: while the playhead is being moved, a steady
+    /// 20 ms timer reads a 40 ms grain at the CURRENT position, shapes it with a Hann window and
+    /// overlap-adds it with the previous grain's tail (50 % overlap, windows sum to exactly 1, so
+    /// 1x scrubbing reproduces the source untouched). The player node is never stopped between
+    /// grains; it just keeps getting 20 ms blocks.
     final class ScrubAudio {
         
         private let queue = DispatchQueue(label: "com.vanvatcorporation.doubleclips.scrub-audio", qos: .userInitiated)
         private let lock = NSLock()
-        private var pending: Double?                       // latest requested time (guarded by `lock`)
+        private var pendingTime: Double?                  // latest playhead position (guarded by `lock`)
+        private var lastRequest: UInt64 = 0               // when it was set, uptime ns (guarded by `lock`)
         
         // Everything below is touched on `queue` only.
         private var sources: [ScrubSource] = []
         private var files: [URL: AVAudioFile] = [:]
         private var converters: [URL: AVAudioConverter] = [:]
         private var unreadable = Set<URL>()
+        private var timer: DispatchSourceTimer?
         private var idleStop: DispatchWorkItem?
+        private var inFlight = 0                          // blocks scheduled but not yet played
+        private var generation = 0                        // invalidates completions after a stop()
         
         private let engine = AVAudioEngine()
         private let node = AVAudioPlayerNode()
         private let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
         private var isGraphBuilt = false
         
-        /// 50 ms — same as the desktop's burst.
-        private let burstFrames: AVAudioFrameCount = 2_205
-        /// ~2 ms linear fade at both ends of a burst: bursts are cut at arbitrary sample positions,
-        /// which would otherwise click on every scrub step.
-        private let fadeFrames = 88
+        /// 20 ms hop, 40 ms grain.
+        private let hopFrames = 882
+        private var grainFrames: Int { hopFrames * 2 }
+        private lazy var window: [Float] = (0..<(hopFrames * 2)).map {
+            // Periodic Hann: window[i] + window[i + hop] == 1.
+            Float(0.5 - 0.5 * cos(2 * Double.pi * Double($0) / Double(hopFrames * 2)))
+        }
+        private var tail: [[Float]] = [[], []]             // second half of the previous grain
+        private var tailPending = false
+        
+        /// No new playhead position for this long = the finger stopped = stop producing sound.
+        private let idleNanos: UInt64 = 120_000_000
         
         func setSources(_ list: [ScrubSource]) {
             queue.async {
@@ -85,94 +105,144 @@ extension EditingView {
             }
         }
         
-        /// Call on every scrub update. Latest request wins: while one burst is being prepared,
-        /// newer requests overwrite `pending`, so no backlog of stale positions can build up.
+        /// Call on every scrub update. Cheap on purpose (runs on the touch path): it only records
+        /// the latest position; the timer decides what to play.
         func burst(at seconds: Double) {
-            lock.lock(); pending = seconds; lock.unlock()
-            queue.async { [weak self] in self?.drain() }
+            lock.lock()
+            pendingTime = seconds
+            lastRequest = DispatchTime.now().uptimeNanoseconds
+            lock.unlock()
+            queue.async { [weak self] in self?.ensureRunning() }
         }
         
         func stop() {
-            lock.lock(); pending = nil; lock.unlock()
-            queue.async { [weak self] in self?.node.stop() }
+            lock.lock(); pendingTime = nil; lock.unlock()
+            queue.async { [weak self] in self?.reset() }
         }
         
         /// Blocks until the engine is stopped — the audio session can't be deactivated while it runs.
         func shutdown() {
-            lock.lock(); pending = nil; lock.unlock()
+            lock.lock(); pendingTime = nil; lock.unlock()
             queue.sync {
+                reset()
                 idleStop?.cancel()
-                node.stop()
                 if engine.isRunning { engine.stop() }
                 files.removeAll()
                 converters.removeAll()
             }
         }
         
-        // MARK: Private (on `queue`)
+        // MARK: Run loop (on `queue`)
         
-        private func drain() {
-            lock.lock(); let time = pending; pending = nil; lock.unlock()
-            guard let time else { return }   // a newer task already consumed it
-            render(at: time)
+        private func ensureRunning() {
+            guard timer == nil else { return }
+            idleStop?.cancel()
+            tail = [[Float](repeating: 0, count: hopFrames), [Float](repeating: 0, count: hopFrames)]
+            tailPending = false
+            let t = DispatchSource.makeTimerSource(queue: queue)
+            t.schedule(deadline: .now(), repeating: .milliseconds(20), leeway: .milliseconds(1))
+            t.setEventHandler { [weak self] in self?.tick() }
+            timer = t
+            t.resume()
         }
         
-        private func render(at seconds: Double) {
-            guard seconds >= 0 else { return }
-            let active = sources.filter { seconds >= $0.startTime && seconds < $0.startTime + $0.duration }
-            guard !active.isEmpty,
-                  let mix = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: burstFrames),
-                  let out = mix.floatChannelData else {
-                node.stop()                       // gap between clips: silence, and drop the stale burst
-                return
-            }
-            
-            for channel in 0..<2 { out[channel].initialize(repeating: 0, count: Int(burstFrames)) }
-            var longest = 0
-            for source in active {
-                let clipTime = seconds - source.startTime + source.startTrim
-                guard let chunk = read(source.url, at: clipTime), let data = chunk.floatChannelData else { continue }
-                let frames = Int(min(chunk.frameLength, burstFrames))
-                let channels = Int(chunk.format.channelCount)
-                for channel in 0..<2 {
-                    let from = data[min(channel, channels - 1)]
-                    let to = out[channel]
-                    for i in 0..<frames { to[i] += from[i] }
-                }
-                longest = max(longest, frames)
-            }
-            guard longest > 0 else { node.stop(); return }
-            
-            // Overlapping clips add up: clamp, then fade the edges.
-            let fade = min(fadeFrames, longest / 2)
-            for channel in 0..<2 {
-                let samples = out[channel]
-                for i in 0..<longest {
-                    var v = max(-1, min(1, samples[i]))
-                    if fade > 0 {
-                        if i < fade { v *= Float(i) / Float(fade) }
-                        else if i >= longest - fade { v *= Float(longest - 1 - i) / Float(fade) }
-                    }
-                    samples[i] = v
-                }
-            }
-            mix.frameLength = AVAudioFrameCount(longest)
-            
-            startEngineIfNeeded()
-            node.stop()                           // flush(): the previous burst is stale now
-            node.scheduleBuffer(mix)
-            node.play()
+        private func endRun() {
+            timer?.cancel()
+            timer = nil
             scheduleIdleStop()
         }
         
-        /// 50 ms of one clip's audio at `clipTime`, in the common 44.1 kHz stereo float format.
+        private func reset() {
+            timer?.cancel()
+            timer = nil
+            generation += 1
+            inFlight = 0
+            tailPending = false
+            if isGraphBuilt { node.stop() }
+        }
+        
+        private func tick() {
+            lock.lock(); let target = pendingTime; let stamp = lastRequest; lock.unlock()
+            guard inFlight < 3 else { return }            // never build a backlog = never add latency
+            
+            let moving = DispatchTime.now().uptimeNanoseconds &- stamp < idleNanos
+            let grain: [[Float]]? = (moving ? target : nil).flatMap { mixGrain(at: $0) }
+            
+            if grain == nil && !tailPending {
+                if moving { return }                      // gap between clips: stay silent, keep listening
+                endRun()                                  // finger stopped and the tail has faded out
+                return
+            }
+            if let block = makeBlock(grain: grain) { schedule(block) }
+        }
+        
+        /// out = previous tail + first half of the new grain; new tail = second half of the new grain.
+        private func makeBlock(grain: [[Float]]?) -> AVAudioPCMBuffer? {
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(hopFrames)),
+                  let out = buffer.floatChannelData else { return nil }
+            buffer.frameLength = AVAudioFrameCount(hopFrames)
+            for channel in 0..<2 {
+                for i in 0..<hopFrames {
+                    var value = tail[channel][i]
+                    if let grain {
+                        value += grain[channel][i] * window[i]
+                        tail[channel][i] = grain[channel][hopFrames + i] * window[hopFrames + i]
+                    } else {
+                        tail[channel][i] = 0
+                    }
+                    out[channel][i] = max(-1, min(1, value))
+                }
+            }
+            tailPending = grain != nil
+            return buffer
+        }
+        
+        private func schedule(_ block: AVAudioPCMBuffer) {
+            startEngineIfNeeded()
+            if !node.isPlaying { node.play() }            // started once; never restarted between grains
+            inFlight += 1
+            let generationAtSchedule = generation
+            node.scheduleBuffer(block) { [weak self] in
+                self?.queue.async {
+                    guard let self, self.generation == generationAtSchedule else { return }
+                    self.inFlight = max(0, self.inFlight - 1)
+                }
+            }
+        }
+        
+        // MARK: Reading + mixing
+        
+        /// 40 ms of every clip active at `seconds`, summed. nil = nothing audible there.
+        private func mixGrain(at seconds: Double) -> [[Float]]? {
+            guard seconds >= 0 else { return nil }
+            let active = sources.filter { seconds >= $0.startTime && seconds < $0.startTime + $0.duration }
+            guard !active.isEmpty else { return nil }
+            
+            var mix = [[Float]](repeating: [Float](repeating: 0, count: grainFrames), count: 2)
+            var any = false
+            for source in active {
+                let clipTime = seconds - source.startTime + source.startTrim
+                guard let chunk = read(source.url, at: clipTime), let data = chunk.floatChannelData else { continue }
+                let frames = min(Int(chunk.frameLength), grainFrames)
+                let channels = Int(chunk.format.channelCount)
+                for channel in 0..<2 {
+                    let from = data[min(channel, channels - 1)]
+                    for i in 0..<frames { mix[channel][i] += from[i] }
+                }
+                any = true
+            }
+            return any ? mix : nil
+        }
+        
+        /// One grain of one clip's audio at `clipTime`, in the common 44.1 kHz stereo float format.
         private func read(_ url: URL, at clipTime: Double) -> AVAudioPCMBuffer? {
             guard clipTime >= 0, let file = openFile(url) else { return nil }
             let inputRate = file.processingFormat.sampleRate
             let position = AVAudioFramePosition(clipTime * inputRate)
             guard position < file.length else { return nil }
             
-            let inFrames = AVAudioFrameCount(Double(burstFrames) * inputRate / format.sampleRate) + 32
+            let wanted = AVAudioFrameCount(grainFrames)
+            let inFrames = AVAudioFrameCount(Double(wanted) * inputRate / format.sampleRate) + 32
             guard let input = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: inFrames) else { return nil }
             file.framePosition = position
             do { try file.read(into: input, frameCount: inFrames) } catch { return nil }
@@ -181,7 +251,7 @@ extension EditingView {
             if file.processingFormat == format { return input }
             
             // Different rate / channel count (48 kHz, mono ...): convert. `reset()` so the
-            // resampler's history from the previous burst never bleeds into this one.
+            // resampler's history from the previous grain never bleeds into this one.
             let converter: AVAudioConverter
             if let cached = converters[url] { converter = cached }
             else if let made = AVAudioConverter(from: file.processingFormat, to: format) {
@@ -189,7 +259,7 @@ extension EditingView {
                 converter = made
             } else { return nil }
             converter.reset()
-            guard let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: burstFrames) else { return nil }
+            guard let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: wanted) else { return nil }
             var supplied = false
             var error: NSError?
             _ = converter.convert(to: converted, error: &error) { _, status in
@@ -215,6 +285,8 @@ extension EditingView {
             }
         }
         
+        // MARK: Engine
+        
         private func startEngineIfNeeded() {
             if !isGraphBuilt {
                 engine.attach(node)
@@ -232,8 +304,8 @@ extension EditingView {
         private func scheduleIdleStop() {
             idleStop?.cancel()
             let work = DispatchWorkItem { [weak self] in
-                guard let self else { return }
-                self.node.stop()
+                guard let self, self.timer == nil else { return }
+                if self.isGraphBuilt { self.node.stop() }
                 if self.engine.isRunning { self.engine.stop() }
             }
             idleStop = work
