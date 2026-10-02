@@ -132,11 +132,18 @@ extension EditingView {
     struct ClipGhostView: View {
         let ghost: ClipGhost
         let pps: CGFloat
+        var media: ClipMediaContext = .empty
         
         var body: some View {
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.mdPrimary.opacity(0.55))
+                // Same thumbnails / waveform as the real block (Android copies its bitmap into the ghost).
+                ClipVisualContent(clip: ghost.clip, displayStartTime: ghost.startTime, pps: pps,
+                                  blockWidth: max(20, CGFloat(ghost.clip.duration) * pps),
+                                  height: ClipGhostMath.blockHeight, media: media)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .opacity(0.7)
                 RoundedRectangle(cornerRadius: 4)
                     .stroke(Color.white.opacity(0.9), lineWidth: 1.5)
                 Text(ghost.clip.clipName)

@@ -1,0 +1,174 @@
+import SwiftUI
+
+// MARK: - What a clip block shows
+//
+//   VIDEO / IMAGE  a CapCut-style strip of 16:9 tiles (desktop ClipNode). Tile i shows the source
+//                  frame at the time of its LEFT edge, so trimming/zooming just reveals other tiles.
+//   AUDIO          the waveform (Android AudioUtils / desktop AudioUtils): navy background, a faint
+//                  centre line, symmetric bars whose height is the RMS of the audio under the bar
+//                  and whose opacity grows with loudness, over the trimmed window of the file.
+//   TEXT / EFFECT  unchanged (plain tinted block).
+//
+// Only what is on screen (plus a margin) is built: a 10-minute clip at maximum zoom is ~100 000 pt
+// wide, but needs about eight tiles or a few hundred bars at any moment.
+
+/// What a block needs to know about the timeline to work out its visible part.
+struct ClipMediaContext {
+    var projectPath: String
+    var scrollOffset: CGFloat       // timeline contentOffset.x
+    var viewportWidth: CGFloat
+    var centerOffset: CGFloat       // x of time 0 inside the scroll content
+    
+    static let empty = ClipMediaContext(projectPath: "", scrollOffset: 0, viewportWidth: 0, centerOffset: 0)
+}
+
+struct ClipVisualContent: View {
+    @ObservedObject var clip: EditingView.Clip
+    /// The ghost passes its own (dragged) start time; blocks pass `clip.startTime`.
+    let displayStartTime: Float
+    let pps: CGFloat
+    let blockWidth: CGFloat
+    let height: CGFloat
+    let media: ClipMediaContext
+    
+    /// Part of the block (in block-local x) that is on screen, plus a prefetch margin.
+    private var visible: ClosedRange<CGFloat> {
+        guard media.viewportWidth > 0 else { return 0...min(blockWidth, 600) }
+        let left = media.centerOffset + CGFloat(displayStartTime) * pps
+        let margin: CGFloat = 160
+        let lo = max(0, media.scrollOffset - left - margin)
+        let hi = min(blockWidth, media.scrollOffset + media.viewportWidth - left + margin)
+        return lo <= hi ? lo...hi : 0...0
+    }
+    
+    var body: some View {
+        if !media.projectPath.isEmpty {
+            let url = clip.mediaURL(projectPath: media.projectPath)
+            switch clip.type {
+            case .video, .image:
+                ClipThumbnailStrip(url: url, isVideo: clip.type == .video, startTrim: clip.startClipTrim,
+                                   pps: pps, blockWidth: blockWidth, height: height, visible: visible)
+            case .audio:
+                ClipWaveformView(url: url, startTrim: clip.startClipTrim,
+                                 pps: pps, blockWidth: blockWidth, height: height, visible: visible)
+            default:
+                EmptyView()
+            }
+        }
+    }
+}
+
+// MARK: - Video / image strip
+
+struct ClipThumbnailStrip: View {
+    let url: URL
+    let isVideo: Bool
+    let startTrim: Float
+    let pps: CGFloat
+    let blockWidth: CGFloat
+    let height: CGFloat
+    let visible: ClosedRange<CGFloat>
+    
+    var body: some View {
+        let tileWidth = height * 16.0 / 9.0
+        let count = max(1, Int((blockWidth / tileWidth).rounded(.up)))
+        let first = max(0, Int((visible.lowerBound / tileWidth).rounded(.down)))
+        let last = min(count - 1, Int((visible.upperBound / tileWidth).rounded(.down)))
+        
+        ZStack(alignment: .topLeading) {
+            if first <= last {
+                ForEach(first...last, id: \.self) { index in
+                    ThumbnailTile(url: url, isVideo: isVideo,
+                                  time: Double(startTrim) + Double(CGFloat(index) * tileWidth / max(pps, 1)),
+                                  width: tileWidth, height: height)
+                        .offset(x: CGFloat(index) * tileWidth)
+                }
+            }
+        }
+        .frame(width: blockWidth, height: height, alignment: .topLeading)
+        .clipped()
+    }
+}
+
+struct ThumbnailTile: View {
+    let url: URL
+    let isVideo: Bool
+    let time: Double
+    let width: CGFloat
+    let height: CGFloat
+    @State private var image: UIImage?
+    
+    /// 0.25 s grid: zooming or nudging a trim by a few pixels reuses the cached frame
+    /// instead of extracting a new one.
+    private var quantizedTime: Double { isVideo ? max(0, (time / 0.25).rounded() * 0.25) : 0 }
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.28)
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()                       // crop, never stretch (portrait clips)
+            }
+        }
+        .frame(width: width, height: height)
+        .clipped()
+        .task(id: "\(url.lastPathComponent)|\(quantizedTime)") {
+            image = await ClipMediaCache.shared.thumbnail(url: url, isVideo: isVideo, time: quantizedTime)
+        }
+    }
+}
+
+// MARK: - Audio waveform
+
+struct ClipWaveformView: View {
+    let url: URL
+    let startTrim: Float
+    let pps: CGFloat
+    let blockWidth: CGFloat
+    let height: CGFloat
+    let visible: ClosedRange<CGFloat>
+    @State private var envelope: WaveformEnvelope?
+    
+    // Android: thumbnailAudioBarWidth / thumbnailAudioBarGap (px). A little wider in points.
+    private let barWidth: CGFloat = 2
+    private let barGap: CGFloat = 1
+    
+    var body: some View {
+        var envelope = self.envelope
+        Canvas { context, size in
+            let midY = size.height / 2
+            let blue = Color(red: 0x1E / 255, green: 0x90 / 255, blue: 0xFF / 255)
+            
+            // Faint centre line (Android: basePaint alpha 60).
+            context.fill(Path(CGRect(x: 0, y: midY - 0.5, width: size.width, height: 1)),
+                         with: .color(blue.opacity(60.0 / 255)))
+            guard let envelope else { return }        // still decoding: just the line
+            
+            let stride = barWidth + barGap
+            let maxHalf = midY - 2
+            let firstBar = max(0, Int((visible.lowerBound / stride).rounded(.down)))
+            let lastBar = Int((visible.upperBound / stride).rounded(.up))
+            guard firstBar <= lastBar else { return }
+            
+            for bar in firstBar...lastBar {
+                let x = CGFloat(bar) * stride
+                if x >= size.width { break }
+                // The bar's slice of the file: the clip's trimmed window, in source seconds.
+                let t0 = Double(startTrim) + Double(x / max(pps, 1))
+                let t1 = Double(startTrim) + Double((x + stride) / max(pps, 1))
+                let amp = CGFloat(envelope.rms(from: t0, to: t1))
+                let half = max(2, amp * maxHalf)
+                let rect = CGRect(x: x, y: midY - half, width: barWidth, height: half * 2)
+                // Android: alpha = 10 + 245 * amp — quiet parts fade away, loud ones are solid.
+                context.fill(Path(roundedRect: rect, cornerRadius: 1),
+                             with: .color(blue.opacity((10 + 245 * Double(amp)) / 255)))
+            }
+        }
+        .frame(width: blockWidth, height: height)
+        .background(Color(hex: "#0D1B2A"))
+        .task(id: url.lastPathComponent) {
+            envelope = await ClipMediaCache.shared.waveform(for: url)
+        }
+    }
+}

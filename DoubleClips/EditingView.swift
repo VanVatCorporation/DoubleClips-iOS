@@ -349,6 +349,10 @@ struct EditingView: View {
                                                     timeline: timeline,
                                                     currentTime: Float(engine.currentTime),
                                                     draggingClipID: clipGhost?.clip.id,
+                                                    media: ClipMediaContext(projectPath: project.projectPath,
+                                                                            scrollOffset: timelineScrollOffset,
+                                                                            viewportWidth: geo.size.width - 50,
+                                                                            centerOffset: centerOffset),
                                                     onClipTap: { clip in selectingClip(clip) },
                                                     onTap: { selectingTrack(track) },
                                                     onClipMoved: { rebuildPreview() },
@@ -364,7 +368,11 @@ struct EditingView: View {
                                         // of the track area), so it is positioned by time + track.
                                         .overlay(alignment: .topLeading) {
                                             if let ghost = clipGhost {
-                                                ClipGhostView(ghost: ghost, pps: effectivePPS)
+                                                ClipGhostView(ghost: ghost, pps: effectivePPS,
+                                                              media: ClipMediaContext(projectPath: project.projectPath,
+                                                                                      scrollOffset: timelineScrollOffset,
+                                                                                      viewportWidth: geo.size.width - 50,
+                                                                                      centerOffset: centerOffset))
                                             }
                                         }
                                         // ─── centerOffset leading + trailing padding ───────────────
@@ -659,7 +667,7 @@ struct EditingView: View {
     
     /// Read project.timeline + project.settings. Runs once; never in SwiftUI previews.
     private func loadProjectFromDisk() {
-        guard !hasLoadedProject /*, !isPreview */ else { return }
+        guard !hasLoadedProject, !isPreview else { return }
         let result = TimelineStore.load(project: project)
         timeline.tracks = result.timeline.tracks
         timeline.duration = result.timeline.duration
@@ -1228,6 +1236,8 @@ private struct TrackRowView: View {
     var trackRowHeight: CGFloat = 100
     /// The clip whose ghost is being dragged: its real block is hidden meanwhile (Android: INVISIBLE).
     var draggingClipID: UUID? = nil
+    /// Project path + scroll window: lets each block build only the thumbnails/bars on screen.
+    var media: ClipMediaContext = .empty
     
     var onClipTap: (EditingView.Clip) -> Void
     var onTap: () -> Void
@@ -1253,6 +1263,7 @@ private struct TrackRowView: View {
                     isSelected: selectedClipID == clip.id,
                     isMultiSelected: selectedClipIDs.contains(clip.id),
                     isGhostSource: draggingClipID == clip.id,
+                    media: media,
                     pps: pps,
                     currentTime: currentTime,
                     trackRowHeight: trackRowHeight,
@@ -1289,6 +1300,7 @@ private struct ClipBlockView: View {
     var isMultiSelected: Bool = false
     /// True while this clip's ghost is being dragged: the block stays in layout but is invisible.
     var isGhostSource: Bool = false
+    var media: ClipMediaContext = .empty
     var pps: CGFloat
     var currentTime: Float
     var trackRowHeight: CGFloat = 100
@@ -1308,6 +1320,10 @@ private struct ClipBlockView: View {
         max(20, CGFloat(clip.duration) * pps)
     }
     
+    private var hasMediaVisual: Bool {
+        !media.projectPath.isEmpty && (clip.type == .video || clip.type == .image || clip.type == .audio)
+    }
+    
     private var borderColor: Color {
         if isMultiSelected { return .orange }
         if isSelected { return .white }
@@ -1319,12 +1335,21 @@ private struct ClipBlockView: View {
             RoundedRectangle(cornerRadius: 4)
                 .fill(Color.mdPrimary.opacity(0.8))
             
+            // Video/image: tile strip. Audio: waveform. Others: nothing (the plain fill above).
+            ClipVisualContent(clip: clip, displayStartTime: clip.startTime, pps: pps,
+                              blockWidth: blockWidth, height: 88, media: media)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            
+            // Over thumbnails/waveforms the label sits top-left on a soft shadow so it stays readable.
             Text(clip.clipName)
-                .font(.system(size: 10))
+                .font(.system(size: 10, weight: hasMediaVisual ? .semibold : .regular))
                 .foregroundColor(.white)
+                .shadow(color: .black.opacity(hasMediaVisual ? 0.85 : 0), radius: 2)
                 .lineLimit(1)
-                .padding(.horizontal, 16)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, hasMediaVisual ? 6 : 16)
+                .padding(.top, hasMediaVisual ? 4 : 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity,
+                       alignment: hasMediaVisual ? .topLeading : .leading)
             
             if isSelected || isMultiSelected {
                 RoundedRectangle(cornerRadius: 4)
