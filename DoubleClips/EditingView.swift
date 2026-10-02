@@ -310,7 +310,7 @@ struct EditingView: View {
                                                 let clampedOffset = max(0, newValue)
                                                 timelineScrollOffset = clampedOffset
                                                 if !engine.isPlaying {
-                                                    engine.seek(to: Double(clampedOffset / effectivePPS))
+                                                    engine.scrub(to: Double(clampedOffset / effectivePPS))
                                                 }
                                             }
                                         ),
@@ -323,7 +323,14 @@ struct EditingView: View {
                                             // playing. Scrubbing takes over from playback rather
                                             // than being silently ignored.
                                             engine.pause()
-                                        }
+                                        },
+                                        onUserScroll: { rawOffset in
+                                            // Android: pumpDecoderAudioSeek / desktop: requestAudioBurst.
+                                            // Only fires for the user's own drag, so programmatic offset
+                                            // syncs (playback, seeks after import) stay silent.
+                                            engine.playScrubBurst(at: Double(max(0, rawOffset) / effectivePPS))
+                                        },
+                                        onUserScrollEnd: { engine.endScrub() }
                                     ) {
                                         LazyVStack(alignment: .leading, spacing: 0) {
                                             ForEach(timeline.tracks) { track in
@@ -473,7 +480,18 @@ struct EditingView: View {
             handleEditZoneInteraction()
             if hasLoadedProject, !timeline.tracks.isEmpty { rebuildPreview(markDirty: false) }
         }
-        .onDisappear { saveNow() }
+        .onDisappear {
+            saveNow()
+            engine.releaseAudio()
+        }
+        // Playback drives the ruler through engine.currentTime, but the track area is a
+        // UIScrollView whose offset only ever came from the user's finger: while playing, the
+        // ruler advanced and the clips stood still. Feed the playhead into the scroll offset
+        // (same formula as scrubbing, inverted: offset = time * pixelsPerSecond).
+        .onChange(of: engine.currentTime) { time in
+            guard engine.isPlaying else { return }
+            timelineScrollOffset = CGFloat(time) * (pixelsPerSecond * pinchScale)
+        }
         .onChange(of: scenePhase) { phase in
             if phase != .active { saveNow() }   // Android saves in onPause/onStop too
         }
@@ -1014,13 +1032,20 @@ struct TrackingHScrollView<Content: View>: UIViewRepresentable {
     /// view makes in `updateUIView`. Safe hook for "user grabbed the timeline" logic
     /// (e.g. pausing playback) without misfiring on our own scroll-syncing.
     var onDragBegin: (() -> Void)? = nil
+    /// Raw contentOffset.x on every scroll frame that comes from the user's finger (dragging or
+    /// the deceleration after a flick) — never for our own programmatic offset writes.
+    var onUserScroll: ((CGFloat) -> Void)? = nil
+    /// The finger lifted and any flick deceleration finished.
+    var onUserScrollEnd: (() -> Void)? = nil
     let content: Content
 
-    init(offset: Binding<CGFloat>, contentWidth: CGFloat, contentHeight: CGFloat, onDragBegin: (() -> Void)? = nil, @ViewBuilder content: () -> Content) {
+    init(offset: Binding<CGFloat>, contentWidth: CGFloat, contentHeight: CGFloat, onDragBegin: (() -> Void)? = nil, onUserScroll: ((CGFloat) -> Void)? = nil, onUserScrollEnd: (() -> Void)? = nil, @ViewBuilder content: () -> Content) {
         self._offset = offset
         self.contentWidth = contentWidth
         self.contentHeight = contentHeight
         self.onDragBegin = onDragBegin
+        self.onUserScroll = onUserScroll
+        self.onUserScrollEnd = onUserScrollEnd
         self.content = content()
     }
 
@@ -1061,12 +1086,28 @@ struct TrackingHScrollView<Content: View>: UIViewRepresentable {
         var hostingController: UIHostingController<Content>?
         init(_ parent: TrackingHScrollView) { self.parent = parent }
 
+        private var isUserScrolling = false
+
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            isUserScrolling = true
             parent.onDragBegin?()
+        }
+
+        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+            if !decelerate {
+                isUserScrolling = false
+                parent.onUserScrollEnd?()
+            }
+        }
+
+        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+            isUserScrolling = false
+            parent.onUserScrollEnd?()
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             let newOffset = scrollView.contentOffset.x
+            if isUserScrolling { parent.onUserScroll?(newOffset) }
             DispatchQueue.main.async {
                 self.parent.offset = newOffset
             }

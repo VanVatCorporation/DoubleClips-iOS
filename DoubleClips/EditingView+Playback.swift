@@ -19,15 +19,32 @@ extension EditingView {
         
         private var timeObserverToken: Any?
         private var currentComposition: AVMutableComposition?
+        private let scrubAudio = ScrubAudio()
+        private var interruptionObserver: NSObjectProtocol?
         
         init() {
+            // `.playback` category: sound must play with the ring/silent switch on.
+            AudioSessionController.activatePlayback()
             setupTimeObserver()
+            // After a phone call / Siri the session is deactivated; take it back when it ends.
+            interruptionObserver = NotificationCenter.default.addObserver(
+                forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+            ) { note in
+                let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+                if raw.flatMap(AVAudioSession.InterruptionType.init(rawValue:)) == .ended {
+                    AudioSessionController.activatePlayback()
+                }
+            }
         }
         
         deinit {
             if let token = timeObserverToken {
                 player.removeTimeObserver(token)
             }
+            if let observer = interruptionObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            scrubAudio.shutdown()
         }
         
         func togglePlayPause() {
@@ -35,9 +52,68 @@ extension EditingView {
                 player.pause()
                 isPlaying = false
             } else {
+                scrubAudio.stop()                       // a scrub burst must not overlap playback
+                AudioSessionController.activatePlayback()
                 player.play()
                 isPlaying = true
             }
+        }
+        
+        // MARK: Smooth scrubbing (Apple QA1820 "chase time")
+        //
+        // Every AVPlayer.seek CANCELS the one before it, so firing a seek per touch-move during a
+        // fast drag means almost none of them ever completes and the picture only updates when
+        // you slow down. Instead: keep at most ONE seek in flight, remember the latest target,
+        // and when the seek finishes chase the newest target. Loose tolerance while the finger
+        // moves (fast, any nearby frame), then one exact seek when it lifts.
+        
+        private var chaseTime: CMTime = .invalid
+        private var isSeekInProgress = false
+        
+        func scrub(to seconds: Double) {
+            currentTime = seconds                  // ruler / readout follow the finger immediately
+            let target = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
+            guard !chaseTime.isValid || CMTimeCompare(target, chaseTime) != 0 else { return }
+            chaseTime = target
+            if !isSeekInProgress { chaseSeek() }
+        }
+        
+        private func chaseSeek() {
+            guard chaseTime.isValid, player.currentItem != nil else { isSeekInProgress = false; return }
+            isSeekInProgress = true
+            let inProgress = chaseTime
+            let tolerance = CMTime(seconds: 0.1, preferredTimescale: 600)
+            player.seek(to: inProgress, toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] _ in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if self.chaseTime.isValid, CMTimeCompare(inProgress, self.chaseTime) != 0 {
+                        self.chaseSeek()           // the finger moved on while we were seeking
+                    } else {
+                        self.isSeekInProgress = false
+                    }
+                }
+            }
+        }
+        
+        /// Finger lifted: land on the exact frame under the playhead.
+        func endScrub() {
+            guard !isPlaying, player.currentItem != nil else { return }
+            chaseTime = .invalid
+            player.seek(to: CMTime(seconds: currentTime, preferredTimescale: 600),
+                        toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        
+        /// Called for every scrub update from the timeline (never for programmatic seeks).
+        func playScrubBurst(at seconds: Double) {
+            guard !isPlaying else { return }
+            scrubAudio.burst(at: seconds)
+        }
+        
+        /// Leaving the editor: stop everything and let other apps' audio resume.
+        func releaseAudio() {
+            pause()
+            scrubAudio.shutdown()
+            AudioSessionController.deactivate()
         }
         
         /// Explicit stop, distinct from the toggle above — this is what timeline
@@ -53,7 +129,7 @@ extension EditingView {
         }
         
         private func setupTimeObserver() {
-            let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
+            let interval = CMTime(seconds: 1.0 / 30.0, preferredTimescale: 600)
             timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
                 guard let self = self else { return }
                 
@@ -116,6 +192,7 @@ extension EditingView {
             /// Draw order: track order, later tracks on top (FFmpegEdit's overlay chain order).
             var layers: [(layer: RenderLayer, range: CMTimeRange)] = []
             var contentEnd: Float = 0
+            var scrubSources: [ScrubSource] = []
             
             for trackModel in timeline.tracks.sorted(by: { $0.timelineIndex < $1.timelineIndex }) {
                 var compositionVideoTrack: AVMutableCompositionTrack?
@@ -171,6 +248,11 @@ extension EditingView {
                                                                                     preferredTrackID: kCMPersistentTrackID_Invalid)
                             }
                             try? compositionAudioTrack?.insertTimeRange(sourceRange, of: audioSource, at: start)
+                            // Same clips, same condition as the composition's audio: what scrubbing
+                            // plays is exactly what playback would.
+                            scrubSources.append(ScrubSource(url: clipURL, startTime: Double(clip.startTime),
+                                                            startTrim: Double(clip.startClipTrim),
+                                                            duration: Double(clip.duration)))
                         }
                         
                     case .image:
@@ -228,6 +310,7 @@ extension EditingView {
             }
             
             currentComposition = composition
+            scrubAudio.setSources(scrubSources)
             player.replaceCurrentItem(with: item)
             
             // Prevent auto-play explicitly
