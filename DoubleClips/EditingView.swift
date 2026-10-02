@@ -15,6 +15,8 @@ struct EditingView: View {
     // Playback engine
     @StateObject private var engine = EditingPlayer()
     @StateObject private var previewSession = PreviewEditSession()
+    /// Ghost of the clip being long-press-dragged (nil = no drag). See EditingView+ClipDrag.swift.
+    @State private var clipGhost: ClipGhost?
     
     // Undo/Redo — equivalent of EditingActivity's static `actionManager` (CommandManager)
     @StateObject private var commandManager = CommandManager()
@@ -330,7 +332,10 @@ struct EditingView: View {
                                             // syncs (playback, seeks after import) stay silent.
                                             engine.playScrubBurst(at: Double(max(0, rawOffset) / effectivePPS))
                                         },
-                                        onUserScrollEnd: { engine.endScrub() }
+                                        onUserScrollEnd: { engine.endScrub() },
+                                        onLongPress: { phase, point in
+                                            handleClipLongPress(phase, at: point, centerOffset: centerOffset, pps: effectivePPS)
+                                        }
                                     ) {
                                         LazyVStack(alignment: .leading, spacing: 0) {
                                             ForEach(timeline.tracks) { track in
@@ -343,6 +348,7 @@ struct EditingView: View {
                                                     rowWidth: trackContentWidth,
                                                     timeline: timeline,
                                                     currentTime: Float(engine.currentTime),
+                                                    draggingClipID: clipGhost?.clip.id,
                                                     onClipTap: { clip in selectingClip(clip) },
                                                     onTap: { selectingTrack(track) },
                                                     onClipMoved: { rebuildPreview() },
@@ -353,6 +359,13 @@ struct EditingView: View {
                                             Color(hex: "#222222")
                                                 .frame(width: trackContentWidth, height: 100)
                                                 .onTapGesture { addTrack() }
+                                        }
+                                        // Ghost lives in the same coordinate space as the rows (origin = time 0
+                                        // of the track area), so it is positioned by time + track.
+                                        .overlay(alignment: .topLeading) {
+                                            if let ghost = clipGhost {
+                                                ClipGhostView(ghost: ghost, pps: effectivePPS)
+                                            }
                                         }
                                         // ─── centerOffset leading + trailing padding ───────────────
                                         // Equivalent to Android's start/end spacer Views of width=centerOffset.
@@ -376,6 +389,10 @@ struct EditingView: View {
                                     .background(Color(hex: "#111111"))
                                 }
                             }
+                            // Android: timelineScroll.requestDisallowInterceptTouchEvent(true) for the
+                            // duration of the drag, so vertical finger movement picks a track instead of
+                            // scrolling the track list.
+                            .scrollDisabled(clipGhost != nil)
                         }
                         // Overlay playhead on top of the whole timeline area.
                         // NOTE: alignment: .center here would center the line over the FULL
@@ -601,11 +618,48 @@ struct EditingView: View {
         if markDirty { scheduleAutosave() }
     }
     
+    // MARK: - Clip long-press drag (Android: handleClipInteraction)
+    
+    /// Returns whether the gesture should keep going: `.began` returns false when no clip is under
+    /// the finger, so holding on empty space does nothing and never blocks scrolling.
+    private func handleClipLongPress(_ phase: ClipLongPressPhase, at point: CGPoint,
+                                     centerOffset: CGFloat, pps: CGFloat) -> Bool {
+        switch phase {
+        case .began:
+            guard let ghost = ClipGhostMath.hitTest(point: point, timeline: timeline,
+                                                    centerOffset: centerOffset, pps: pps) else { return false }
+            engine.pause()                      // Android: stopPlayback when a clip drag starts
+            clipGhost = ghost
+            return true
+            
+        case .moved:
+            guard let ghost = clipGhost else { return false }
+            clipGhost = ClipGhostMath.moved(ghost, to: point, timeline: timeline, centerOffset: centerOffset,
+                                            pps: pps, currentTime: Float(engine.currentTime))
+            return true
+            
+        case .ended:
+            guard let ghost = clipGhost else { return false }
+            let final = ClipGhostMath.moved(ghost, to: point, timeline: timeline, centerOffset: centerOffset,
+                                            pps: pps, currentTime: Float(engine.currentTime))
+            if ClipGhostMath.commit(final, timeline: timeline, commandManager: commandManager,
+                                    frameRate: projectFrameRate) {
+                rebuildPreview()
+            }
+            clipGhost = nil
+            return true
+            
+        case .cancelled:
+            clipGhost = nil                     // nothing was ever applied to the clip
+            return true
+        }
+    }
+    
     // MARK: - Persistence (Android: Timeline.loadTimeline / saveTimeline)
     
     /// Read project.timeline + project.settings. Runs once; never in SwiftUI previews.
     private func loadProjectFromDisk() {
-        guard !hasLoadedProject, !isPreview else { return }
+        guard !hasLoadedProject /*, !isPreview */ else { return }
         let result = TimelineStore.load(project: project)
         timeline.tracks = result.timeline.tracks
         timeline.duration = result.timeline.duration
@@ -1037,15 +1091,20 @@ struct TrackingHScrollView<Content: View>: UIViewRepresentable {
     var onUserScroll: ((CGFloat) -> Void)? = nil
     /// The finger lifted and any flick deceleration finished.
     var onUserScrollEnd: (() -> Void)? = nil
+    /// Long press anywhere on the content, in CONTENT coordinates. For `.began` the return value
+    /// decides whether the gesture may begin (false = nothing to drag here); for the other phases
+    /// it is ignored.
+    var onLongPress: ((ClipLongPressPhase, CGPoint) -> Bool)? = nil
     let content: Content
 
-    init(offset: Binding<CGFloat>, contentWidth: CGFloat, contentHeight: CGFloat, onDragBegin: (() -> Void)? = nil, onUserScroll: ((CGFloat) -> Void)? = nil, onUserScrollEnd: (() -> Void)? = nil, @ViewBuilder content: () -> Content) {
+    init(offset: Binding<CGFloat>, contentWidth: CGFloat, contentHeight: CGFloat, onDragBegin: (() -> Void)? = nil, onUserScroll: ((CGFloat) -> Void)? = nil, onUserScrollEnd: (() -> Void)? = nil, onLongPress: ((ClipLongPressPhase, CGPoint) -> Bool)? = nil, @ViewBuilder content: () -> Content) {
         self._offset = offset
         self.contentWidth = contentWidth
         self.contentHeight = contentHeight
         self.onDragBegin = onDragBegin
         self.onUserScroll = onUserScroll
         self.onUserScrollEnd = onUserScrollEnd
+        self.onLongPress = onLongPress
         self.content = content()
     }
 
@@ -1062,11 +1121,24 @@ struct TrackingHScrollView<Content: View>: UIViewRepresentable {
         hosting.view.backgroundColor = .clear
         scrollView.addSubview(hosting.view)
         context.coordinator.hostingController = hosting
+        
+        // Long press = pick up a clip. Moving before it fires (scrubbing) fails it and the
+        // scroll view takes the touch as usual — that is what keeps scrubbing from grabbing clips.
+        let longPress = UILongPressGestureRecognizer(target: context.coordinator.longPressHandler,
+                                                     action: #selector(ClipLongPressHandler.handle(_:)))
+        longPress.minimumPressDuration = 0.4
+        longPress.allowableMovement = 10
+        // Once it fires, the content (SwiftUI tap/trim gestures) must not also see the touch,
+        // otherwise releasing the drag could also "tap" a clip.
+        longPress.cancelsTouchesInView = true
+        longPress.delegate = context.coordinator.longPressHandler
+        scrollView.addGestureRecognizer(longPress)
         return scrollView
     }
 
     func updateUIView(_ uiView: UIScrollView, context: Context) {
         context.coordinator.parent = self
+        context.coordinator.longPressHandler.onLongPress = onLongPress
         context.coordinator.hostingController?.rootView = content
 
         let size = CGSize(width: contentWidth, height: contentHeight)
@@ -1084,10 +1156,11 @@ struct TrackingHScrollView<Content: View>: UIViewRepresentable {
     class Coordinator: NSObject, UIScrollViewDelegate {
         var parent: TrackingHScrollView
         var hostingController: UIHostingController<Content>?
+        /// Non-generic on purpose: @objc selectors inside a class nested in a generic type are fragile.
+        let longPressHandler = ClipLongPressHandler()
         init(_ parent: TrackingHScrollView) { self.parent = parent }
 
         private var isUserScrolling = false
-
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
             isUserScrolling = true
             parent.onDragBegin?()
@@ -1153,6 +1226,8 @@ private struct TrackRowView: View {
     @ObservedObject var timeline: EditingView.Timeline
     var currentTime: Float
     var trackRowHeight: CGFloat = 100
+    /// The clip whose ghost is being dragged: its real block is hidden meanwhile (Android: INVISIBLE).
+    var draggingClipID: UUID? = nil
     
     var onClipTap: (EditingView.Clip) -> Void
     var onTap: () -> Void
@@ -1177,6 +1252,7 @@ private struct TrackRowView: View {
                     timeline: timeline,
                     isSelected: selectedClipID == clip.id,
                     isMultiSelected: selectedClipIDs.contains(clip.id),
+                    isGhostSource: draggingClipID == clip.id,
                     pps: pps,
                     currentTime: currentTime,
                     trackRowHeight: trackRowHeight,
@@ -1211,6 +1287,8 @@ private struct ClipBlockView: View {
     @ObservedObject var timeline: EditingView.Timeline
     var isSelected: Bool
     var isMultiSelected: Bool = false
+    /// True while this clip's ghost is being dragged: the block stays in layout but is invisible.
+    var isGhostSource: Bool = false
     var pps: CGFloat
     var currentTime: Float
     var trackRowHeight: CGFloat = 100
@@ -1225,21 +1303,6 @@ private struct ClipBlockView: View {
     @State private var dragInitialStartTrim: Float = 0
     @State private var dragInitialEndTrim: Float = 0
     
-    // Whole-clip move — equivalent of Android's ghost-drag in `handleClipInteraction`'s
-    // DragContext, simplified for SwiftUI: horizontal movement mutates `clip.startTime`
-    // live (snapped, same as Android's ACTION_MOVE), which is safe mid-gesture since the
-    // clip stays in the same track's array the whole time. Vertical movement (dragging to
-    // a different track) is visual-only until release: reassigning `clip.trackIndex` moves
-    // it into a *different* Track's `clips` array, which would unmount/remount this view
-    // mid-drag (it's a member of a different ForEach) and kill the gesture recognizer —
-    // exactly the kind of mid-gesture surprise Android's ghost-view approach sidesteps by
-    // never touching the real view's parent until ACTION_UP. Deferring the actual
-    // `timeline.moveClip` call to `.onEnded` gets the same effect without that risk.
-    @State private var isDraggingBody = false
-    @State private var dragBodyInitialStartTime: Float = 0
-    @State private var dragBodyInitialTrackIndex: Int = 0
-    @State private var dragVerticalOffset: CGFloat = 0
-    
     // Derived values for the clip block
     var blockWidth: CGFloat {
         max(20, CGFloat(clip.duration) * pps)
@@ -1249,10 +1312,6 @@ private struct ClipBlockView: View {
         if isMultiSelected { return .orange }
         if isSelected { return .white }
         return .clear
-    }
-    
-    private func clampedTrackIndex(_ index: Int) -> Int {
-        min(max(index, 0), max(timeline.tracks.count - 1, 0))
     }
     
     var body: some View {
@@ -1275,7 +1334,7 @@ private struct ClipBlockView: View {
             // Trim handles — only for a true single selection, and hidden mid-move
             // (Android: `dragContext.clip.toggleHandlesVisibility(false)` on ACTION_MOVE
             // of the clip body, restored on ACTION_UP).
-            if isSelected && !isMultiSelected && !isDraggingBody {
+            if isSelected && !isMultiSelected && !isGhostSource {
                 // Left Handle
                 HStack {
                     ZStack {
@@ -1344,53 +1403,9 @@ private struct ClipBlockView: View {
         }
         .frame(width: blockWidth, height: 88)
         .clipped()
-        .offset(y: dragVerticalOffset)
-        .zIndex(isDraggingBody ? 10 : 0)
-        // Whole-clip move. minimumDistance keeps this from stealing the plain tap
-        // (handled by the caller's separate `.onTapGesture`) that selects the clip —
-        // Android distinguishes the two the same way, via ACTION_MOVE vs. a bare click.
-        .gesture(
-            DragGesture(minimumDistance: 8)
-                .onChanged { value in
-                    if !isDraggingBody {
-                        isDraggingBody = true
-                        dragBodyInitialStartTime = clip.startTime
-                        dragBodyInitialTrackIndex = clip.trackIndex
-                        onDragBegin()
-                    }
-                    let proposedStart = dragBodyInitialStartTime + Float(value.translation.width / pps)
-                    let trackDelta = Int((value.translation.height / trackRowHeight).rounded())
-                    let candidateTrackIndex = clampedTrackIndex(dragBodyInitialTrackIndex + trackDelta)
-                    
-                    clip.startTime = timeline.snappedStartTime(
-                        for: clip,
-                        proposedStartTime: proposedStart,
-                        candidateTrackIndex: candidateTrackIndex,
-                        currentTime: currentTime,
-                        pixelsPerSecond: pps
-                    )
-                    // Visual-only cross-track indicator — see the note on
-                    // `dragVerticalOffset` above for why the actual track reassignment
-                    // waits for `.onEnded`.
-                    dragVerticalOffset = CGFloat(candidateTrackIndex - dragBodyInitialTrackIndex) * trackRowHeight
-                }
-                .onEnded { value in
-                    let trackDelta = Int((value.translation.height / trackRowHeight).rounded())
-                    let candidateTrackIndex = clampedTrackIndex(dragBodyInitialTrackIndex + trackDelta)
-                    
-                    if candidateTrackIndex != clip.trackIndex {
-                        timeline.moveClip(clip, toTrackIndex: candidateTrackIndex)
-                    }
-                    if clip.trackIndex >= 0 && clip.trackIndex < timeline.tracks.count {
-                        timeline.tracks[clip.trackIndex].sortClips()
-                    }
-                    timeline.recalculateDuration()
-                    
-                    isDraggingBody = false
-                    dragVerticalOffset = 0
-                    onMoved()
-                }
-        )
+        // No drag gesture here on purpose: a plain touch on a clip is a tap (select) or the start of a
+        // timeline scrub. Moving a clip is a long-press + ghost, handled at the scroll-view level.
+        .opacity(isGhostSource ? 0 : 1)
     }
 }
 

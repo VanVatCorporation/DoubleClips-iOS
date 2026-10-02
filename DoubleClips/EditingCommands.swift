@@ -277,3 +277,39 @@ final class ClipPropertyCommand<T>: EditCommand {
     func execute() { setter(clip, newValue) }
     func undo() { setter(clip, oldValue) }
 }
+
+/// Drop step of Android's clip drag (EditingActivity.handleClipInteraction, ACTION_UP):
+/// new start time + new track, then re-sort and recompute the timeline end. Android has no undo
+/// for it; here a drag is a single undoable step.
+final class MoveClipCommand: EditCommand {
+    private let timeline: EditingView.Timeline
+    private let clip: EditingView.Clip
+    private let fromStart: Float
+    private let fromTrack: Int
+    private let toStart: Float
+    private let toTrack: Int
+    
+    init(timeline: EditingView.Timeline, clip: EditingView.Clip,
+         fromStart: Float, fromTrack: Int, toStart: Float, toTrack: Int) {
+        self.timeline = timeline
+        self.clip = clip
+        self.fromStart = fromStart
+        self.fromTrack = fromTrack
+        self.toStart = toStart
+        self.toTrack = toTrack
+    }
+    
+    var description: String { "Move Clip: \(clip.clipName)" }
+    
+    func execute() { apply(start: toStart, track: toTrack) }
+    func undo() { apply(start: fromStart, track: fromTrack) }
+    
+    private func apply(start: Float, track: Int) {
+        clip.startTime = start
+        timeline.moveClip(clip, toTrackIndex: track)     // no-op when the track doesn't change
+        if timeline.tracks.indices.contains(clip.trackIndex) {
+            timeline.tracks[clip.trackIndex].sortClips()
+        }
+        timeline.recalculateDuration()
+    }
+}
