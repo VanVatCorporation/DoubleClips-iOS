@@ -135,7 +135,13 @@ struct ClipWaveformView: View {
     private let barGap: CGFloat = 1
     
     var body: some View {
-        var envelope = self.envelope
+        let loadedEnvelope = self.envelope      // (own name: the .task below assigns the @State `envelope`)
+        // The canvas covers only the on-screen slice of the block (not the whole, possibly tens of
+        // thousands of points wide, clip) and is shifted into place: a huge Canvas can exceed the
+        // GPU texture limit and silently stop drawing.
+        let sliceStart = visible.lowerBound
+        let sliceWidth = max(1, visible.upperBound - visible.lowerBound)
+        
         Canvas { context, size in
             let midY = size.height / 2
             let blue = Color(red: 0x1E / 255, green: 0x90 / 255, blue: 0xFF / 255)
@@ -143,30 +149,33 @@ struct ClipWaveformView: View {
             // Faint centre line (Android: basePaint alpha 60).
             context.fill(Path(CGRect(x: 0, y: midY - 0.5, width: size.width, height: 1)),
                          with: .color(blue.opacity(60.0 / 255)))
-            guard let envelope else { return }        // still decoding: just the line
+            guard let envelope = loadedEnvelope else { return }        // still decoding: just the line
             
             let stride = barWidth + barGap
             let maxHalf = midY - 2
-            let firstBar = max(0, Int((visible.lowerBound / stride).rounded(.down)))
-            let lastBar = Int((visible.upperBound / stride).rounded(.up))
+            let firstBar = max(0, Int((sliceStart / stride).rounded(.down)))
+            let lastBar = Int(((sliceStart + sliceWidth) / stride).rounded(.up))
             guard firstBar <= lastBar else { return }
             
             for bar in firstBar...lastBar {
-                let x = CGFloat(bar) * stride
-                if x >= size.width { break }
+                let blockX = CGFloat(bar) * stride            // x inside the whole block
+                if blockX >= blockWidth { break }
                 // The bar's slice of the file: the clip's trimmed window, in source seconds.
-                let t0 = Double(startTrim) + Double(x / max(pps, 1))
-                let t1 = Double(startTrim) + Double((x + stride) / max(pps, 1))
+                let t0 = Double(startTrim) + Double(blockX / max(pps, 1))
+                let t1 = Double(startTrim) + Double((blockX + stride) / max(pps, 1))
                 let amp = CGFloat(envelope.rms(from: t0, to: t1))
                 let half = max(2, amp * maxHalf)
-                let rect = CGRect(x: x, y: midY - half, width: barWidth, height: half * 2)
+                let rect = CGRect(x: blockX - sliceStart, y: midY - half, width: barWidth, height: half * 2)
                 // Android: alpha = 10 + 245 * amp — quiet parts fade away, loud ones are solid.
                 context.fill(Path(roundedRect: rect, cornerRadius: 1),
                              with: .color(blue.opacity((10 + 245 * Double(amp)) / 255)))
             }
         }
-        .frame(width: blockWidth, height: height)
+        .frame(width: sliceWidth, height: height)
+        .offset(x: sliceStart)
+        .frame(width: blockWidth, height: height, alignment: .topLeading)
         .background(Color(hex: "#0D1B2A"))
+        .clipped()
         .task(id: url.lastPathComponent) {
             envelope = await ClipMediaCache.shared.waveform(for: url)
         }

@@ -75,7 +75,7 @@ final class ClipMediaCache {
     
     // MARK: Keys
     
-    private func fileKey(_ url: URL) -> String {
+    func fileKey(_ url: URL) -> String {
         lock.lock()
         if let known = fileKeys[url] { lock.unlock(); return known }
         lock.unlock()
@@ -170,6 +170,13 @@ final class ClipMediaCache {
         return try? generator.copyCGImage(at: CMTime(seconds: seconds, preferredTimescale: 600), actualTime: nil)
     }
     
+    // MARK: Scrub PCM cache
+    
+    /// Where the decoded PCM copy of a clip's audio lives (see ScrubAudio.extractAudio).
+    func scrubCacheURL(for url: URL) -> URL {
+        root.appendingPathComponent("scrub", isDirectory: true).appendingPathComponent("\(fileKey(url)).caf")
+    }
+    
     // MARK: Waveform
     
     /// Shared per file: split clips of one audio file (and every redraw) wait for the same single decode.
@@ -202,18 +209,22 @@ final class ClipMediaCache {
         return computed
     }
     
-    /// Decodes the whole audio track once, at 8 kHz mono (plenty for an energy envelope, and a
-    /// fraction of the decode cost of full rate), and reduces it to RMS per 5 ms.
+    /// Decodes the whole audio track once and reduces it to RMS per 5 ms.
+    ///
+    /// The time base comes from each sample buffer's REAL format (sample rate, channel count,
+    /// sample type), not from what was requested: a decoder is free to hand back something other
+    /// than the 8 kHz mono asked for. The first version divided by the requested rate; with a
+    /// 44.1/48 kHz stream that made every bin 5-6x too short, so the whole envelope covered only
+    /// the first seconds of the file — bars at the start of the clip, a flat line after it.
     private func computeEnvelope(url: URL) -> WaveformEnvelope? {
         let asset = AVURLAsset(url: url)
         guard let track = asset.tracks(withMediaType: .audio).first,
               let reader = try? AVAssetReader(asset: asset) else { return nil }
         
-        let sampleRate = 8_000
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
             AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: sampleRate,
-            AVNumberOfChannelsKey: 1,                       // the decoder mixes channels down for us
+            AVSampleRateKey: 8_000,                         // a request; honoured or not, we read the truth below
+            AVNumberOfChannelsKey: 1,
             AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false,
             AVLinearPCMIsBigEndianKey: false,
@@ -223,22 +234,38 @@ final class ClipMediaCache {
         reader.add(output)
         guard reader.startReading() else { return nil }
         
-        let samplesPerBin = sampleRate / Self.binsPerSecond
         var values: [UInt16] = []
         var energy = 0.0
-        var inBin = 0
+        var sampleCount = 0
+        var currentBin = 0
+        var frameBase = 0                                   // frames consumed by earlier buffers
+        var seenRate = 0.0, seenChannels = 0
         
         func closeBin() {
-            let rms = (energy / Double(max(inBin, 1))).squareRoot() / 32768
+            let rms = (energy / Double(max(sampleCount, 1))).squareRoot()
             values.append(UInt16(min(1, rms) * 65535))
             energy = 0
-            inBin = 0
+            sampleCount = 0
         }
         
         while let sample = output.copyNextSampleBuffer() {
-            guard let block = CMSampleBufferGetDataBuffer(sample) else { continue }
+            guard let description = CMSampleBufferGetFormatDescription(sample),
+                  let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(description)?.pointee,
+                  asbd.mSampleRate > 0, asbd.mChannelsPerFrame > 0,
+                  let block = CMSampleBufferGetDataBuffer(sample) else { continue }
+            
+            let channels = Int(asbd.mChannelsPerFrame)
+            let isFloat = asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
+            let bytesPerSample = Int(asbd.mBitsPerChannel) / 8
+            guard bytesPerSample == 2 || (isFloat && bytesPerSample == 4) else { continue }
+            let planar = channels > 1 && asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
+            let framesInBuffer = CMSampleBufferGetNumSamples(sample)
+            let framesPerBin = asbd.mSampleRate / Double(Self.binsPerSecond)
+            seenRate = asbd.mSampleRate
+            seenChannels = channels
+            
             let length = CMBlockBufferGetDataLength(block)
-            guard length > 0 else { continue }
+            guard length > 0, framesInBuffer > 0 else { continue }
             var data = Data(count: length)
             let status = data.withUnsafeMutableBytes { raw -> OSStatus in
                 guard let base = raw.baseAddress else { return -1 }
@@ -247,23 +274,34 @@ final class ClipMediaCache {
             guard status == kCMBlockBufferNoErr else { continue }
             
             data.withUnsafeBytes { raw in
-                for sampleValue in raw.bindMemory(to: Int16.self) {
-                    let v = Double(sampleValue)
-                    energy += v * v
-                    inBin += 1
-                    if inBin == samplesPerBin { closeBin() }
+                // Planar buffers store channel after channel; the first plane is enough for an envelope.
+                let total = planar ? min(framesInBuffer, length / bytesPerSample) : length / bytesPerSample
+                for index in 0..<total {
+                    let value: Double = isFloat
+                        ? Double(raw.load(fromByteOffset: index * 4, as: Float.self))
+                        : Double(raw.load(fromByteOffset: index * 2, as: Int16.self)) / 32768
+                    let frame = planar ? index : index / channels
+                    let bin = Int(Double(frameBase + frame) / framesPerBin)
+                    if bin != currentBin { closeBin(); currentBin = bin }
+                    energy += value * value
+                    sampleCount += 1
                 }
             }
+            frameBase += framesInBuffer
         }
-        if inBin > 0 { closeBin() }
+        if sampleCount > 0 { closeBin() }
         
         guard reader.status != .failed, !values.isEmpty else { return nil }
+        
+        let envelopeSeconds = Double(values.count) / Double(Self.binsPerSecond)
+        let assetSeconds = asset.duration.seconds
+        print("[Waveform] \(url.lastPathComponent): decoded \(Int(seenRate)) Hz x\(seenChannels), envelope \(String(format: "%.1f", envelopeSeconds)) s vs file \(String(format: "%.1f", assetSeconds.isFinite ? assetSeconds : 0)) s")
         return WaveformEnvelope(binsPerSecond: Self.binsPerSecond, values: values)
     }
     
-    // File format: "DCW1" | UInt32 binsPerSecond | UInt32 count | count x UInt16 (little endian).
+    // File format ("DCW2": v1 files had a wrong time base and are ignored): "DCW2" | UInt32 binsPerSecond | UInt32 count | count x UInt16 (little endian).
     private func writeEnvelope(_ envelope: WaveformEnvelope, to url: URL) {
-        var data = Data("DCW1".utf8)
+        var data = Data("DCW2".utf8)
         for number in [UInt32(envelope.binsPerSecond), UInt32(envelope.values.count)] {
             withUnsafeBytes(of: number.littleEndian) { data.append(contentsOf: $0) }
         }
@@ -274,7 +312,7 @@ final class ClipMediaCache {
     
     private func readEnvelope(at url: URL) -> WaveformEnvelope? {
         guard let data = try? Data(contentsOf: url), data.count >= 12,
-              data.prefix(4) == Data("DCW1".utf8) else { return nil }
+              data.prefix(4) == Data("DCW2".utf8) else { return nil }
         func le32(_ offset: Int) -> Int {
             Int(data[data.startIndex + offset]) | Int(data[data.startIndex + offset + 1]) << 8
                 | Int(data[data.startIndex + offset + 2]) << 16 | Int(data[data.startIndex + offset + 3]) << 24

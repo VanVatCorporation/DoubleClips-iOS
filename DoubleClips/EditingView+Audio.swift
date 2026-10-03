@@ -72,6 +72,11 @@ extension EditingView {
         private var files: [URL: AVAudioFile] = [:]
         private var converters: [URL: AVAudioConverter] = [:]
         private var unreadable = Set<URL>()
+        /// original media URL -> decoded PCM copy (CAF) with instant random access.
+        private var prepared: [URL: URL] = [:]
+        private var preparing = Set<URL>()
+        private var withoutAudio = Set<URL>()
+        private let prepareQueue = DispatchQueue(label: "com.vanvatcorporation.doubleclips.scrub-prepare", qos: .utility)
         private var timer: DispatchSourceTimer?
         private var idleStop: DispatchWorkItem?
         private var inFlight = 0                          // blocks scheduled but not yet played
@@ -102,6 +107,7 @@ extension EditingView {
                 self.files = self.files.filter { keep.contains($0.key) }
                 self.converters = self.converters.filter { keep.contains($0.key) }
                 self.unreadable.formIntersection(keep)
+                keep.forEach { self.ensurePrepared($0) }
             }
         }
         
@@ -271,11 +277,120 @@ extension EditingView {
             return error == nil && converted.frameLength > 0 ? converted : nil
         }
         
+        // MARK: Decoded PCM copies
+        //
+        // The desktop scrubs from per-clip preview .wav files and Android from a preview clip: random
+        // access into already-decoded audio. AVAudioFile can read audio-only files directly, but
+        // often can NOT open an .mp4/.mov that also carries video — scrubbing a video clip was
+        // silent. So every clip's audio is decoded ONCE to a CAF in Caches (in the background);
+        // until that exists, the original file is tried as a fallback.
+        
+        private func ensurePrepared(_ url: URL) {
+            guard prepared[url] == nil, !preparing.contains(url), !withoutAudio.contains(url) else { return }
+            let destination = ClipMediaCache.shared.scrubCacheURL(for: url)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                adopt(destination, for: url)
+                return
+            }
+            preparing.insert(url)
+            prepareQueue.async { [weak self] in
+                let result = ScrubAudio.extractAudio(from: url, to: destination)
+                self?.queue.async {
+                    guard let self else { return }
+                    self.preparing.remove(url)
+                    switch result {
+                    case .done: self.adopt(destination, for: url)
+                    case .noAudio: self.withoutAudio.insert(url)
+                    case .failed: break           // retried the next time the sources are set
+                    }
+                }
+            }
+        }
+        
+        private func adopt(_ cache: URL, for url: URL) {
+            prepared[url] = cache
+            files[url] = nil                      // reopen from the fast copy
+            converters[url] = nil
+            unreadable.remove(url)
+        }
+        
+        private enum Extraction { case done, noAudio, failed }
+        
+        /// Decodes the audio track to a CAF (16-bit PCM, the source's own rate and channel layout;
+        /// reads convert to 44.1 kHz stereo). Written to a temp name and renamed, so a crash or a
+        /// cancelled launch never leaves a half-written file that would later be used.
+        private static func extractAudio(from url: URL, to destination: URL) -> Extraction {
+            let asset = AVURLAsset(url: url)
+            guard let track = asset.tracks(withMediaType: .audio).first else { return .noAudio }
+            guard let reader = try? AVAssetReader(asset: asset) else { return .failed }
+            let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: 44_100,
+                AVNumberOfChannelsKey: 2,
+                AVLinearPCMBitDepthKey: 32,
+                AVLinearPCMIsFloatKey: true,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: true
+            ])
+            guard reader.canAdd(output) else { return .failed }
+            reader.add(output)
+            guard reader.startReading() else { return .failed }
+            
+            let fm = FileManager.default
+            try? fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            // AVAudioFile picks the container from the extension, so the temp file must stay ".caf".
+            let temporary = destination.deletingLastPathComponent()
+                .appendingPathComponent(destination.deletingPathExtension().lastPathComponent + ".part.caf")
+            try? fm.removeItem(at: temporary)
+            
+            var file: AVAudioFile?
+            var wroteAnything = false
+            while let sample = output.copyNextSampleBuffer() {
+                guard let description = CMSampleBufferGetFormatDescription(sample) else { continue }
+                let format = AVAudioFormat(cmAudioFormatDescription: description)
+                let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sample))
+                guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { continue }
+                buffer.frameLength = frames
+                guard CMSampleBufferCopyPCMDataIntoAudioBufferList(
+                    sample, at: 0, frameCount: Int32(frames), into: buffer.mutableAudioBufferList) == noErr else { continue }
+                
+                if file == nil {
+                    file = try? AVAudioFile(forWriting: temporary, settings: [
+                        AVFormatIDKey: kAudioFormatLinearPCM,
+                        AVSampleRateKey: format.sampleRate,
+                        AVNumberOfChannelsKey: Int(format.channelCount),
+                        AVLinearPCMBitDepthKey: 16,
+                        AVLinearPCMIsFloatKey: false,
+                        AVLinearPCMIsBigEndianKey: false
+                    ], commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+                    if file == nil { reader.cancelReading(); return .failed }
+                }
+                do {
+                    try file?.write(from: buffer)
+                    wroteAnything = true
+                } catch {
+                    reader.cancelReading()
+                    file = nil
+                    try? fm.removeItem(at: temporary)
+                    return .failed
+                }
+            }
+            file = nil                            // closes the file (flushes the header)
+            
+            guard reader.status == .completed, wroteAnything else {
+                try? fm.removeItem(at: temporary)
+                return wroteAnything ? .failed : .noAudio
+            }
+            try? fm.removeItem(at: destination)
+            do { try fm.moveItem(at: temporary, to: destination) } catch { return .failed }
+            return .done
+        }
+        
         private func openFile(_ url: URL) -> AVAudioFile? {
             if let file = files[url] { return file }
             if unreadable.contains(url) { return nil }
             do {
-                let file = try AVAudioFile(forReading: url)
+                let file = try AVAudioFile(forReading: prepared[url] ?? url)
                 files[url] = file
                 return file
             } catch {

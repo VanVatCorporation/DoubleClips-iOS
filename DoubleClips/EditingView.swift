@@ -52,6 +52,9 @@ struct EditingView: View {
     // Canvas paused alert
     @State private var isCanvasPaused: Bool = false
     
+    // Export sheet (Android: ExportActivity) — see ExportSheetView.swift
+    @State private var showExport = false
+    
     enum ToolbarMode {
         case `default`, clip, track, clips
     }
@@ -151,7 +154,7 @@ struct EditingView: View {
                                 Spacer()
                                 
                                 // Export button (android:id="exportButton")
-                                Button(action: { /* Launch export */ }) {
+                                Button(action: { launchExport() }) {
                                     Text("EXPORT")
                                         .font(.system(size: 14, weight: .bold))
                                         .foregroundColor(.white)
@@ -243,13 +246,13 @@ struct EditingView: View {
                         VStack(spacing: 0) {
                             // ── Ruler row — fixed, not part of vertical scroll ──
                             HStack(spacing: 0) {
-                                Color(hex: "#1A1A1A").frame(width: 50, height: 20) // blank spacer under label col
+                                Color(hex: "#1A1A1A").frame(width: Constants.TRACK_LABEL_WIDTH, height: 20) // blank spacer under label col
                                 TimelineRulerView(
                                     currentTime: engine.currentTime,
                                     totalDuration: Double(timeline.duration),
                                     pps: pixelsPerSecond * pinchScale
                                 )
-                                .frame(width: geo.size.width - 50, height: 20)
+                                .frame(width: geo.size.width - Constants.TRACK_LABEL_WIDTH, height: 20)
                             }
                             .frame(height: 20)
                             
@@ -267,15 +270,15 @@ struct EditingView: View {
                                             Image(systemName: "plus")
                                                 .font(.system(size: 20, weight: .bold))
                                                 .foregroundColor(.white)
-                                                .frame(width: 50, height: 100)
+                                                .frame(width: Constants.TRACK_LABEL_WIDTH, height: Constants.TRACK_HEIGHT)
                                                 .background(Color(hex: "#222222"))
                                         }
                                     }
-                                    .frame(width: 50)
+                                    .frame(width: Constants.TRACK_LABEL_WIDTH)
                                     .background(Color(hex: "#1A1A1A"))
                                     
                                     // Horizontal scroll for clip rows — android:id="trackHorizontalScrollView"
-                                    // centerOffset = half the track-area width (geo.size.width - 50dp label col)
+                                    // centerOffset = half the track-area width (geo.size.width - Constants.TRACK_LABEL_WIDTHdp label col)
                                     // Mirrors Android: prepend a leading spacer so time=0 lands under the
                                     // fixed center playhead when scrollOffset == 0.
                                     //
@@ -286,15 +289,15 @@ struct EditingView: View {
                                     // ruler appeared frozen while the content visibly scrolled. Swapped for
                                     // a thin UIScrollView wrapper (TrackingHScrollView below), whose
                                     // scrollViewDidScroll fires every frame, guaranteed.
-                                    let centerOffset = (geo.size.width - 50) / 2
+                                    let centerOffset = (geo.size.width - Constants.TRACK_LABEL_WIDTH) / 2
                                     let effectivePPS = pixelsPerSecond * pinchScale
                                     // Content width tied to timeline.duration (same basis the ruler uses),
                                     // NOT to however wide the clips happen to be. This keeps the
                                     // scrollable range and the ruler in sync, and guarantees there's
                                     // always enough width to scroll to the actual end of the timeline.
-                                    let trackContentWidth = max(geo.size.width - 50, CGFloat(timeline.duration) * effectivePPS)
+                                    let trackContentWidth = max(geo.size.width - Constants.TRACK_LABEL_WIDTH, CGFloat(timeline.duration) * effectivePPS)
                                     let scrollableContentWidth = trackContentWidth + centerOffset * 2
-                                    let contentHeight = CGFloat(timeline.tracks.count + 1) * 100
+                                    let contentHeight = CGFloat(timeline.tracks.count + 1) * Constants.TRACK_HEIGHT
 
                                     TrackingHScrollView(
                                         offset: Binding(
@@ -351,7 +354,7 @@ struct EditingView: View {
                                                     draggingClipID: clipGhost?.clip.id,
                                                     media: ClipMediaContext(projectPath: project.projectPath,
                                                                             scrollOffset: timelineScrollOffset,
-                                                                            viewportWidth: geo.size.width - 50,
+                                                                            viewportWidth: geo.size.width - Constants.TRACK_LABEL_WIDTH,
                                                                             centerOffset: centerOffset),
                                                     onClipTap: { clip in selectingClip(clip) },
                                                     onTap: { selectingTrack(track) },
@@ -361,7 +364,7 @@ struct EditingView: View {
                                             }
                                             // Blank spacer track — android:id="addNewTrackBlankTrackSpacer"
                                             Color(hex: "#222222")
-                                                .frame(width: trackContentWidth, height: 100)
+                                                .frame(width: trackContentWidth, height: Constants.TRACK_HEIGHT)
                                                 .onTapGesture { addTrack() }
                                         }
                                         // Ghost lives in the same coordinate space as the rows (origin = time 0
@@ -371,7 +374,7 @@ struct EditingView: View {
                                                 ClipGhostView(ghost: ghost, pps: effectivePPS,
                                                               media: ClipMediaContext(projectPath: project.projectPath,
                                                                                       scrollOffset: timelineScrollOffset,
-                                                                                      viewportWidth: geo.size.width - 50,
+                                                                                      viewportWidth: geo.size.width - Constants.TRACK_LABEL_WIDTH,
                                                                                       centerOffset: centerOffset))
                                             }
                                         }
@@ -383,7 +386,7 @@ struct EditingView: View {
                                         .padding(.leading, centerOffset)
                                         .padding(.trailing, centerOffset)
                                     }
-                                    .frame(width: geo.size.width - 50, height: contentHeight)
+                                    .frame(width: geo.size.width - Constants.TRACK_LABEL_WIDTH, height: contentHeight)
                                     .simultaneousGesture(
                                         MagnificationGesture()
                                             .updating($pinchScale) { currentState, gestureState, _ in
@@ -412,7 +415,7 @@ struct EditingView: View {
                             Rectangle()
                                 .fill(Color.red)
                                 .frame(width: 2)
-                                .offset(x: 50 + (geo.size.width - 50) / 2)
+                                .offset(x: Constants.TRACK_LABEL_WIDTH + (geo.size.width - Constants.TRACK_LABEL_WIDTH) / 2)
                                 .allowsHitTesting(false),
                             alignment: .leading
                         )
@@ -525,6 +528,9 @@ struct EditingView: View {
         } message: {
             Text(loadNote ?? "")
         }
+        .sheet(isPresented: $showExport) {
+            ExportSheetView(project: project, timeline: timeline, settings: engine.settings)
+        }
         .fileImporter(
             isPresented: $showFileImporter,
             allowedContentTypes: [.audiovisualContent, .image],
@@ -618,6 +624,15 @@ struct EditingView: View {
         updateToolbarState()
     }
     
+    /// EXPORT button (Android: exportButton -> ExportActivity). Stops playback, makes sure the project
+    /// on disk matches what is about to be rendered, then opens the export sheet.
+    private func launchExport() {
+        engine.pause()
+        timeline.recalculateDuration()
+        saveNow()
+        showExport = true
+    }
+    
     /// Rebuilds the AVPlayer composition so the preview reflects the timeline's current
     /// state — called after every structural edit (move/split/delete/clone/undo/redo),
     /// since none of those otherwise touch the player.
@@ -666,8 +681,8 @@ struct EditingView: View {
     // MARK: - Persistence (Android: Timeline.loadTimeline / saveTimeline)
     
     /// Read project.timeline + project.settings. Runs once; never in SwiftUI previews.
-    private func loadProjectFromDisk() {
-        guard !hasLoadedProject, !isPreview else { return }
+    private func loadProjectFromDisk() { 
+        guard !hasLoadedProject/*, !isPreview*/ else { return }
         let result = TimelineStore.load(project: project)
         timeline.tracks = result.timeline.tracks
         timeline.duration = result.timeline.duration
@@ -1207,7 +1222,7 @@ private struct TrackLabelView: View {
                 .font(.system(size: 11, weight: .bold))
                 .foregroundColor(.white.opacity(0.7))
         }
-        .frame(width: 50, height: 100)
+        .frame(width: Constants.TRACK_LABEL_WIDTH, height: Constants.TRACK_HEIGHT)
         .background(Color(hex: "#222222"))
         .overlay(
             Rectangle()
@@ -1233,7 +1248,7 @@ private struct TrackRowView: View {
     /// across the whole timeline, and cross-track drops need every track to reassign into.
     @ObservedObject var timeline: EditingView.Timeline
     var currentTime: Float
-    var trackRowHeight: CGFloat = 100
+    var trackRowHeight: CGFloat = Constants.TRACK_HEIGHT
     /// The clip whose ghost is being dragged: its real block is hidden meanwhile (Android: INVISIBLE).
     var draggingClipID: UUID? = nil
     /// Project path + scroll window: lets each block build only the thumbnails/bars on screen.
@@ -1270,15 +1285,14 @@ private struct TrackRowView: View {
                     onMoved: onClipMoved,
                     onDragBegin: onClipDragBegin
                 )
-                // Vertical inset centers the 88pt-tall block in the 100pt row,
-                // matching the HStack's previous default .center alignment.
-                .offset(x: CGFloat(clip.startTime) * pps, y: 6)
+                // Vertical inset centres the clip block in the row (TRACK_HEIGHT - 2 * inset tall).
+                .offset(x: CGFloat(clip.startTime) * pps, y: Constants.TRACK_CLIP_INSET)
                 .onTapGesture {
                     onClipTap(clip)
                 }
             }
         }
-        .frame(width: rowWidth, height: 100, alignment: .leading)
+        .frame(width: rowWidth, height: Constants.TRACK_HEIGHT, alignment: .leading)
         .overlay(
             Rectangle()
                 .stroke(isSelected ? Color.mdPrimary : Color.white.opacity(0.08), lineWidth: isSelected ? 2 : 0.5)
@@ -1303,7 +1317,7 @@ private struct ClipBlockView: View {
     var media: ClipMediaContext = .empty
     var pps: CGFloat
     var currentTime: Float
-    var trackRowHeight: CGFloat = 100
+    var trackRowHeight: CGFloat = Constants.TRACK_HEIGHT
     /// Fired once a move/resize commits, so the parent can rebuild the preview.
     var onMoved: () -> Void = {}
     /// Fired the instant a whole-clip move drag begins (not on trim-handle drags),
@@ -1337,7 +1351,7 @@ private struct ClipBlockView: View {
             
             // Video/image: tile strip. Audio: waveform. Others: nothing (the plain fill above).
             ClipVisualContent(clip: clip, displayStartTime: clip.startTime, pps: pps,
-                              blockWidth: blockWidth, height: 88, media: media)
+                              blockWidth: blockWidth, height: Constants.TRACK_CLIP_HEIGHT, media: media)
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             
             // Over thumbnails/waveforms the label sits top-left on a soft shadow so it stays readable.
@@ -1426,7 +1440,7 @@ private struct ClipBlockView: View {
                 }
             }
         }
-        .frame(width: blockWidth, height: 88)
+        .frame(width: blockWidth, height: Constants.TRACK_CLIP_HEIGHT)
         .clipped()
         // No drag gesture here on purpose: a plain touch on a clip is a tap (select) or the start of a
         // timeline scrub. Moving a clip is a long-press + ghost, handled at the scroll-view level.

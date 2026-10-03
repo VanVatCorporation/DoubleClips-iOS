@@ -140,8 +140,14 @@ struct TemplateView: View {
             DispatchQueue.main.async {
                 isLoading = false
                 guard let data = data, error == nil else { return }
-                if let decoded = try? JSONDecoder().decode([TemplateData].self, from: data) {
-                    self.templates = decoded
+                // Tolerant: a malformed template is skipped (and logged), never the whole list.
+                if let result = TemplateData.decodeList(from: data) {
+                    if result.skipped > 0 {
+                        print("[Templates] Skipped \(result.skipped) malformed/duplicate template(s); loaded \(result.templates.count).")
+                    }
+                    self.templates = result.templates
+                } else {
+                    print("[Templates] Response was not a JSON array; keeping the current list.")
                 }
             }
         }.resume()

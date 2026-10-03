@@ -73,10 +73,10 @@ extension EditingView {
     }
     
     enum ClipGhostMath {
-        static let rowHeight: CGFloat = 100
-        /// Clip blocks sit 6 pt below the row's top and are 88 pt tall (see TrackRowView).
-        static let blockInset: CGFloat = 6
-        static let blockHeight: CGFloat = 88
+        // All derived from Constants (TRACK_HEIGHT & co.), the same numbers TrackRowView lays out with.
+        static var rowHeight: CGFloat { Constants.TRACK_HEIGHT }
+        static var blockInset: CGFloat { Constants.TRACK_CLIP_INSET }
+        static var blockHeight: CGFloat { Constants.TRACK_CLIP_HEIGHT }
         
         /// `point` is in the timeline scroll view's content coordinates:
         /// x = centerOffset + time * pps, y = trackIndex * rowHeight (+ inset).
