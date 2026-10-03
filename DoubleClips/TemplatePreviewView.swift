@@ -87,6 +87,8 @@ struct TemplatePreviewItemView: View {
     @State private var bookmarkCount: Int = 0
     
     @State private var showLoginAlert: Bool = false
+    // "Use template" -> TemplateExportView (Android: TemplateExportActivity)
+    @State private var showTemplateExport: Bool = false
     
     // API Function
     func toggleLike() {
@@ -332,8 +334,8 @@ struct TemplatePreviewItemView: View {
             VStack {
                 Spacer()
                 Button(action: {
-                    print("Use Template: \(template.templateTitle)")
-                    // Navigate to TemplateExportActivity equivalent
+                    isPlaying = false          // stop the preview video behind the new screen
+                    showTemplateExport = true
                 }) {
                     Text("Use template")
                         .font(.headline)
@@ -354,6 +356,9 @@ struct TemplatePreviewItemView: View {
             bookmarkCount = template.bookmarkCount
             isLiked = template.isLiked ?? false
             isBookmarked = template.isBookmarked ?? false
+        }
+        .fullScreenCover(isPresented: $showTemplateExport) {
+            TemplateExportView(template: template)
         }
         .alert("Login Required", isPresented: $showLoginAlert) {
             Button("Cancel", role: .cancel) { }

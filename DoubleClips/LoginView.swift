@@ -183,20 +183,20 @@ struct LoginView: View {
 }
 
 // Custom Checkbox Toggle Style
-struct CheckboxToggleStyle: ToggleStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack {
-            Image(systemName: configuration.isOn ? "checkmark.square.fill" : "square")
-                .foregroundColor(configuration.isOn ? .mdPrimary : .secondary)
-                .font(.system(size: 22))
-                .onTapGesture {
-                    configuration.isOn.toggle()
-                }
-            
-            configuration.label
-        }
-    }
-}
+//struct CheckboxToggleStyle: ToggleStyle {
+//    func makeBody(configuration: Configuration) -> some View {
+//        HStack {
+//            Image(systemName: configuration.isOn ? "checkmark.square.fill" : "square")
+//                .foregroundColor(configuration.isOn ? .mdPrimary : .secondary)
+//                .font(.system(size: 22))
+//                .onTapGesture {
+//                    configuration.isOn.toggle()
+//                }
+//            
+//            configuration.label
+//        }
+//    }
+//}
 
 #Preview {
     NavigationStack {

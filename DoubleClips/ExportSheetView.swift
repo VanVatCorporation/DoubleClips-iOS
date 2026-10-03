@@ -493,7 +493,7 @@ struct ExportSettingsSheet: View {
 
 // MARK: - Reusable pieces (Android: SectionView + 52dp rows)
 
-private struct ExportSection<Content: View>: View {
+struct ExportSection<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
     
@@ -511,13 +511,13 @@ private struct ExportSection<Content: View>: View {
     }
 }
 
-private struct RowDivider: View {
+struct RowDivider: View {
     var body: some View {
         Divider().padding(.leading, 50)
     }
 }
 
-private struct SettingRow<Trailing: View>: View {
+struct SettingRow<Trailing: View>: View {
     let icon: String
     let label: String
     @ViewBuilder let trailing: Trailing
@@ -560,7 +560,7 @@ private struct InfoRow: View {
     }
 }
 
-private struct CheckboxToggleStyle: ToggleStyle {
+struct CheckboxToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         Button { configuration.isOn.toggle() } label: {
             HStack(spacing: 5) {
