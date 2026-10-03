@@ -528,8 +528,12 @@ struct EditingView: View {
         } message: {
             Text(loadNote ?? "")
         }
-        .sheet(isPresented: $showExport) {
-            ExportSheetView(project: project, timeline: timeline, settings: engine.settings)
+        .fullScreenCover(isPresented: $showExport, onDismiss: {
+            // The Export Settings panel can change resolution / fps / stretch in project.settings:
+            // rebuild so the preview canvas and its gesture geometry follow.
+            if !timeline.tracks.isEmpty { rebuildPreview(markDirty: false) }
+        }) {
+            ExportSheetView(project: project, timeline: timeline)
         }
         .fileImporter(
             isPresented: $showFileImporter,
@@ -681,7 +685,7 @@ struct EditingView: View {
     // MARK: - Persistence (Android: Timeline.loadTimeline / saveTimeline)
     
     /// Read project.timeline + project.settings. Runs once; never in SwiftUI previews.
-    private func loadProjectFromDisk() { 
+    private func loadProjectFromDisk() {
         guard !hasLoadedProject/*, !isPreview*/ else { return }
         let result = TimelineStore.load(project: project)
         timeline.tracks = result.timeline.tracks

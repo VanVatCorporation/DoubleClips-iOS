@@ -18,55 +18,44 @@ import Combine
 // Because the preview and the exporter share the builder and the compositor, a frame you see in
 // the editor is the frame you get in the file.
 
-// MARK: Quality / plan
+// MARK: Plan / stats
 
-enum ExportQuality: String, CaseIterable, Identifiable {
-    case standard, high, maximum
-    
-    var id: String { rawValue }
-    
-    var title: String {
-        switch self {
-        case .standard: return "Standard"
-        case .high:     return "High"
-        case .maximum:  return "Maximum"
-        }
-    }
-    
-    /// Lower CRF = better quality. Standard uses the project's own CRF (Android's meaning of it).
-    func crf(projectCRF: Int) -> Int {
-        switch self {
-        case .standard: return projectCRF
-        case .high:     return max(0, projectCRF - Constants.EXPORT_CRF_STEP_HIGH)
-        case .maximum:  return max(0, projectCRF - Constants.EXPORT_CRF_STEP_MAX)
-        }
-    }
-}
-
+/// What will be rendered, derived from project.settings (Export Settings).
 struct ExportPlan {
     let width: Int
     let height: Int
     let frameRate: Int
-    let videoBitrate: Int
+    let videoBitrate: Int          // bits per second
     let durationSeconds: Double
+    /// True when the requested size was odd and had to be rounded down (H.264 needs even sizes).
+    let sizeWasRounded: Bool
     
-    /// Rough size of the finished file (video + audio), for the pre-export estimate and the
-    /// free-space check. VBR output lands close to, but not exactly on, this.
+    var bitrateMbps: Double { Double(videoBitrate) / 1_000_000 }
+    var totalFrames: Int { max(1, Int((durationSeconds * Double(frameRate)).rounded(.up))) }
+    
+    /// Rough size of the finished file (video + audio), for the estimate and the free-space check.
     var estimatedBytes: Int64 {
         Int64(Double(videoBitrate + Constants.EXPORT_AUDIO_BITRATE) / 8.0 * max(durationSeconds, 0))
     }
     
-    static func make(settings: EditingView.VideoSettings, quality: ExportQuality, duration: Double) -> ExportPlan {
-        // H.264 wants even dimensions; the render size is set to exactly this before export.
+    /// Android's "Bitrate (HW)" field is the hardware encoder's target in Mbps, so it is used as is.
+    static func make(settings: EditingView.VideoSettings, duration: Double) -> ExportPlan {
         let w = max(2, settings.videoWidth & ~1)
         let h = max(2, settings.videoHeight & ~1)
         let fps = max(1, settings.frameRate)
-        let crf = Double(quality.crf(projectCRF: settings.crf))
-        let bitsPerPixel = Constants.EXPORT_BPP_AT_CRF23 * pow(2.0, (23.0 - crf) / 6.0)
-        let raw = Double(w) * Double(h) * Double(fps) * bitsPerPixel
-        let clamped = min(max(Int(raw), Constants.EXPORT_MIN_VIDEO_BITRATE), Constants.EXPORT_MAX_VIDEO_BITRATE)
-        return ExportPlan(width: w, height: h, frameRate: fps, videoBitrate: clamped, durationSeconds: duration)
+        let mbps = min(max(settings.bitrate, Constants.EXPORT_MIN_BITRATE_MBPS), Constants.EXPORT_MAX_BITRATE_MBPS)
+        return ExportPlan(width: w, height: h, frameRate: fps, videoBitrate: mbps * 1_000_000,
+                          durationSeconds: duration,
+                          sizeWasRounded: w != settings.videoWidth || h != settings.videoHeight)
     }
+}
+
+/// Live numbers for the status line: "(frame/total frames - fps frames per second) (percent%)".
+struct ExportStats: Equatable {
+    var frame = 0
+    var totalFrames = 0
+    var fps = 0.0
+    var percent = 0.0
 }
 
 struct ExportError: LocalizedError {
@@ -93,6 +82,13 @@ private final class ExportControl {
     }
 }
 
+/// Frame counter for the status line; only touched on the video pump queue.
+private final class FrameMeter {
+    var frames = 0
+    var lastFrames = 0
+    var lastTime = Date()
+}
+
 /// Guards against a pump closure finishing its input twice.
 private final class PumpState {
     var done = false
@@ -110,14 +106,23 @@ final class TimelineExporter: ObservableObject {
         case cancelled
     }
     
+    static let taskName = "Compositing Video (Core Image)"
+    
     @Published private(set) var state: State = .idle
-    @Published private(set) var progress: Double = 0
+    @Published private(set) var stats = ExportStats()
+    /// Android's log section: "Enable log" / "Truncate log" are read at the moment a line is appended.
+    @Published private(set) var logText = ""
+    @Published var logEnabled = true
+    @Published var truncateLog = true
+    
+    var progress: Double { min(max(stats.percent / 100, 0), 1) }
     
     private let workQueue = DispatchQueue(label: "com.vanvatcorporation.doubleclips.export", qos: .userInitiated)
     private var control = ExportControl()
     private var reader: AVAssetReader?
     private var writer: AVAssetWriter?
     private var backgroundObserver: NSObjectProtocol?
+    private var startedAt = Date()
     
     deinit {
         if let observer = backgroundObserver { NotificationCenter.default.removeObserver(observer) }
@@ -129,7 +134,7 @@ final class TimelineExporter: ObservableObject {
         guard state != .exporting else { return }
         
         guard let videoComposition = built.videoComposition, built.composition.duration.seconds > 0 else {
-            state = .failed("Nothing to export yet. Add a video, image or text clip to the timeline first.")
+            failEarly("Nothing to export yet. Add a video, image or text clip to the timeline first.")
             return
         }
         
@@ -137,14 +142,14 @@ final class TimelineExporter: ObservableObject {
         do {
             url = try Self.prepareOutputURL(fileName: fileName)
         } catch {
-            state = .failed(error.localizedDescription)
+            failEarly(error.localizedDescription)
             return
         }
         
         // Free space: the estimate plus a safety margin, so a full disk fails here, not at 90 %.
         if let available = Self.availableBytes(), available < Int64(Double(plan.estimatedBytes) * 1.3) + 50_000_000 {
-            state = .failed("Not enough free storage. This export needs about "
-                            + Self.formatBytes(plan.estimatedBytes) + " of free space.")
+            failEarly("Not enough free storage. This export needs about "
+                      + Self.formatBytes(plan.estimatedBytes) + " of free space.")
             return
         }
         
@@ -153,8 +158,16 @@ final class TimelineExporter: ObservableObject {
         videoComposition.renderSize = CGSize(width: plan.width, height: plan.height)
         
         control = ExportControl()
-        progress = 0
+        stats = ExportStats(totalFrames: plan.totalFrames)
+        logText = ""
+        startedAt = Date()
         state = .exporting
+        appendLog(String(format: "Export started: %d×%d @ %d fps, %.1f Mbps H.264 (hardware), %.2fs, %d frames, %d layer(s)",
+                         plan.width, plan.height, plan.frameRate, plan.bitrateMbps,
+                         plan.durationSeconds, plan.totalFrames, built.layerCount))
+        if plan.sizeWasRounded {
+            appendLog("Output size rounded down to even dimensions: \(plan.width)×\(plan.height)")
+        }
         
         // Keep the screen on, and stop cleanly if the app is backgrounded: iOS doesn't let apps
         // submit GPU work (Core Image / Metal) from the background, so the render would fail anyway.
@@ -182,8 +195,14 @@ final class TimelineExporter: ObservableObject {
     
     func reset() {
         guard state != .exporting else { return }
-        progress = 0
+        stats = ExportStats()
+        logText = ""
         state = .idle
+    }
+    
+    private func failEarly(_ message: String) {
+        appendLog("Export failed: \(message)")
+        state = .failed(message)
     }
     
     // MARK: Pipeline (work queue)
@@ -224,6 +243,9 @@ final class TimelineExporter: ObservableObject {
                     audioOutput = output
                 }
             }
+            log(audioOutput != nil
+                ? "Audio: mixing \(audioTracks.count) track(s) → AAC \(Constants.EXPORT_AUDIO_BITRATE / 1000) kbps"
+                : "Audio: none (silent export)")
             
             // ── Writer: H.264 + AAC in .mp4
             let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
@@ -269,6 +291,7 @@ final class TimelineExporter: ObservableObject {
                 throw writer.error ?? ExportError("The output file could not be created.")
             }
             writer.startSession(atSourceTime: .zero)
+            log("Encoder ready, rendering…")
             
             DispatchQueue.main.async { [weak self] in
                 self?.reader = reader
@@ -276,14 +299,34 @@ final class TimelineExporter: ObservableObject {
             }
             
             // ── Pump both streams until they run dry.
-            let total = max(composition.duration.seconds, 0.001)
             let group = DispatchGroup()
+            let meter = FrameMeter()
             
-            pump(output: videoOutput, input: videoInput, label: "video", group: group, control: control) { [weak self] pts in
-                self?.report(progress: pts / total)
-            }
+            pump(output: videoOutput, input: videoInput, label: "video", group: group, control: control,
+                 onSample: { [weak self] pts in
+                    meter.frames += 1
+                    let n = meter.frames
+                    if n % Constants.EXPORT_PROGRESS_FRAME_INTERVAL == 0 {
+                        let now = Date()
+                        let elapsed = now.timeIntervalSince(meter.lastTime)
+                        let fps = elapsed > 0 ? Double(n - meter.lastFrames) / elapsed : 0
+                        meter.lastTime = now
+                        meter.lastFrames = n
+                        self?.publish(frame: n, total: plan.totalFrames, fps: fps)
+                    }
+                    if n % Constants.EXPORT_LOG_FRAME_INTERVAL == 0 {
+                        self?.log(String(format: "Core Image: frame %d/%d (t=%.2fs)", n, max(plan.totalFrames, n), pts))
+                    }
+                 },
+                 onFinish: { [weak self] in
+                    self?.log("Video: \(meter.frames) frames composited")
+                    let elapsed = Date().timeIntervalSince(self?.startedAt ?? Date())
+                    self?.publish(frame: meter.frames, total: plan.totalFrames,
+                                  fps: elapsed > 0 ? Double(meter.frames) / elapsed : 0)
+                 })
             if let audioOutput, let audioInput {
-                pump(output: audioOutput, input: audioInput, label: "audio", group: group, control: control, onSample: nil)
+                pump(output: audioOutput, input: audioInput, label: "audio", group: group, control: control,
+                     onSample: nil, onFinish: { [weak self] in self?.log("Audio: stream finished") })
             }
             
             group.notify(queue: workQueue) { [weak self] in
@@ -313,6 +356,7 @@ final class TimelineExporter: ObservableObject {
                     return
                 }
                 
+                self.log("Finalizing file…")
                 writer.finishWriting {
                     if writer.status == .completed {
                         self.finish(.finished(url))
@@ -330,7 +374,8 @@ final class TimelineExporter: ObservableObject {
     
     /// Moves samples from a reader output to a writer input whenever the writer is ready.
     private func pump(output: AVAssetReaderOutput, input: AVAssetWriterInput, label: String,
-                      group: DispatchGroup, control: ExportControl, onSample: ((Double) -> Void)?) {
+                      group: DispatchGroup, control: ExportControl, onSample: ((Double) -> Void)?,
+                      onFinish: @escaping () -> Void) {
         let queue = DispatchQueue(label: "com.vanvatcorporation.doubleclips.export.\(label)")
         let state = PumpState()
         group.enter()
@@ -353,6 +398,7 @@ final class TimelineExporter: ObservableObject {
                 }
                 if !keepGoing {
                     state.done = true
+                    if !control.isCancelled { onFinish() }
                     input.markAsFinished()
                     group.leave()
                     return
@@ -363,23 +409,54 @@ final class TimelineExporter: ObservableObject {
     
     // MARK: Main-thread updates
     
-    private var lastReported: Double = -1
     
-    private func report(progress value: Double) {
-        let clamped = min(max(value, 0), 1)
+    /// Thread-safe: log lines are queued onto the main thread in order.
+    func log(_ message: String) {
+        DispatchQueue.main.async { [weak self] in self?.appendLog(message) }
+    }
+    
+    /// Main thread. "Enable log" / "Truncate log" are honored at the moment a line is added (Android).
+    private func appendLog(_ message: String) {
+        guard logEnabled else { return }
+        var text = logText.isEmpty ? message : logText + "\n" + message
+        let limit = Constants.DEFAULT_LOGGING_LIMIT_CHARACTERS
+        if truncateLog, text.count > limit {
+            text = String(text.suffix(limit))
+            if let newline = text.firstIndex(of: "\n") {      // don't start mid-line
+                text = String(text[text.index(after: newline)...])
+            }
+        }
+        logText = text
+    }
+    
+    private func publish(frame: Int, total: Int, fps: Double) {
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.state == .exporting, clamped - self.lastReported >= 0.005 || clamped >= 1 else { return }
-            self.lastReported = clamped
-            self.progress = clamped
+            guard let self, self.state == .exporting else { return }
+            let totalFrames = max(total, frame)
+            self.stats = ExportStats(frame: frame, totalFrames: totalFrames, fps: fps,
+                                     percent: min(100, Double(frame) * 100 / Double(max(totalFrames, 1))))
         }
     }
     
     private func finish(_ newState: State) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            if case .finished = newState { self.progress = 1 }
+            switch newState {
+            case .finished(let url):
+                self.stats.percent = 100
+                let elapsed = Date().timeIntervalSince(self.startedAt)
+                let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
+                self.appendLog(String(format: "Export finished in %.1fs (avg %.2f fps) — %@",
+                                      elapsed, elapsed > 0 ? Double(self.stats.frame) / elapsed : 0,
+                                      Self.formatBytes(size)))
+            case .failed(let message):
+                self.appendLog("Export failed: \(message)")
+            case .cancelled:
+                self.appendLog("Export cancelled.")
+            default:
+                break
+            }
             self.state = newState
-            self.lastReported = -1
             self.reader = nil
             self.writer = nil
             UIApplication.shared.isIdleTimerDisabled = false

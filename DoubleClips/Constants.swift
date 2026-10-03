@@ -56,18 +56,20 @@ enum Constants {
     // MARK: - Export (iOS: Core Image compositor -> AVAssetReader -> AVAssetWriter, H.264 + AAC)
     /// Folder (inside the temporary directory) that holds finished exports until shared or saved.
     static let EXPORT_TEMP_DIRECTORY        = "DoubleClips-Export"
-    /// x264-style CRF -> bits-per-pixel-per-frame: bpp = EXPORT_BPP_AT_CRF23 * 2^((23 - crf) / 6).
-    /// The hardware H.264 encoder is a bit less efficient than x264, hence the generous base.
-    static let EXPORT_BPP_AT_CRF23: Double  = 0.15
-    static let EXPORT_MIN_VIDEO_BITRATE: Int = 1_000_000
-    static let EXPORT_MAX_VIDEO_BITRATE: Int = 100_000_000
-    /// "High" / "Maximum" quality = the project's CRF minus this many steps (lower CRF = better).
-    static let EXPORT_CRF_STEP_HIGH: Int    = 6
-    static let EXPORT_CRF_STEP_MAX: Int     = 12
+    /// Allowed ranges for the Export Settings fields (values outside are clamped).
+    static let EXPORT_MIN_DIMENSION: Int    = 16
+    static let EXPORT_MAX_DIMENSION: Int    = 8192
+    static let EXPORT_MIN_FRAME_RATE: Int   = 1
+    static let EXPORT_MAX_FRAME_RATE: Int   = 120
+    static let EXPORT_MIN_BITRATE_MBPS: Int = 1
+    static let EXPORT_MAX_BITRATE_MBPS: Int = 100
     static let EXPORT_AUDIO_BITRATE: Int    = 192_000
     static let EXPORT_AUDIO_SAMPLE_RATE: Double = 44_100
     /// Keyframe (IDR) interval in seconds.
     static let EXPORT_KEYFRAME_SECONDS: Int = 2
+    /// Same cadence as Android's OpenGLEditNative: progress every 5 frames, a log line every 30.
+    static let EXPORT_PROGRESS_FRAME_INTERVAL: Int = 5
+    static let EXPORT_LOG_FRAME_INTERVAL: Int      = 30
 
     // MARK: - Canvas / Snap Constants
     static let CANVAS_ROTATE_SNAP_THRESHOLD_DEGREE: Float  = 3.0   // degrees
