@@ -24,6 +24,9 @@ extension EditingView {
     enum CompositionBuilder {
 
         static func build(timeline: EditingView.Timeline, projectDir: URL) -> BuiltComposition {
+            // Bundled animations + installed packs must be in the registry before any frame is rendered
+            // (idempotent, cheap after the first call).
+            ClipAnimationStore.loadAll()
             let projectSettings = VideoSettings.load(projectPath: projectDir.path)
             
             let composition = AVMutableComposition()
@@ -50,7 +53,9 @@ extension EditingView {
                     func snapshot(_ kind: RenderLayer.Kind) -> RenderLayer {
                         RenderLayer(kind: kind, clipID: clip.id, startTime: clip.startTime,
                                     width: CGFloat(clip.width), height: CGFloat(clip.height),
-                                    baseProperties: clip.videoProperties, keyframes: clip.keyframes)
+                                    baseProperties: clip.videoProperties, keyframes: clip.keyframes,
+                                    inAnimation: clip.inAnimation, outAnimation: clip.outAnimation,
+                                    duration: clip.duration)
                     }
                     
                     switch clip.type {

@@ -18,6 +18,10 @@ import UIKit
 //   - Layers draw in track order, later tracks on top.
 //   - TEXT is centered on the canvas, offset by PosX/PosY, and ignores scale/rotation/opacity
 //     (Android draws it with ffmpeg drawtext).
+//   - Clip in / out animations (assets/animations JSON, see ClipAnimation.swift) are evaluated per
+//     frame and combined with the clip's own properties exactly as OpenGLEdit does: additive
+//     (offset, rotation, hue, brightness, temperature), multiplicative (opacity, scale, saturation),
+//     standalone (contrast, blur, warp). Videos and images only, as on Android.
 
 extension EditingView {
     
@@ -36,6 +40,11 @@ extension EditingView {
         var height: CGFloat
         var baseProperties: VideoProperties
         var keyframes: AnimatedProperty
+        /// Clip in / out animation slots (ids looked up in ClipAnimationLoader at render time) and the
+        /// clip's timeline duration, which decides how the two windows fit inside the clip.
+        var inAnimation = AnimationClip()
+        var outAnimation = AnimationClip()
+        var duration: Float = 0
     }
     
     final class CompositorInstruction: NSObject, AVVideoCompositionInstructionProtocol {
@@ -133,37 +142,46 @@ extension EditingView {
             case .video(let trackID, let preferredTransform):
                 guard let buffer = request.sourceFrame(byTrackID: trackID) else { return nil }
                 let upright = Self.upright(CIImage(cvPixelBuffer: buffer), preferredTransform)
-                return place(upright, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull)
+                return place(upright, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull,
+                             anim: Self.animationFrame(layer, at: time))
                 
             case .image(let url):
                 guard let source = Self.cachedImage(url) else { return nil }
-                return place(source, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull)
+                return place(source, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull,
+                             anim: Self.animationFrame(layer, at: time))
             }
         }
         
         /// Color adjustments (same order as FFmpegEdit: hue/sat/brightness → temperature → opacity),
         /// then the pivot-based scale/rotate/translate from OpenGLEdit.buildClipMvp.
         private func place(_ source: CIImage, layer: RenderLayer, props: VideoProperties,
-                           canvas: CGSize, stretchToFull: Bool) -> CIImage? {
+                           canvas: CGSize, stretchToFull: Bool, anim: ClipAnimationFrame) -> CIImage? {
             let srcW = source.extent.width, srcH = source.extent.height
             guard srcW > 0, srcH > 0 else { return nil }
             
             let baseW = stretchToFull ? canvas.width : (layer.width > 0 ? layer.width : srcW)
             let baseH = stretchToFull ? canvas.height : (layer.height > 0 ? layer.height : srcH)
-            let scaledW = baseW * CGFloat(props.valueScaleX)
-            let scaledH = baseH * CGFloat(props.valueScaleY)
+            // The animation's scale multiplies the clip's own (about its pivot).
+            let scaledW = baseW * CGFloat(props.valueScaleX * anim.scale)
+            let scaledH = baseH * CGFloat(props.valueScaleY * anim.scale)
             guard scaledW > 0, scaledH > 0 else { return nil }
             
-            let colored = Self.colorAdjusted(source, props)
+            var colored = Self.colorAdjusted(source, props, anim: anim)
+            // Top-centre squish (warp.* channels) happens on the clip's own box, before scale/rotate.
+            if anim.hasWarp { colored = Self.warped(colored, anim: anim) }
             
+            // Offsets are fractions of the canvas size added to PosX/PosY.
+            let posX = CGFloat(props.valuePosX) + CGFloat(anim.offsetX) * canvas.width
+            let posY = CGFloat(props.valuePosY) + CGFloat(anim.offsetY) * canvas.height
             let pivotX = CGFloat(props.valuePivotX), pivotY = CGFloat(props.valuePivotY)
             // Pivot inside the scaled clip, in Core Image's y-up space.
             let pivotLocal = CGPoint(x: pivotX * scaledW, y: scaledH - pivotY * scaledH)
             // Pivot on the canvas: located on the UNSCALED clip, so it stays put (Android's rule).
-            let pivotCanvasDown = CGPoint(x: CGFloat(props.valuePosX) + pivotX * baseW,
-                                          y: CGFloat(props.valuePosY) + pivotY * baseH)
+            let pivotCanvasDown = CGPoint(x: posX + pivotX * baseW,
+                                          y: posY + pivotY * baseH)
             let pivotCanvas = CGPoint(x: pivotCanvasDown.x, y: canvas.height - pivotCanvasDown.y)
-            let theta = CGFloat(props.value(.rotInRadians))
+            // The animation's rotation (degrees) is added to the clip's own.
+            let theta = CGFloat(props.value(.rotInRadians)) + CGFloat(anim.rotationDegrees) * .pi / 180
             
             // scale → move pivot to origin → rotate → move pivot to its canvas position.
             // Android's positive angle is clockwise on a y-down canvas = -theta in y-up space.
@@ -171,35 +189,139 @@ extension EditingView {
                 .concatenating(CGAffineTransform(translationX: -pivotLocal.x, y: -pivotLocal.y))
                 .concatenating(CGAffineTransform(rotationAngle: -theta))
                 .concatenating(CGAffineTransform(translationX: pivotCanvas.x, y: pivotCanvas.y))
-            return colored.transformed(by: transform)
+            var placed = colored.transformed(by: transform)
+            
+            // Blur sigma is a fraction of the canvas WIDTH, applied to the drawn layer in canvas
+            // pixels (Android blurs the layer after drawing it). Transparent surroundings fade in
+            // exactly as they do there; the final render crops to the canvas.
+            let sigma = CGFloat(anim.blurWidthFraction) * canvas.width
+            if sigma > 0.25 {
+                placed = placed.applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: sigma])
+            }
+            return placed
         }
         
         // MARK: Helpers
         
-        private static func colorAdjusted(_ image: CIImage, _ p: VideoProperties) -> CIImage {
+        /// Clip properties plus the animation's channels: hue / brightness / temperature add,
+        /// saturation / opacity multiply, contrast stands alone (the clip has none). The animation's
+        /// brightness is in Android's -10..10 units, which its shader scales by 0.1 before adding.
+        private static func colorAdjusted(_ image: CIImage, _ p: VideoProperties, anim: ClipAnimationFrame) -> CIImage {
+            let saturation = p.valueSaturation * anim.saturation
+            let brightness = p.valueBrightness + anim.brightness * 0.1
+            let contrast = anim.contrast
+            let hue = p.valueHue + anim.hueDegrees
+            let temperature = p.valueTemperature + anim.temperatureKelvin
+            let opacity = p.valueOpacity * anim.opacity
+            
             var out = image
-            if p.valueSaturation != 1 || p.valueBrightness != 0 {
+            if saturation != 1 || brightness != 0 || contrast != 1 {
                 out = out.applyingFilter("CIColorControls", parameters: [
-                    kCIInputSaturationKey: p.valueSaturation,
-                    kCIInputBrightnessKey: p.valueBrightness,
-                    kCIInputContrastKey: 1.0
+                    kCIInputSaturationKey: saturation,
+                    kCIInputBrightnessKey: brightness,
+                    kCIInputContrastKey: contrast
                 ])
             }
-            if p.valueHue != 0 {
-                out = out.applyingFilter("CIHueAdjust", parameters: [kCIInputAngleKey: p.valueHue * .pi / 180])
+            if hue != 0 {
+                out = out.applyingFilter("CIHueAdjust", parameters: [kCIInputAngleKey: hue * .pi / 180])
             }
-            if abs(p.valueTemperature - 6500) > 1 {
+            if abs(temperature - 6500) > 1 {
                 out = out.applyingFilter("CITemperatureAndTint", parameters: [
-                    "inputNeutral": CIVector(x: CGFloat(p.valueTemperature), y: 0),
+                    "inputNeutral": CIVector(x: CGFloat(temperature), y: 0),
                     "inputTargetNeutral": CIVector(x: 6500, y: 0)
                 ])
             }
-            if p.valueOpacity < 1 {
+            if opacity < 1 {
                 out = out.applyingFilter("CIColorMatrix", parameters: [
-                    "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(max(0, p.valueOpacity)))
+                    "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(max(0, opacity)))
                 ])
             }
             return out
+        }
+        
+        // MARK: Clip animations
+        
+        /// The clip's animation channel values at this output time (`.neutral` when none is active).
+        /// The in window starts at the clip's first frame, the out window ends at its last; if the two
+        /// don't fit in the clip together both shrink proportionally, so they never overlap and at most
+        /// one is active at any time. The out animation is held at its end state past the clip's nominal
+        /// end (the outgoing clip of a transition keeps drawing there). Same rules as Android's
+        /// OpenGLEdit.animationFrame.
+        static func animationFrame(_ layer: RenderLayer, at t: Float) -> ClipAnimationFrame {
+            let inDef = ClipAnimationLoader.get(layer.inAnimation.type, direction: .in)
+            let outDef = ClipAnimationLoader.get(layer.outAnimation.type, direction: .out)
+            if inDef == nil && outDef == nil { return .neutral }
+            
+            let inRaw: Float = inDef != nil ? layer.inAnimation.duration : 0
+            let outRaw: Float = outDef != nil ? layer.outAnimation.duration : 0
+            if let inDef {
+                let inDur = ClipAnimation.fitDuration(inRaw, other: outRaw, clip: layer.duration)
+                let p = ClipAnimation.progress(elapsed: t - layer.startTime, duration: inDur)
+                if p >= 0 { return inDef.evaluate(p) }
+            }
+            if let outDef {
+                let outDur = ClipAnimation.fitDuration(outRaw, other: inRaw, clip: layer.duration)
+                let p = ClipAnimation.progressOut(clipEnd: layer.startTime + layer.duration, t: t, duration: outDur)
+                if p >= 0 { return outDef.evaluate(p) }
+            }
+            return .neutral
+        }
+        
+        // MARK: Warp (top-centre squish)
+        //
+        // Android does this per pixel in the fragment shader as an inverse mapping with edge clamping:
+        // the TOP edge is topWidth wide, the BOTTOM edge bottomWidth wide (relative to normal, about the
+        // vertical centre line), the height is scaled by `height` keeping the top edge fixed, and source
+        // positions outside the clip clamp to its edge, so the area the shrunken picture no longer
+        // covers is filled with edge pixels instead of showing a gap. This is the same mapping as a
+        // Core Image warp kernel. Should the (deprecated) kernel language be unavailable on a future
+        // iOS, it falls back to a perspective trapezoid: same silhouette, no edge fill.
+        
+        private static let warpKernel: CIWarpKernel? = {
+            let source = """
+            kernel vec2 clipWarp(vec4 box, vec3 w)
+            {
+                vec2 d = destCoord();
+                float qx = ((d.x - box.x) / box.z) * 2.0 - 1.0;
+                float qy = 1.0 - 2.0 * ((d.y - box.y) / box.w);
+                float srcQy = clamp((qy + 1.0) / w.z - 1.0, -1.0, 1.0);
+                float edgeW = mix(w.x, w.y, (qy + 1.0) * 0.5);
+                float srcQx = clamp(qx / edgeW, -1.0, 1.0);
+                float sx = box.x + (srcQx * 0.5 + 0.5) * box.z;
+                float sy = box.y + (1.0 - (srcQy + 1.0) * 0.5) * box.w;
+                return vec2(clamp(sx, box.x + 0.5, box.x + box.z - 0.5),
+                            clamp(sy, box.y + 0.5, box.y + box.w - 0.5));
+            }
+            """
+            return CIWarpKernel(source: source)
+        }()
+        
+        private static func warped(_ image: CIImage, anim: ClipAnimationFrame) -> CIImage {
+            let box = image.extent
+            guard box.width > 1, box.height > 1, box.width.isFinite, box.height.isFinite else { return image }
+            let topW = CGFloat(max(anim.warpTopWidth, 0.1))
+            let bottomW = CGFloat(max(anim.warpBottomWidth, 0.1))
+            let height = CGFloat(max(anim.warpHeight, 0.1))
+            
+            if let kernel = warpKernel,
+               let result = kernel.apply(extent: box,
+                                         roiCallback: { _, _ in box },
+                                         image: image,
+                                         arguments: [CIVector(x: box.minX, y: box.minY, z: box.width, w: box.height),
+                                                     CIVector(x: topW, y: bottomW, z: height)]) {
+                return result
+            }
+            
+            // Fallback: trapezoid (y-up coordinates; the top edge stays where it is).
+            let cx = box.midX
+            let topY = box.maxY
+            let bottomY = box.maxY - box.height * height
+            return image.applyingFilter("CIPerspectiveTransform", parameters: [
+                "inputTopLeft": CIVector(x: cx - box.width * topW / 2, y: topY),
+                "inputTopRight": CIVector(x: cx + box.width * topW / 2, y: topY),
+                "inputBottomLeft": CIVector(x: cx - box.width * bottomW / 2, y: bottomY),
+                "inputBottomRight": CIVector(x: cx + box.width * bottomW / 2, y: bottomY)
+            ])
         }
         
         /// Apply a track's preferredTransform (defined in y-down video space) to a y-up CIImage,

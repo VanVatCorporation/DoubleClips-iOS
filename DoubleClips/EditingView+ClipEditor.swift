@@ -121,6 +121,11 @@ extension EditingView {
         /// Snapshot taken when a slider drag / field edit begins, so the whole gesture is one undo step.
         @State private var propertiesBefore: EditingView.VideoProperties?
         
+        /// Animation packs sheet; `registryVersion` bumps when a pack is imported / removed so the
+        /// pickers below re-read the animation registry.
+        @State private var showAnimationPacks = false
+        @State private var registryVersion = 0
+        
         private var isVisual: Bool { clip.type == .video || clip.type == .image || clip.type == .text }
         private var hasAudio: Bool { clip.type == .video || clip.type == .audio }
         
@@ -174,10 +179,24 @@ extension EditingView {
                 
                 if isVisual {
                     SectionTitle(text: "Animation")
-                    animationRow("In", \.inAnimation)
+                    animationRow("In", \.inAnimation, .in)
+                    animationRow("Out", \.outAnimation, .out)
+                    Button { showAnimationPacks = true } label: {
+                        Label("Animation packs…", systemImage: "square.stack.3d.up")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Color.mdPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
                     
                     SectionTitle(text: "Keyframes (\(clip.keyframes.keyframes.count))")
                     keyframeList
+                }
+            }
+            .sheet(isPresented: $showAnimationPacks) {
+                AnimationPackSheet {
+                    registryVersion += 1     // pickers re-read the registry
+                    onChanged()              // the preview re-renders with what is installed now
                 }
             }
         }
@@ -266,23 +285,65 @@ extension EditingView {
             .tint(Color.mdPrimary)
         }
         
-        private func animationRow(_ label: String, _ kp: ReferenceWritableKeyPath<EditingView.Clip, EditingView.AnimationClip>) -> some View {
-            HStack {
-                Text("\(label) type").font(.system(size: 12)).foregroundColor(.white.opacity(0.8)).frame(width: 80, alignment: .leading)
-                Picker("", selection: Binding(
-                    get: { clip[keyPath: kp].type },
-                    set: { clip[keyPath: kp].type = $0; onChanged() }
-                )) {
-                    Text("none").tag("none")
-                    Text("unfold").tag("unfold")
+        /// One animation row (Android: AnimationPicker): a type menu + a duration field for one direction.
+        /// The choices come from the ClipAnimationLoader registry ("None" plus every installed animation
+        /// of this direction) and show each animation's display name while storing its id in
+        /// `AnimationClip.type`. Picking a real animation by hand also fills the duration with that
+        /// animation's own default; showing a clip never does. A saved id that isn't installed stays
+        /// selectable (and is kept) as "<id> (not installed)".
+        private func animationRow(_ label: String,
+                                  _ kp: ReferenceWritableKeyPath<EditingView.Clip, EditingView.AnimationClip>,
+                                  _ direction: ClipAnimation.Direction) -> some View {
+            _ = registryVersion      // re-read the registry after packs change
+            ClipAnimationStore.loadAll()
+            let current = clip[keyPath: kp].type
+            let installed = ClipAnimationLoader.list(direction)
+            let isNone = current.isEmpty || current == "none"
+            let currentName = isNone ? "None"
+                : (installed.first(where: { $0.id == current })?.name ?? "\(current) (not installed)")
+            
+            return HStack {
+                Text("\(label) animation").font(.system(size: 12)).foregroundColor(.white.opacity(0.8))
+                    .frame(width: 80, alignment: .leading)
+                Menu {
+                    Button("None") { setAnimation(kp, id: "none") }
+                    ForEach(installed, id: \.id) { animation in
+                        Button(animation.name) { setAnimation(kp, id: animation.id) }
+                    }
+                    if !isNone, !installed.contains(where: { $0.id == current }) {
+                        Button("\(current) (not installed)") { setAnimation(kp, id: current) }
+                    }
+                } label: {
+                    HStack {
+                        Text(currentName)
+                            .font(.system(size: 13))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
+                    .background(Color.white.opacity(0.08))
+                    .cornerRadius(6)
                 }
-                .pickerStyle(.segmented)
                 NumberField(label: "", value: Binding(
                     get: { clip[keyPath: kp].duration },
                     set: { clip[keyPath: kp].duration = max(0, $0) }
                 )) { onChanged() }
                 .frame(width: 70)
             }
+        }
+        
+        private func setAnimation(_ kp: ReferenceWritableKeyPath<EditingView.Clip, EditingView.AnimationClip>, id: String) {
+            guard clip[keyPath: kp].type != id else { return }
+            clip[keyPath: kp].type = id
+            if let animation = ClipAnimationLoader.get(id) {
+                clip[keyPath: kp].duration = animation.defaultDuration
+            }
+            onChanged()
         }
         
         // MARK: Keyframes
