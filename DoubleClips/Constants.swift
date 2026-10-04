@@ -81,6 +81,15 @@ enum Constants {
         "mp4", "mov", "m4v", "mkv", "webm", "3gp", "m4a", "mp3", "aac", "ogg", "opus", "flac",
         "jpg", "jpeg", "png", "heic", "gif", "webp", "zip"
     ]
+    // MARK: - Track reorder
+    /// How fast the other rows slide out of the way while a track is dragged.
+    static let TRACK_REORDER_SLIDE_SECONDS: Double = 0.15
+
+    // MARK: - Project files panel
+    static let PROJECT_FILES_GRID_COLUMNS: Int  = 3
+    /// "Solid colour image" size (Android makes 100x100; a 16:9 frame fills the canvas as is).
+    static let SOLID_COLOR_IMAGE_WIDTH: CGFloat  = 1920
+    static let SOLID_COLOR_IMAGE_HEIGHT: CGFloat = 1080
 
     // MARK: - Timeline clip blocks
     /// Text / effect block tints (Android: ColorFilter 0xAAFF0000 / 0xAAFFFF00 over the block).

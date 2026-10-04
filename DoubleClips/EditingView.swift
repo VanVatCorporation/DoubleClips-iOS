@@ -17,6 +17,9 @@ struct EditingView: View {
     @StateObject private var previewSession = PreviewEditSession()
     /// Ghost of the clip being long-press-dragged (nil = no drag). See EditingView+ClipDrag.swift.
     @State private var clipGhost: ClipGhost?
+    /// Track reorder (EditingView+TrackReorder.swift): grips shown / the track being dragged.
+    @State private var isReorderingTracks = false
+    @State private var trackReorder: TrackReorderDrag?
     
     // Undo/Redo — equivalent of EditingActivity's static `actionManager` (CommandManager)
     @StateObject private var commandManager = CommandManager()
@@ -229,6 +232,14 @@ struct EditingView: View {
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.8))
                             Spacer()
+                            if isReorderingTracks {
+                                Text("Drag ≡ to reorder · lower tracks draw on top")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(Color.mdPrimary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                                Spacer()
+                            }
                             Text(formatTime(Double(timeline.duration)))
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.8))
@@ -246,7 +257,17 @@ struct EditingView: View {
                         VStack(spacing: 0) {
                             // ── Ruler row — fixed, not part of vertical scroll ──
                             HStack(spacing: 0) {
-                                Color(hex: "#1A1A1A").frame(width: Constants.TRACK_LABEL_WIDTH, height: 20) // blank spacer under label col
+                                // Was a blank spacer; now the reorder toggle (grips are hidden unless asked for).
+                                Button(action: { toggleTrackReorder() }) {
+                                    Image(systemName: isReorderingTracks ? "checkmark" : "arrow.up.arrow.down")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(isReorderingTracks ? Color.mdPrimary : .white.opacity(0.7))
+                                        .frame(width: Constants.TRACK_LABEL_WIDTH, height: 20)
+                                        .background(Color(hex: "#1A1A1A"))
+                                        .contentShape(Rectangle())
+                                }
+                                .disabled(timeline.tracks.count < 2 && !isReorderingTracks)
+                                .opacity(timeline.tracks.count < 2 && !isReorderingTracks ? 0.35 : 1)
                                 TimelineRulerView(
                                     currentTime: engine.currentTime,
                                     totalDuration: Double(timeline.duration),
@@ -262,8 +283,17 @@ struct EditingView: View {
                                 HStack(spacing: 0) {
                                     // Track Info Column (50dp) — android:id="trackInfoScroll" / trackInfoLayout
                                     VStack(spacing: 0) {
-                                        ForEach(timeline.tracks) { track in
-                                            TrackLabelView(track: track)
+                                        ForEach(Array(timeline.tracks.enumerated()), id: \.element.id) { index, track in
+                                            TrackLabelView(
+                                                track: track,
+                                                showGrip: isReorderingTracks,
+                                                isDragging: trackReorder?.trackID == track.id,
+                                                onDragChanged: { translation in trackReorderChanged(track, translation: translation) },
+                                                onDragEnded: { trackReorderEnded() }
+                                            )
+                                            .offset(y: reorderOffset(forRowAt: index))
+                                            .animation(reorderAnimation(for: track), value: reorderOffset(forRowAt: index))
+                                            .zIndex(trackReorder?.trackID == track.id ? 1 : 0)
                                         }
                                         // Add-track button at bottom — matches Android addNewTrackButton position
                                         Button(action: { addTrack() }) {
@@ -341,7 +371,7 @@ struct EditingView: View {
                                         }
                                     ) {
                                         LazyVStack(alignment: .leading, spacing: 0) {
-                                            ForEach(timeline.tracks) { track in
+                                            ForEach(Array(timeline.tracks.enumerated()), id: \.element.id) { index, track in
                                                 TrackRowView(
                                                     track: track,
                                                     isSelected: selectedTrackID == track.id,
@@ -365,6 +395,9 @@ struct EditingView: View {
                                                         engine.seek(to: Double(max(0, time)))
                                                     }
                                                 )
+                                                .offset(y: reorderOffset(forRowAt: index))
+                                                .animation(reorderAnimation(for: track), value: reorderOffset(forRowAt: index))
+                                                .zIndex(trackReorder?.trackID == track.id ? 1 : 0)
                                             }
                                             // Blank spacer track — android:id="addNewTrackBlankTrackSpacer"
                                             Color(hex: "#222222")
@@ -407,7 +440,7 @@ struct EditingView: View {
                             // Android: timelineScroll.requestDisallowInterceptTouchEvent(true) for the
                             // duration of the drag, so vertical finger movement picks a track instead of
                             // scrolling the track list.
-                            .scrollDisabled(clipGhost != nil)
+                            .scrollDisabled(clipGhost != nil || trackReorder != nil)
                         }
                         // Overlay playhead on top of the whole timeline area.
                         // NOTE: alignment: .center here would center the line over the FULL
@@ -437,7 +470,8 @@ struct EditingView: View {
                                 case .default:
                                     DefaultToolbarView(
                                         onAddTrack: { addTrack() },
-                                        onSplit: { splitAtPlayhead() }
+                                        onSplit: { splitAtPlayhead() },
+                                        onFiles: { openProjectFiles() }
                                     )
                                 case .clip:
                                     ClipToolbarView(
@@ -478,16 +512,39 @@ struct EditingView: View {
                 
                 // Specific Edit Overlays (slides up over editingZone)
                 if let overlayType = activeOverlay {
-                    let selectedClip = timeline.tracks.flatMap({ $0.clips }).first(where: { $0.id == selectedClipID })
-                    SpecificEditOverlay(
-                        type: overlayType,
-                        clip: selectedClip,
-                        commandManager: commandManager,
-                        playhead: Float(engine.currentTime),
-                        frameRate: projectFrameRate,
-                        onChanged: { rebuildPreview() }
-                    ) {
-                        withAnimation { activeOverlay = nil }
+                    if overlayType == .projectFiles {
+                        ProjectFilesPanel(
+                            projectPath: project.projectPath,
+                            timeline: timeline,
+                            commandManager: commandManager,
+                            playhead: Float(engine.currentTime),
+                            selectedTrackID: selectedTrackID,
+                            onAdded: { track, clip in
+                                // Same as the media importer: select the track, park the playhead
+                                // at the end of what was added so the next file chains after it.
+                                selectedTrackID = track.id
+                                engine.seek(to: Double(clip.startTime + clip.duration))
+                            },
+                            onChanged: { rebuildPreview() },
+                            onDeselect: {
+                                selectedClipID = nil
+                                selectedClipIDs = []
+                                updateToolbarState()
+                            },
+                            onClose: { withAnimation { activeOverlay = nil } }
+                        )
+                    } else {
+                        let selectedClip = timeline.tracks.flatMap({ $0.clips }).first(where: { $0.id == selectedClipID })
+                        SpecificEditOverlay(
+                            type: overlayType,
+                            clip: selectedClip,
+                            commandManager: commandManager,
+                            playhead: Float(engine.currentTime),
+                            frameRate: projectFrameRate,
+                            onChanged: { rebuildPreview() }
+                        ) {
+                            withAnimation { activeOverlay = nil }
+                        }
                     }
                 }
             }
@@ -787,6 +844,76 @@ struct EditingView: View {
     }
     
     /// editMediaButton: TEXT clips open the text editor, everything else the property editor.
+    // MARK: - Track reorder
+    
+    private func toggleTrackReorder() {
+        withAnimation(.easeInOut(duration: 0.15)) { isReorderingTracks.toggle() }
+        if !isReorderingTracks { trackReorder = nil }
+    }
+    
+    private func reorderOffset(forRowAt index: Int) -> CGFloat {
+        trackReorder?.offset(forRowAt: index, count: timeline.tracks.count) ?? 0
+    }
+    
+    /// The grabbed row follows the finger with no animation; the rows it passes slide. With no drag
+    /// running (including the instant of the drop, when everything lands in its new place) nothing animates.
+    private func reorderAnimation(for track: EditingView.Track) -> Animation? {
+        guard let drag = trackReorder, drag.trackID != track.id else { return nil }
+        return .easeOut(duration: Constants.TRACK_REORDER_SLIDE_SECONDS)
+    }
+    
+    private func trackReorderChanged(_ track: EditingView.Track, translation: CGFloat) {
+        let count = timeline.tracks.count
+        if trackReorder == nil {
+            guard let index = timeline.tracks.firstIndex(where: { $0.id == track.id }) else { return }
+            engine.pause()
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            trackReorder = TrackReorderDrag(trackID: track.id, startIndex: index, translation: 0)
+        }
+        guard var drag = trackReorder, drag.trackID == track.id else { return }
+        let before = drag.targetIndex(count: count)
+        drag.translation = translation
+        trackReorder = drag
+        if drag.targetIndex(count: count) != before { UISelectionFeedbackGenerator().selectionChanged() }
+    }
+    
+    private func trackReorderEnded() {
+        guard let drag = trackReorder else { return }
+        let target = drag.targetIndex(count: timeline.tracks.count)
+        trackReorder = nil
+        guard target != drag.startIndex else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        moveTrack(from: drag.startIndex, to: target)
+    }
+    
+    /// One undoable step. Track order is layer order: positions are renumbered (tracks AND their
+    /// clips' trackIndex, like Android's reloadTrackIndex) and the preview is rebuilt.
+    private func moveTrack(from: Int, to: Int) {
+        guard timeline.tracks.indices.contains(from), timeline.tracks.indices.contains(to) else { return }
+        let before = timeline.tracks
+        var after = before
+        let moved = after.remove(at: from)
+        after.insert(moved, at: to)
+        let timeline = self.timeline
+        
+        func apply(_ order: [EditingView.Track]) {
+            timeline.tracks = order
+            timeline.reloadTrackIndex()
+            timeline.recalculateDuration()
+            rebuildPreview()
+        }
+        commandManager.execute(GenericCommand(
+            description: "Move Track",
+            undo: { apply(before) },
+            redo: { apply(after) }))
+    }
+    
+    /// Toolbar "Files": the project's media library (EditingView+ProjectFiles.swift).
+    private func openProjectFiles() {
+        engine.pause()
+        withAnimation { activeOverlay = .projectFiles }
+    }
+    
     private func openClipEditor() {
         guard let clip = selectedClip else { return }
         withAnimation { activeOverlay = clip.type == .text ? .textEdit : .videoProperties }
@@ -991,62 +1118,23 @@ struct EditingView: View {
                         }
                     }
                     
-                    let filename = url.lastPathComponent
-                    let ext = url.pathExtension.lowercased()
-                    let isImage = ["png", "jpg", "jpeg"].contains(ext)
-                    
-                    let clipDir = IOHelper.combinePath(project.projectPath, Constants.DEFAULT_CLIP_DIRECTORY)
-                    IOHelper.createEmptyDirectories(clipDir)
-                    let targetPath = IOHelper.combinePath(clipDir, filename)
-                    let targetUrl = URL(fileURLWithPath: targetPath)
-                    
-                    if !FileManager.default.fileExists(atPath: targetPath) {
-                        do {
-                            try FileManager.default.copyItem(at: url, to: targetUrl)
-                        } catch {
-                            print("File copy error: \(error)")
-                            continue
-                        }
+                    // Shared with the Project Files panel (ProjectFiles.swift): a different file with
+                    // a taken name gets "name (1).ext" instead of silently standing in for the old
+                    // one, and audio files become AUDIO clips (they used to become VIDEO).
+                    let filename: String
+                    do {
+                        filename = try ProjectLibrary.copyIn(url, projectPath: project.projectPath)
+                    } catch {
+                        print("File copy error: \(error)")
+                        continue
                     }
-                    
-                    var durationSeconds: Float = 3.0
-                    var trackWidth: Int = 1920
-                    var trackHeight: Int = 1080
-                    var hasAudio = false
-                    
-                    if isImage {
-                        durationSeconds = 3.0
-                    } else {
-                        let asset = AVURLAsset(url: targetUrl)
-                        if #available(iOS 15.0, *) {
-                            if let duration = try? await asset.load(.duration) {
-                                durationSeconds = Float(duration.seconds)
-                            }
-                            if let videoTrack = try? await asset.loadTracks(withMediaType: .video).first,
-                               let size = try? await videoTrack.load(.naturalSize) {
-                                // naturalSize ignores the rotation flag: portrait iPhone video would be
-                                // stored sideways (and composited squashed). Apply preferredTransform.
-                                let transform = (try? await videoTrack.load(.preferredTransform)) ?? .identity
-                                let oriented = size.applying(transform)
-                                trackWidth = Int(abs(oriented.width))
-                                trackHeight = Int(abs(oriented.height))
-                            }
-                            if let _ = try? await asset.loadTracks(withMediaType: .audio).first {
-                                hasAudio = true
-                            }
-                        } else {
-                            durationSeconds = Float(asset.duration.seconds)
-                            if let videoTrack = asset.tracks(withMediaType: .video).first {
-                                let oriented = videoTrack.naturalSize.applying(videoTrack.preferredTransform)
-                                trackWidth = Int(abs(oriented.width))
-                                trackHeight = Int(abs(oriented.height))
-                            }
-                            hasAudio = asset.tracks(withMediaType: .audio).first != nil
-                        }
-                    }
-                    
-                    let finalDuration = max(0.5, durationSeconds) // Guard against 0 duration
-                    let type: EditingView.ClipType = isImage ? .image : .video
+                    let targetUrl = ProjectLibrary.clipsDirectory(project.projectPath).appendingPathComponent(filename)
+                    let info = await MediaProbe.probe(targetUrl)
+                    let hasAudio = info.hasAudio
+                    let trackWidth = info.width
+                    let trackHeight = info.height
+                    let finalDuration = max(0.5, info.duration) // Guard against 0 duration
+                    let type: EditingView.ClipType = info.kind == .audio ? .audio : (info.kind == .image ? .image : .video)
 
                     await MainActor.run {
                         let newClip = Clip(
@@ -1224,17 +1312,38 @@ struct TrackingHScrollView<Content: View>: UIViewRepresentable {
 /// Track label shown in the left 50dp column
 private struct TrackLabelView: View {
     @ObservedObject var track: EditingView.Track
+    /// Reorder mode: show the grip. Dragging it moves the track (EditingView+TrackReorder.swift).
+    var showGrip: Bool = false
+    var isDragging: Bool = false
+    var onDragChanged: (CGFloat) -> Void = { _ in }
+    var onDragEnded: () -> Void = {}
+    
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 4) {
+            if showGrip {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(isDragging ? Color.mdPrimary : .white)
+            }
             Text("T\(track.timelineIndex + 1)")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundColor(.white.opacity(0.7))
         }
         .frame(width: Constants.TRACK_LABEL_WIDTH, height: Constants.TRACK_HEIGHT)
-        .background(Color(hex: "#222222"))
+        .background(Color(hex: isDragging ? "#33405A" : "#222222"))
         .overlay(
             Rectangle()
                 .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(isDragging ? 0.6 : 0), radius: 6, y: 2)
+        .contentShape(Rectangle())
+        // The whole label is the handle while grips are shown. High priority so the vertical scroll
+        // view doesn't take the drag; it is disabled while a track is being moved anyway.
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 2)
+                .onChanged { onDragChanged($0.translation.height) }
+                .onEnded { _ in onDragEnded() },
+            including: showGrip ? .all : .none
         )
     }
 }
@@ -1545,12 +1654,13 @@ private struct TimelineRulerView: View {
 private struct DefaultToolbarView: View {
     var onAddTrack: () -> Void = {}
     var onSplit: () -> Void = {}
+    var onFiles: () -> Void = {}
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 ToolbarButton(icon: "rectangle.stack.badge.plus", label: "Add Track") { onAddTrack() }
                 ToolbarButton(icon: "scissors", label: "Cut") { onSplit() }
-                ToolbarButton(icon: "folder", label: "Files") {}
+                ToolbarButton(icon: "folder", label: "Files") { onFiles() }
                 ToolbarButton(icon: "square.and.arrow.down", label: "Import") {}
             }
             .padding(.horizontal, 4)

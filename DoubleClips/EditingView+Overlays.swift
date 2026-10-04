@@ -6,6 +6,7 @@ extension EditingView {
         var id: String { rawValue }
         case videoProperties
         case textEdit
+        case projectFiles
     }
     
     // MARK: - Overlays Container
@@ -44,6 +45,8 @@ extension EditingView {
                                                      playhead: playhead, frameRate: frameRate, onChanged: onChanged)
                             case .textEdit:
                                 TextClipEditor(clip: clip, commandManager: commandManager, onChanged: onChanged)
+                            case .projectFiles:
+                                EmptyView()     // has its own panel (ProjectFilesPanel), never routed here
                             }
                         } else {
                             Text("No clip selected").foregroundColor(.white)
@@ -62,6 +65,7 @@ extension EditingView {
             switch type {
             case .videoProperties: return "Clip Properties"
             case .textEdit: return "Edit Text"
+            case .projectFiles: return "Project Files"
             }
         }
     }
