@@ -14,6 +14,7 @@ enum Tab: Hashable, CaseIterable {
 struct ContentView: View {
     @State private var selection: Tab = .home
     @State private var isBlockingGestures: Bool = false // Prevents tabs swipe when in Editor
+    @ObservedObject private var incoming = IncomingFileCenter.shared
     
     // Ordered list of tabs for swipe navigation
     private let tabOrder: [Tab] = [.home, .template, .search, .storage, .profile]
@@ -49,6 +50,10 @@ struct ContentView: View {
                     Label("Profile", systemImage: "person")
                 }
                 .tag(Tab.profile)
+        }
+        // A project ZIP opened from Files is imported by HomeView: make sure it is on screen.
+        .onChange(of: incoming.pendingZip) { _, newValue in
+            if newValue != nil { selection = .home }
         }
         // Swipe left/right to change tabs, just like Android ViewPager.
         // We use a simultaneous DragGesture so vertical scrolling inside

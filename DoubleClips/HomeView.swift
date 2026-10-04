@@ -10,6 +10,9 @@ struct HomeView: View {
     @StateObject private var importer = ProjectImportController()
     @State private var showImporter = false
     @State private var pendingImport = false
+    // "Open in DoubleClips" (IncomingFiles.swift) and Share project as ZIP (ProjectExporter.swift)
+    @ObservedObject private var incoming = IncomingFileCenter.shared
+    @StateObject private var shareController = ProjectShareController()
     @State private var showAddProjectPopup: Bool = false
     @State private var editingProject: ProjectData? = nil
     
@@ -48,6 +51,18 @@ struct HomeView: View {
                 isLoading = false
             }
         }
+    }
+    
+    /// Starts the import of a ZIP that was opened from outside the app, as soon as nothing else is
+    /// in the way (editor closed, no other import running). Safe to call at any time.
+    private func processIncomingZip() {
+        guard editingProject == nil, !importer.isRunning, !shareController.isRunning,
+              let url = incoming.takePending() else { return }
+        importer.start(zipURL: url, onFinished: {
+            IncomingFileCenter.removeInboxCopy(url)
+            loadProjects()
+            processIncomingZip()    // another file may have arrived meanwhile
+        })
     }
     
     /// <project>/preview.png is written by the editor on every save (same file Android uses).
@@ -145,7 +160,7 @@ struct HomeView: View {
                                     newProjectTitle = project.projectTitle
                                     showingRenameAlert = true
                                 },
-                                onShare: { print("Share \(project.projectTitle)") },
+                                onShare: { shareController.start(project: project) },
                                 onClone: {
                                     if let cloned = project.clone() {
                                         withAnimation {
@@ -184,6 +199,12 @@ struct HomeView: View {
         }
         .onAppear {
             loadProjects()
+            processIncomingZip()
+        }
+        .onChange(of: incoming.pendingZip) { _, _ in processIncomingZip() }
+        // Back from the editor: a ZIP that arrived meanwhile can be imported now.
+        .onChange(of: editingProject) { _, newValue in
+            if newValue == nil { processIncomingZip() }
         }
         .navigationDestination(item: $editingProject) { project in
             EditingView(project: project, isPreview: false)
@@ -216,6 +237,7 @@ struct HomeView: View {
             )
         }
         .projectImport(controller: importer, showImporter: $showImporter, onProjectsChanged: { loadProjects() })
+        .projectShare(controller: shareController)
         // Rename Alert
         .alert("Rename Project", isPresented: $showingRenameAlert) {
             TextField("New Title", text: $newProjectTitle)

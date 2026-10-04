@@ -71,6 +71,17 @@ enum Constants {
     static let EXPORT_PROGRESS_FRAME_INTERVAL: Int = 5
     static let EXPORT_LOG_FRAME_INTERVAL: Int      = 30
 
+    // MARK: - Project share (ZIP export)
+    /// Folder (inside the temporary directory) that holds finished project ZIPs until shared.
+    static let SHARE_TEMP_DIRECTORY         = "DoubleClips-Share"
+    /// Leave `Clips/Temp` (the frame cache) out of the ZIP. Android's own export wipes it anyway.
+    static let PROJECT_ZIP_EXCLUDE_TEMP     = true
+    /// Already-compressed formats: stored as is, since deflating them gains nothing and costs time.
+    static let PROJECT_ZIP_STORED_EXTENSIONS: Set<String> = [
+        "mp4", "mov", "m4v", "mkv", "webm", "3gp", "m4a", "mp3", "aac", "ogg", "opus", "flac",
+        "jpg", "jpeg", "png", "heic", "gif", "webp", "zip"
+    ]
+
     // MARK: - Canvas / Snap Constants
     static let CANVAS_ROTATE_SNAP_THRESHOLD_DEGREE: Float  = 3.0   // degrees
     static let CANVAS_ROTATE_SNAP_DEGREE: Float             = 90.0

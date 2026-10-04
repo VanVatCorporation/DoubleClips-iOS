@@ -31,6 +31,8 @@ struct DoubleClipsApp: App {
         WindowGroup {
             ContentView()
                 .preferredColorScheme(colorScheme)
+                // "Open in DoubleClips" from Files / Mail / AirDrop: see IncomingFiles.swift
+                .onOpenURL { url in IncomingFileCenter.shared.receive(url) }
                 .onAppear {
                     // Delay slightly so the UI is ready, matching Android's onCreate behavior
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
