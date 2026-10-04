@@ -159,7 +159,7 @@ extension EditingView {
                     SectionTitle(text: "Look")
                     slider("Opacity", \.valueOpacity, 0...1, reset: 1)
                     slider("Saturation", \.valueSaturation, 0...3, reset: 1)
-                    slider("Brightness", \.valueBrightness, -1...1, reset: 0)
+                    slider("Brightness", \.valueBrightness, -10...10, reset: 0)
                     slider("Temperature", \.valueTemperature, 1000...12000, reset: 6500)
                     field("Hue", \.valueHue)
                 }

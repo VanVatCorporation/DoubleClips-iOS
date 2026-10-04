@@ -204,11 +204,11 @@ extension EditingView {
         // MARK: Helpers
         
         /// Clip properties plus the animation's channels: hue / brightness / temperature add,
-        /// saturation / opacity multiply, contrast stands alone (the clip has none). The animation's
-        /// brightness is in Android's -10..10 units, which its shader scales by 0.1 before adding.
+        /// saturation / opacity multiply, contrast stands alone (the clip has none). Brightness is in
+        /// Android's -10..10 units for both the clip and the animation; the shader scales the sum by 0.1.
         private static func colorAdjusted(_ image: CIImage, _ p: VideoProperties, anim: ClipAnimationFrame) -> CIImage {
             let saturation = p.valueSaturation * anim.saturation
-            let brightness = p.valueBrightness + anim.brightness * 0.1
+            let brightness = (p.valueBrightness + anim.brightness) * 0.1
             let contrast = anim.contrast
             let hue = p.valueHue + anim.hueDegrees
             let temperature = p.valueTemperature + anim.temperatureKelvin
