@@ -82,6 +82,21 @@ enum Constants {
         "jpg", "jpeg", "png", "heic", "gif", "webp", "zip"
     ]
 
+    // MARK: - Timeline clip blocks
+    /// Text / effect block tints (Android: ColorFilter 0xAAFF0000 / 0xAAFFFF00 over the block).
+    static let CLIP_TINT_ALPHA: Double          = 170.0 / 255.0
+    /// Keyframe diamond on the selected clip (Android: 10 dp white square rotated 45 degrees).
+    static let KEYFRAME_KNOT_SIZE: CGFloat      = 10
+    /// Finger-sized tap area around a diamond.
+    static let KEYFRAME_KNOT_HIT: CGFloat       = 30
+    /// A diamond lights up when the playhead is within this many seconds of it.
+    static let KEYFRAME_KNOT_ACTIVE_SECONDS: Float = 0.02
+    /// Video blocks also show their own audio as a thin waveform band along the bottom edge.
+    /// (iOS addition: Android shows only thumbnails on video. Set false to turn it off; the first
+    /// time a project opens, each video's audio is decoded once in the background and cached.)
+    static let VIDEO_WAVEFORM_ENABLED           = true
+    static let VIDEO_WAVEFORM_BAND_HEIGHT: CGFloat = 20
+
     // MARK: - Canvas / Snap Constants
     static let CANVAS_ROTATE_SNAP_THRESHOLD_DEGREE: Float  = 3.0   // degrees
     static let CANVAS_ROTATE_SNAP_DEGREE: Float             = 90.0

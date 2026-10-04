@@ -359,7 +359,11 @@ struct EditingView: View {
                                                     onClipTap: { clip in selectingClip(clip) },
                                                     onTap: { selectingTrack(track) },
                                                     onClipMoved: { rebuildPreview() },
-                                                    onClipDragBegin: { engine.pause() }
+                                                    onClipDragBegin: { engine.pause() },
+                                                    onKeyframeTap: { time in
+                                                        engine.pause()
+                                                        engine.seek(to: Double(max(0, time)))
+                                                    }
                                                 )
                                             }
                                             // Blank spacer track — android:id="addNewTrackBlankTrackSpacer"
@@ -1265,6 +1269,8 @@ private struct TrackRowView: View {
     /// Fired the instant a whole-clip move drag begins — parent pauses playback,
     /// matching the timeline-scroll drag's same behavior.
     var onClipDragBegin: () -> Void = {}
+    /// A keyframe diamond was tapped: the argument is its time on the timeline (Android: setCurrentTime).
+    var onKeyframeTap: (Float) -> Void = { _ in }
     
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -1287,7 +1293,8 @@ private struct TrackRowView: View {
                     currentTime: currentTime,
                     trackRowHeight: trackRowHeight,
                     onMoved: onClipMoved,
-                    onDragBegin: onClipDragBegin
+                    onDragBegin: onClipDragBegin,
+                    onKeyframeTap: onKeyframeTap
                 )
                 // Vertical inset centres the clip block in the row (TRACK_HEIGHT - 2 * inset tall).
                 .offset(x: CGFloat(clip.startTime) * pps, y: Constants.TRACK_CLIP_INSET)
@@ -1327,6 +1334,7 @@ private struct ClipBlockView: View {
     /// Fired the instant a whole-clip move drag begins (not on trim-handle drags),
     /// matching Android's `stopPlayback` call the moment a clip drag starts.
     var onDragBegin: () -> Void = {}
+    var onKeyframeTap: (Float) -> Void = { _ in }
     
     @State private var dragInitialDuration: Float = 0
     @State private var dragInitialStartTime: Float = 0
@@ -1342,6 +1350,18 @@ private struct ClipBlockView: View {
         !media.projectPath.isEmpty && (clip.type == .video || clip.type == .image || clip.type == .audio)
     }
     
+    /// Android tints the placeholder block by type: text red (0xAAFF0000), effect yellow (0xAAFFFF00).
+    /// Everything else keeps the app's primary colour behind its thumbnails / waveform.
+    private var blockFill: Color {
+        switch clip.type {
+        case .text:   return Color(red: 1, green: 0, blue: 0).opacity(Constants.CLIP_TINT_ALPHA)
+        case .effect: return Color(red: 1, green: 1, blue: 0).opacity(Constants.CLIP_TINT_ALPHA)
+        default:      return Color.mdPrimary.opacity(0.8)
+        }
+    }
+    
+    private var isTinted: Bool { clip.type == .text || clip.type == .effect }
+    
     private var borderColor: Color {
         if isMultiSelected { return .orange }
         if isSelected { return .white }
@@ -1351,7 +1371,7 @@ private struct ClipBlockView: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color.mdPrimary.opacity(0.8))
+                .fill(blockFill)
             
             // Video/image: tile strip. Audio: waveform. Others: nothing (the plain fill above).
             ClipVisualContent(clip: clip, displayStartTime: clip.startTime, pps: pps,
@@ -1362,7 +1382,7 @@ private struct ClipBlockView: View {
             Text(clip.clipName)
                 .font(.system(size: 10, weight: hasMediaVisual ? .semibold : .regular))
                 .foregroundColor(.white)
-                .shadow(color: .black.opacity(hasMediaVisual ? 0.85 : 0), radius: 2)
+                .shadow(color: .black.opacity(hasMediaVisual || isTinted ? 0.85 : 0), radius: 2)
                 .lineLimit(1)
                 .padding(.horizontal, hasMediaVisual ? 6 : 16)
                 .padding(.top, hasMediaVisual ? 4 : 0)
@@ -1372,6 +1392,27 @@ private struct ClipBlockView: View {
             if isSelected || isMultiSelected {
                 RoundedRectangle(cornerRadius: 4)
                     .stroke(borderColor, lineWidth: 2)
+            }
+            
+            // Keyframe diamonds (Android: addKeyframeUi — visible only while this clip is selected).
+            // Tap = move the playhead to that keyframe. Drawn under the trim handles so a keyframe
+            // at the very start/end can't make the handle harder to grab: those are pulled 8 pt
+            // inside the block (visual only; the tap still goes to the exact time).
+            if isSelected && !isMultiSelected && !isGhostSource {
+                ForEach(Array(clip.keyframes.keyframes.enumerated()), id: \.offset) { _, key in
+                    let exact = CGFloat(key.time) * pps
+                    let x = min(max(exact, 8), max(8, blockWidth - 8))
+                    let active = abs(key.time + clip.startTime - currentTime) <= Constants.KEYFRAME_KNOT_ACTIVE_SECONDS
+                    Rectangle()
+                        .fill(active ? Color.mdPrimary : Color.white)
+                        .overlay(Rectangle().stroke(Color.black.opacity(0.55), lineWidth: 1))
+                        .frame(width: Constants.KEYFRAME_KNOT_SIZE, height: Constants.KEYFRAME_KNOT_SIZE)
+                        .rotationEffect(.degrees(45))
+                        .frame(width: Constants.KEYFRAME_KNOT_HIT, height: Constants.KEYFRAME_KNOT_HIT)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onKeyframeTap(clip.startTime + key.time) }
+                        .position(x: x, y: Constants.TRACK_CLIP_HEIGHT / 2)
+                }
             }
             
             // Trim handles — only for a true single selection, and hidden mid-move

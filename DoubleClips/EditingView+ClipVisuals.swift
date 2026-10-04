@@ -46,8 +46,19 @@ struct ClipVisualContent: View {
             let url = clip.mediaURL(projectPath: media.projectPath)
             switch clip.type {
             case .video, .image:
-                ClipThumbnailStrip(url: url, isVideo: clip.type == .video, startTrim: clip.startClipTrim,
-                                   pps: pps, blockWidth: blockWidth, height: height, visible: visible)
+                ZStack(alignment: .bottomLeading) {
+                    ClipThumbnailStrip(url: url, isVideo: clip.type == .video, startTrim: clip.startClipTrim,
+                                       pps: pps, blockWidth: blockWidth, height: height, visible: visible)
+                    // The video's own audio, as a thin band over the bottom of the tiles. A silent
+                    // video has no audio track: the envelope is nil and only the scrim shows.
+                    if clip.type == .video && Constants.VIDEO_WAVEFORM_ENABLED {
+                        ClipWaveformView(url: url, startTrim: clip.startClipTrim,
+                                         pps: pps, blockWidth: blockWidth,
+                                         height: Constants.VIDEO_WAVEFORM_BAND_HEIGHT,
+                                         visible: visible, isBand: true)
+                    }
+                }
+                .frame(width: blockWidth, height: height, alignment: .bottomLeading)
             case .audio:
                 ClipWaveformView(url: url, startTrim: clip.startClipTrim,
                                  pps: pps, blockWidth: blockWidth, height: height, visible: visible)
@@ -128,6 +139,8 @@ struct ClipWaveformView: View {
     let blockWidth: CGFloat
     let height: CGFloat
     let visible: ClosedRange<CGFloat>
+    /// Video blocks: a short, white-on-scrim strip instead of the full-height navy audio block.
+    var isBand: Bool = false
     @State private var envelope: WaveformEnvelope?
     
     // Android: thumbnailAudioBarWidth / thumbnailAudioBarGap (px). A little wider in points.
@@ -144,7 +157,7 @@ struct ClipWaveformView: View {
         
         Canvas { context, size in
             let midY = size.height / 2
-            let blue = Color(red: 0x1E / 255, green: 0x90 / 255, blue: 0xFF / 255)
+            let blue = isBand ? Color.white : Color(red: 0x1E / 255, green: 0x90 / 255, blue: 0xFF / 255)
             
             // Faint centre line (Android: basePaint alpha 60).
             context.fill(Path(CGRect(x: 0, y: midY - 0.5, width: size.width, height: 1)),
@@ -174,7 +187,7 @@ struct ClipWaveformView: View {
         .frame(width: sliceWidth, height: height)
         .offset(x: sliceStart)
         .frame(width: blockWidth, height: height, alignment: .topLeading)
-        .background(Color(hex: "#0D1B2A"))
+        .background(isBand ? Color.black.opacity(0.45) : Color(hex: "#0D1B2A"))
         .clipped()
         .task(id: url.lastPathComponent) {
             envelope = await ClipMediaCache.shared.waveform(for: url)
