@@ -410,65 +410,6 @@ extension EditingView {
                 redo: { target.keyframes = EditingView.AnimatedProperty(); onChanged() }))
         }
     }
-    
-    // MARK: - Text clip editor (TextEditSpecificAreaScreen)
-    
-    struct TextClipEditor: View {
-        @ObservedObject var clip: EditingView.Clip
-        let commandManager: CommandManager
-        let onChanged: () -> Void
-        @State private var draft: String = ""
-        @State private var sizeBefore: Float?
-        
-        var body: some View {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("TEXT").font(.system(size: 11, weight: .bold)).foregroundColor(Color.mdPrimary)
-                TextField("Text", text: $draft, axis: .vertical)
-                    .lineLimit(1...4)
-                    .foregroundColor(.white)
-                    .padding(8)
-                    .background(Color.white.opacity(0.08))
-                    .cornerRadius(8)
-                    .onSubmit(commitText)
-                    .onChange(of: draft) { _ in /* live-edit the model, undo registered on commit */ clip.textContent = draft }
-                
-                PropertySlider(
-                    label: "Font size",
-                    value: Binding(get: { clip.fontSize ?? 30 }, set: { clip.fontSize = $0 }),
-                    range: 8...200,
-                    resetTo: 30,
-                    onEditingBegan: { if sizeBefore == nil { sizeBefore = clip.fontSize ?? 30 } },
-                    onEditingEnded: commitSize
-                )
-            }
-            .onAppear { draft = clip.textContent ?? ""; committedText = draft }
-            .onDisappear(perform: commitText)
-        }
-        
-        @State private var committedText: String = ""
-        
-        private func commitText() {
-            let old = committedText
-            let new = draft
-            guard old != new else { return }
-            committedText = new
-            let target = clip
-            commandManager.execute(GenericCommand(description: "Edit text",
-                undo: { target.textContent = old; onChanged() },
-                redo: { target.textContent = new; onChanged() }))
-        }
-        
-        private func commitSize() {
-            guard let before = sizeBefore else { return }
-            sizeBefore = nil
-            let after = clip.fontSize ?? 30
-            guard before != after else { return }
-            let target = clip
-            commandManager.execute(GenericCommand(description: "Font size",
-                undo: { target.fontSize = before; onChanged() },
-                redo: { target.fontSize = after; onChanged() }))
-        }
-    }
 }
 
 // MARK: - Small helpers

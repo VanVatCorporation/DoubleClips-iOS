@@ -112,6 +112,8 @@ extension EditingView {
         @Published var effect: EffectTemplate?
         @Published var textContent: String?
         @Published var fontSize: Float?
+        /// iOS addition (EditingView+Text.swift): font, colour, outline, shadow... nil = defaults.
+        @Published var textStyle: TextStyle?
         
         @Published var endTransition: TransitionClip?
         @Published var endTransitionEnabled: Bool
@@ -149,6 +151,7 @@ extension EditingView {
             case effect
             case textContent
             case fontSize
+            case textStyle
             case endTransition
             case endTransitionEnabled
             case isClipHasAudio
@@ -205,6 +208,8 @@ extension EditingView {
             self.effect = try container.decodeIfPresent(EffectTemplate.self, forKey: .effect)
             self.textContent = try container.decodeIfPresent(String.self, forKey: .textContent)
             self.fontSize = try container.decodeIfPresent(Float.self, forKey: .fontSize)
+            // A style that can't be read must never cost the clip: fall back to the defaults.
+            self.textStyle = try? container.decodeIfPresent(TextStyle.self, forKey: .textStyle)
             self.endTransition = try container.decodeIfPresent(TransitionClip.self, forKey: .endTransition)
             self.endTransitionEnabled = try container.decodeIfPresent(Bool.self, forKey: .endTransitionEnabled) ?? false
             self.isClipHasAudio = try container.decodeIfPresent(Bool.self, forKey: .isClipHasAudio) ?? false
@@ -238,6 +243,7 @@ extension EditingView {
             try container.encodeIfPresent(effect, forKey: .effect)
             try container.encodeIfPresent(textContent, forKey: .textContent)
             try container.encodeIfPresent(fontSize, forKey: .fontSize)
+            try container.encodeIfPresent(textStyle, forKey: .textStyle)
             try container.encodeIfPresent(endTransition, forKey: .endTransition)
             try container.encode(endTransitionEnabled, forKey: .endTransitionEnabled)
             try container.encode(isClipHasAudio, forKey: .isClipHasAudio)

@@ -76,8 +76,9 @@ extension EditingView {
             p.valuePosX = basis.valuePosX + Float(translation.width / fit)
             p.valuePosY = basis.valuePosY + Float(translation.height / fit)
             
-            // Text is drawn by drawtext on Android: move only.
-            if clip.type != .text {
+            // Text is a bitmap layer now (TextRenderer), so it scales and rotates like any clip.
+            // (Android's drawtext can only move it.)
+            do {
                 p.valueScaleX = basis.valueScaleX * Float(scale)
                 p.valueScaleY = basis.valueScaleY * Float(scale)
                 

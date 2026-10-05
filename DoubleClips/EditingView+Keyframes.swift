@@ -233,6 +233,7 @@ extension EditingView.Clip {
         c.comboAnimation = comboAnimation
         c.textContent = textContent
         c.fontSize = fontSize
+        c.textStyle = textStyle
         c.effect = effect
         c.sceneConfig = sceneConfig
         c.textureClipName = textureClipName

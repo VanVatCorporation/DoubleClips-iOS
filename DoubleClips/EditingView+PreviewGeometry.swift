@@ -38,12 +38,12 @@ extension EditingView {
     enum ClipGeometry {
         
         /// Corners TL, TR, BR, BL in canvas pixels (y down).
-        static func quad(baseW: CGFloat, baseH: CGFloat, props: VideoProperties) -> [CGPoint] {
+        static func quad(baseW: CGFloat, baseH: CGFloat, props: VideoProperties, origin: CGPoint = .zero) -> [CGPoint] {
             let scaledW = baseW * CGFloat(props.valueScaleX)
             let scaledH = baseH * CGFloat(props.valueScaleY)
             let px = CGFloat(props.valuePivotX), py = CGFloat(props.valuePivotY)
-            let pivot = CGPoint(x: CGFloat(props.valuePosX) + px * baseW,
-                                y: CGFloat(props.valuePosY) + py * baseH)
+            let pivot = CGPoint(x: CGFloat(props.valuePosX) + origin.x + px * baseW,
+                                y: CGFloat(props.valuePosY) + origin.y + py * baseH)
             let theta = CGFloat(props.value(.rotInRadians))
             let c = cos(theta), s = sin(theta)
             func map(_ u: CGFloat, _ v: CGFloat) -> CGPoint {
@@ -53,22 +53,12 @@ extension EditingView {
             return [map(0, 0), map(1, 0), map(1, 1), map(0, 1)]
         }
         
-        /// Text is drawn centered on the canvas + PosX/PosY, unscaled and unrotated (drawtext).
-        static func textQuad(text: String, fontSize: CGFloat, props: VideoProperties, canvas: CGSize) -> [CGPoint] {
-            let size = textSize(text, fontSize: fontSize)
-            let cx = canvas.width / 2 + CGFloat(props.valuePosX)
-            let cy = canvas.height / 2 + CGFloat(props.valuePosY)
-            let l = cx - size.width / 2, r = cx + size.width / 2
-            let t = cy - size.height / 2, b = cy + size.height / 2
-            return [CGPoint(x: l, y: t), CGPoint(x: r, y: t), CGPoint(x: r, y: b), CGPoint(x: l, y: b)]
-        }
-        
-        /// Same font + padding as the compositor's text image.
-        static func textSize(_ text: String, fontSize: CGFloat) -> CGSize {
-            let s = NSAttributedString(string: text, attributes: [
-                .font: UIFont.systemFont(ofSize: max(fontSize, 1))
-            ]).size()
-            return CGSize(width: ceil(s.width) + 4, height: ceil(s.height) + 4)
+        /// Text is a bitmap (TextRenderer) centred on the canvas + PosX/PosY, then scaled / rotated
+        /// about its pivot like any other clip: the same box the compositor draws.
+        static func textQuad(spec: TextSpec, props: VideoProperties, canvas: CGSize) -> [CGPoint] {
+            let size = TextRenderer.size(spec)
+            let origin = CGPoint(x: (canvas.width - size.width) / 2, y: (canvas.height - size.height) / 2)
+            return quad(baseW: size.width, baseH: size.height, props: props, origin: origin)
         }
         
         /// Convex-quad hit test (works for mirrored/negative scales too).
@@ -113,8 +103,9 @@ extension EditingView.Clip {
             let baseH = stretchToFull ? canvas.height : (height > 0 ? CGFloat(height) : canvas.height)
             return EditingView.ClipGeometry.quad(baseW: baseW, baseH: baseH, props: props)
         case .text:
-            return EditingView.ClipGeometry.textQuad(text: textContent ?? "", fontSize: CGFloat(fontSize ?? 30),
-                                                      props: props, canvas: canvas)
+            let spec = EditingView.TextSpec(text: textContent ?? "", fontSize: CGFloat(fontSize ?? 30),
+                                            style: textStyle ?? EditingView.TextStyle(), canvasWidth: canvas.width)
+            return EditingView.ClipGeometry.textQuad(spec: spec, props: props, canvas: canvas)
         default:
             return nil
         }

@@ -81,6 +81,14 @@ enum Constants {
         "mp4", "mov", "m4v", "mkv", "webm", "3gp", "m4a", "mp3", "aac", "ogg", "opus", "flac",
         "jpg", "jpeg", "png", "heic", "gif", "webp", "zip"
     ]
+    // MARK: - Text
+    /// Colour of a text clip that has no style yet. Android's FFmpeg drawtext has no colour option, so
+    /// its export is FFmpeg's default (black); iOS has always drawn white, which is visible on the
+    /// black canvas. Existing iOS projects keep looking the same.
+    static let TEXT_DEFAULT_COLOR_HEX               = "#FFFFFF"
+    /// Edits to a text style are committed this long after the last change (colour pickers fire continuously).
+    static let TEXT_STYLE_COMMIT_DELAY_SECONDS: Double = 0.5
+
     // MARK: - Transitions
     static let TRANSITION_KNOT_SIZE: CGFloat        = 28     // Android: 28 dp
     static let TRANSITION_KNOT_HIT: CGFloat         = 38

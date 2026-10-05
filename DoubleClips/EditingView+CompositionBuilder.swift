@@ -178,7 +178,10 @@ extension EditingView {
                         contentEnd = max(contentEnd, clip.startTime + clip.duration)
                         
                     case .text:
-                        layers.append((snapshot(.text(clip.textContent ?? "", CGFloat(clip.fontSize ?? 30))), window, drawOrder))
+                        let spec = TextSpec(text: clip.textContent ?? "", fontSize: CGFloat(clip.fontSize ?? 30),
+                                            style: clip.textStyle ?? TextStyle(),
+                                            canvasWidth: CGFloat(projectSettings.videoWidth))
+                        layers.append((snapshot(.text(spec)), window, drawOrder))
                         drawOrder += 1
                         contentEnd = max(contentEnd, clip.startTime + clip.duration)
                         

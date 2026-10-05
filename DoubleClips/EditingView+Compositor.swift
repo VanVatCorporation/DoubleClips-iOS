@@ -16,8 +16,10 @@ import UIKit
 //     itself never moves. Base size = clip size (or the canvas when stretch-to-full).
 //   - Rotation is stored in degrees; positive = clockwise.
 //   - Layers draw in track order, later tracks on top.
-//   - TEXT is centered on the canvas, offset by PosX/PosY, and ignores scale/rotation/opacity
-//     (Android draws it with ffmpeg drawtext).
+//   - TEXT is drawn into its own bitmap (TextRenderer: font, colour, outline, shadow, box) and then
+//     placed like any other layer. Its centre starts on the canvas centre (drawtext's
+//     x=(w-text_w)/2), offset by PosX/PosY, but unlike Android's drawtext it also honours scale,
+//     rotation about the pivot, opacity, colour adjustments and clip in/out animations.
 //   - Clip in / out animations (assets/animations JSON, see ClipAnimation.swift) are evaluated per
 //     frame and combined with the clip's own properties exactly as OpenGLEdit does: additive
 //     (offset, rotation, hue, brightness, temperature), multiplicative (opacity, scale, saturation),
@@ -31,7 +33,7 @@ extension EditingView {
         enum Kind {
             case video(trackID: CMPersistentTrackID, preferredTransform: CGAffineTransform)
             case image(URL)
-            case text(String, CGFloat)
+            case text(TextSpec)
         }
         var kind: Kind
         var clipID: UUID
@@ -171,14 +173,16 @@ extension EditingView {
                                                                      clipStartTime: layer.startTime, at: time)
             
             switch layer.kind {
-            case .text(let text, let fontSize):
-                guard !text.isEmpty, let img = Self.textImage(text, fontSize: fontSize) else { return nil }
-                // drawtext: x = (w - text_w)/2 + PosX, y = (h - text_h)/2 + PosY  (y down)
-                let cx = canvas.width / 2 + CGFloat(props.valuePosX)
-                let cyDown = canvas.height / 2 + CGFloat(props.valuePosY)
-                return img.transformed(by: CGAffineTransform(
-                    translationX: cx - img.extent.width / 2,
-                    y: (canvas.height - cyDown) - img.extent.height / 2))
+            case .text(let spec):
+                guard let rendered = TextRenderer.render(spec) else { return nil }
+                // The bitmap is the clip's own box; PosX/PosY move its top-left from the canvas-centred spot.
+                var box = layer
+                box.width = rendered.size.width
+                box.height = rendered.size.height
+                let origin = CGPoint(x: (canvas.width - rendered.size.width) / 2,
+                                     y: (canvas.height - rendered.size.height) / 2)
+                return place(rendered.image, layer: box, props: props, canvas: canvas, stretchToFull: false,
+                             anim: Self.animationFrame(layer, at: time), origin: origin)
                 
             case .video(let trackID, let preferredTransform):
                 guard let buffer = request.sourceFrame(byTrackID: trackID) else { return nil }
@@ -196,7 +200,8 @@ extension EditingView {
         /// Color adjustments (same order as FFmpegEdit: hue/sat/brightness → temperature → opacity),
         /// then the pivot-based scale/rotate/translate from OpenGLEdit.buildClipMvp.
         private func place(_ source: CIImage, layer: RenderLayer, props: VideoProperties,
-                           canvas: CGSize, stretchToFull: Bool, anim: ClipAnimationFrame) -> CIImage? {
+                           canvas: CGSize, stretchToFull: Bool, anim: ClipAnimationFrame,
+                           origin: CGPoint = .zero) -> CIImage? {
             let srcW = source.extent.width, srcH = source.extent.height
             guard srcW > 0, srcH > 0 else { return nil }
             
@@ -212,8 +217,8 @@ extension EditingView {
             if anim.hasWarp { colored = Self.warped(colored, anim: anim) }
             
             // Offsets are fractions of the canvas size added to PosX/PosY.
-            let posX = CGFloat(props.valuePosX) + CGFloat(anim.offsetX) * canvas.width
-            let posY = CGFloat(props.valuePosY) + CGFloat(anim.offsetY) * canvas.height
+            let posX = CGFloat(props.valuePosX) + CGFloat(anim.offsetX) * canvas.width + origin.x
+            let posY = CGFloat(props.valuePosY) + CGFloat(anim.offsetY) * canvas.height + origin.y
             let pivotX = CGFloat(props.valuePivotX), pivotY = CGFloat(props.valuePivotY)
             // Pivot inside the scaled clip, in Core Image's y-up space.
             let pivotLocal = CGPoint(x: pivotX * scaledW, y: scaledH - pivotY * scaledH)
@@ -387,29 +392,6 @@ extension EditingView {
             let normalized = loaded.transformed(by: CGAffineTransform(translationX: -loaded.extent.minX, y: -loaded.extent.minY))
             mediaCache.setObject(normalized, forKey: key)
             return normalized
-        }
-        
-        private static func textImage(_ text: String, fontSize: CGFloat) -> CIImage? {
-            let key = "text|\(fontSize)|\(text)" as NSString
-            if let hit = mediaCache.object(forKey: key) { return hit }
-            let attributed = NSAttributedString(string: text, attributes: [
-                .font: UIFont.systemFont(ofSize: max(fontSize, 1)),
-                .foregroundColor: UIColor.white
-            ])
-            let textSize = attributed.size()
-            let pad: CGFloat = 2
-            let size = CGSize(width: ceil(textSize.width) + pad * 2, height: ceil(textSize.height) + pad * 2)
-            guard size.width > 0, size.height > 0 else { return nil }
-            let format = UIGraphicsImageRendererFormat()
-            format.scale = 1
-            format.opaque = false
-            let rendered = UIGraphicsImageRenderer(size: size, format: format).image { _ in
-                attributed.draw(at: CGPoint(x: pad, y: pad))
-            }
-            guard let cg = rendered.cgImage else { return nil }
-            let image = CIImage(cgImage: cg)
-            mediaCache.setObject(image, forKey: key)
-            return image
         }
     }
 }
