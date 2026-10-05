@@ -59,6 +59,10 @@ struct EditingView: View {
     
     // Export sheet (Android: ExportActivity) — see ExportSheetView.swift
     @State private var showExport = false
+    /// Project settings panel (Android: settingsButton) — see EditingView+ProjectSettings.swift.
+    @State private var showProjectSettings = false
+    /// Android: keepPlayingWhenClipSelected. Off = playing with a clip selected plays only that clip.
+    @AppStorage(Constants.PREF_KEEP_PLAYING_SELECTION_KEY) private var keepPlayingWithSelection = false
     
     enum ToolbarMode {
         case `default`, clip, track, clips
@@ -141,7 +145,7 @@ struct EditingView: View {
                                 }
                                 
                                 // Settings button (android:id="settingsButton")
-                                Button(action: { /* Open video properties */ }) {
+                                Button(action: { showProjectSettings = true }) {
                                     Image(systemName: "display")
                                         .font(.system(size: 20))
                                         .foregroundColor(.white)
@@ -193,7 +197,7 @@ struct EditingView: View {
                                 Spacer()
                                 
                                 // Play/Pause (android:id="playPauseButton", centered)
-                                Button(action: { engine.togglePlayPause() }) {
+                                Button(action: { engine.togglePlayPause(window: selectedClipPlaybackWindow()) }) {
                                     Image(systemName: engine.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                                         .font(.system(size: 36))
                                         .foregroundColor(.white)
@@ -620,6 +624,18 @@ struct EditingView: View {
         }) {
             ExportSheetView(project: project, timeline: timeline)
         }
+        .sheet(isPresented: $showProjectSettings) {
+            ProjectSettingsSheet(initial: engine.settings, engine: engine) { edited in
+                applyProjectSettings(edited)
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .alert("Playback", isPresented: Binding(get: { engine.notice != nil },
+                                                set: { if !$0 { engine.notice = nil } })) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(engine.notice ?? "")
+        }
         .fileImporter(
             isPresented: $showFileImporter,
             allowedContentTypes: [.audiovisualContent, .image],
@@ -720,6 +736,24 @@ struct EditingView: View {
         timeline.recalculateDuration()
         saveNow()
         showExport = true
+    }
+    
+    /// Android startPlayback(): with a clip selected, play only that clip (from its start when the
+    /// playhead is outside it) unless "Keep Playing with Chosen Clip" is on. nil = whole timeline.
+    private func selectedClipPlaybackWindow() -> ClosedRange<Double>? {
+        guard !keepPlayingWithSelection, let id = selectedClipID,
+              let clip = timeline.tracks.flatMap({ $0.clips }).first(where: { $0.id == id }),
+              clip.duration > 0 else { return nil }
+        return Double(clip.startTime)...Double(clip.startTime + clip.duration)
+    }
+    
+    /// The Project Settings panel closed: save what changed to project.settings (other keys kept) and
+    /// rebuild so the preview canvas, ruler and gesture geometry follow resolution / fps / stretch.
+    private func applyProjectSettings(_ edited: VideoSettings) {
+        guard !edited.sameProjectFields(as: engine.settings) else { return }
+        engine.settings = edited
+        edited.persistProjectEdits(projectPath: project.projectPath)
+        if !timeline.tracks.isEmpty { rebuildPreview(markDirty: false) }
     }
     
     /// Rebuilds the AVPlayer composition so the preview reflects the timeline's current
@@ -947,7 +981,13 @@ struct EditingView: View {
     
     private func openClipEditor() {
         guard let clip = selectedClip else { return }
-        withAnimation { activeOverlay = clip.type == .text ? .textEdit : .videoProperties }
+        withAnimation {
+            switch clip.type {
+            case .text: activeOverlay = .textEdit
+            case .effect: activeOverlay = .effectEdit      // no picture properties: its own panel
+            default: activeOverlay = .videoProperties
+            }
+        }
     }
     
     /// addKeyframeButton
@@ -1095,15 +1135,19 @@ struct EditingView: View {
         rebuildPreview()
     }
     
-    /// Equivalent of Android's `addEffectButton` handler. As with text clips, this places
-    /// an EFFECT clip on the timeline; it doesn't yet composite into the preview.
+    /// Equivalent of Android's `addEffectButton` handler: places an EFFECT clip (an adjustment layer,
+    /// see EditingView+Effects.swift) and opens the effect picker so the style is chosen right away.
     private func addEffectClip() {
         guard let id = selectedTrackID, let trackIndex = timeline.tracks.firstIndex(where: { $0.id == id }) else { return }
-        let clip = Clip(clipName: "EFFECT", startTime: Float(engine.currentTime), duration: 3, trackIndex: trackIndex, type: .effect, isClipHasAudio: false, width: 0, height: 0)
-        clip.effect = EffectTemplate(type: nil, style: "glitch-pulse", duration: 1.2, offset: 4.0)
+        let start = Float(engine.currentTime)
+        let clip = Clip(clipName: "EFFECT", startTime: start, duration: 3, trackIndex: trackIndex, type: .effect, isClipHasAudio: false, width: 0, height: 0)
+        clip.effect = EffectTemplate(type: nil, style: EffectCatalog.styles[0].key, duration: 3, offset: Double(start))
         commandManager.execute(AddClipCommand(track: timeline.tracks[trackIndex], clip: clip))
         timeline.recalculateDuration()
         rebuildPreview()
+        selectedClipID = clip.id
+        updateToolbarState()
+        withAnimation { activeOverlay = .effectEdit }
     }
     
     /// Equivalent of Android's `selectAllButton` — enters multi-select and selects every

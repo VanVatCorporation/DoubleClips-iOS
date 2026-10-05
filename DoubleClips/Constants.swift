@@ -71,6 +71,25 @@ enum Constants {
     static let EXPORT_PROGRESS_FRAME_INTERVAL: Int = 5
     static let EXPORT_LOG_FRAME_INTERVAL: Int      = 30
 
+    // MARK: - Project settings panel (Android: view_edit_specific_video_properties.xml)
+    /// Constant rate factor, clip cap: only used by FFmpeg exports on Android / desktop, but kept in project.settings.
+    static let PROJECT_CRF_MIN: Int             = 0
+    static let PROJECT_CRF_MAX: Int             = 51
+    static let PROJECT_CLIP_CAP_MIN: Int        = 1
+    static let PROJECT_CLIP_CAP_MAX: Int        = 999
+    /// Preview playback speed (= preview fps / project fps) the panel can ask the player for.
+    static let PREVIEW_SPEED_MIN: Double        = 0.1
+    static let PREVIEW_SPEED_MAX: Double        = 4.0
+    /// Timeline audio waveform bars (Android: thumbnailAudioBarWidth / Gap, default 1 / 0 px; a little
+    /// wider in points). Persisted on this device, unlike Android where they reset every launch.
+    static let WAVEFORM_BAR_WIDTH_DEFAULT: Int  = 2
+    static let WAVEFORM_BAR_GAP_DEFAULT: Int    = 1
+    static let WAVEFORM_BAR_MAX: Int            = 16
+    static let PREF_WAVEFORM_BAR_WIDTH_KEY      = "editor.waveformBarWidth"
+    static let PREF_WAVEFORM_BAR_GAP_KEY        = "editor.waveformBarGap"
+    /// "Keep Playing with Chosen Clip" (Android: runtime-only flag; persisted here).
+    static let PREF_KEEP_PLAYING_SELECTION_KEY  = "editor.keepPlayingWithSelection"
+
     // MARK: - Project share (ZIP export)
     /// Folder (inside the temporary directory) that holds finished project ZIPs until shared.
     static let SHARE_TEMP_DIRECTORY         = "DoubleClips-Share"
@@ -88,6 +107,10 @@ enum Constants {
     static let TEXT_DEFAULT_COLOR_HEX               = "#FFFFFF"
     /// Edits to a text style are committed this long after the last change (colour pickers fire continuously).
     static let TEXT_STYLE_COMMIT_DELAY_SECONDS: Double = 0.5
+
+    // MARK: - Effects
+    /// Shown under every built-in effect in the picker.
+    static let EFFECT_BUILTIN_AUTHOR = "@doubleclips"
 
     // MARK: - Transitions
     static let TRANSITION_KNOT_SIZE: CGFloat        = 28     // Android: 28 dp

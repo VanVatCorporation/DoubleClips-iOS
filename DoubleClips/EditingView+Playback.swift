@@ -17,6 +17,15 @@ extension EditingView {
         /// Project resolution / frame rate, refreshed on every rebuild from `project.settings`.
         @Published var settings: VideoSettings = VideoSettings.androidDefault
         
+        /// Project settings panel, "Preview Playback" (Android: previewFpsRuntime / isPlayingInReverse).
+        /// Speed is preview fps / project fps; 1 = normal. Applied live, also while playing.
+        @Published var previewSpeed: Double = 1.0 { didSet { applyLiveRate() } }
+        @Published var playsInReverse: Bool = false { didSet { applyLiveRate() } }
+        /// A short message the editor shows in an alert (e.g. reverse is not available).
+        @Published var notice: String?
+        /// True while the item carries a playback window (selected-clip playback) that must be removed again.
+        private var windowActive = false
+        
         private var timeObserverToken: Any?
         private var currentComposition: AVMutableComposition?
         private let scrubAudio = ScrubAudio()
@@ -47,16 +56,88 @@ extension EditingView {
             scrubAudio.shutdown()
         }
         
-        func togglePlayPause() {
+        /// `window`: when a clip is selected Android plays only that clip (unless "Keep Playing with
+        /// Chosen Clip" is on): playback starts at the clip's start if the playhead is outside it and
+        /// stops at its end. nil = the whole timeline.
+        func togglePlayPause(window: ClosedRange<Double>? = nil) {
             if player.timeControlStatus == .playing {
-                player.pause()
-                isPlaying = false
+                pause()
             } else {
-                scrubAudio.stop()                       // a scrub burst must not overlap playback
-                AudioSessionController.activatePlayback()
-                player.play()
-                isPlaying = true
+                startPlayback(window: window)
             }
+        }
+        
+        private var signedRate: Float { Float(previewSpeed) * (playsInReverse ? -1 : 1) }
+        
+        /// Speed / direction changed from the panel: follow immediately if the player is running.
+        private func applyLiveRate() {
+            guard player.timeControlStatus != .paused else { return }
+            if playsInReverse, player.currentItem?.canPlayReverse != true {
+                playsInReverse = false
+                notice = "This preview can't be played backwards."
+                return
+            }
+            player.rate = signedRate
+        }
+        
+        private func startPlayback(window: ClosedRange<Double>?) {
+            guard let item = player.currentItem else { return }
+            let total = item.duration.seconds
+            guard total.isFinite, total > 0 else { return }
+            if playsInReverse && !item.canPlayReverse {
+                playsInReverse = false
+                notice = "This preview can't be played backwards."
+                return
+            }
+            scrubAudio.stop()                       // a scrub burst must not overlap playback
+            AudioSessionController.activatePlayback()
+            
+            let reverse = playsInReverse
+            let eps = 0.02
+            let lower = window?.lowerBound ?? 0
+            let upper = min(window?.upperBound ?? total, total)
+            // Start inside the window / not stuck on the end we are about to run into.
+            var start = currentTime
+            if reverse {
+                if start <= lower + eps || start > upper + eps { start = upper }
+            } else {
+                if start >= upper - eps || start < lower - eps { start = lower }
+            }
+            
+            let begin: () -> Void = { [weak self] in
+                guard let self, self.player.currentItem === item else { return }
+                if window != nil {
+                    item.forwardPlaybackEndTime = CMTime(seconds: upper, preferredTimescale: 600)
+                    item.reversePlaybackEndTime = CMTime(seconds: lower, preferredTimescale: 600)
+                    self.windowActive = true
+                } else {
+                    item.forwardPlaybackEndTime = .invalid
+                    item.reversePlaybackEndTime = .invalid
+                    self.windowActive = false
+                }
+                self.player.rate = self.signedRate        // a non-zero rate starts playback
+                self.isPlaying = true
+            }
+            
+            if abs(start - currentTime) > 0.001 {
+                currentTime = start
+                player.seek(to: CMTime(seconds: start, preferredTimescale: 600),
+                            toleranceBefore: .zero, toleranceAfter: .zero) { finished in
+                    // A newer seek (the user scrubbed) cancels this start.
+                    guard finished else { return }
+                    DispatchQueue.main.async { begin() }
+                }
+            } else {
+                begin()
+            }
+        }
+        
+        /// Seeks past `forwardPlaybackEndTime` would be clamped, so the window must not outlive playback.
+        private func clearWindow() {
+            guard windowActive else { return }
+            windowActive = false
+            player.currentItem?.forwardPlaybackEndTime = .invalid
+            player.currentItem?.reversePlaybackEndTime = .invalid
         }
         
         // MARK: Smooth scrubbing (Apple QA1820 "chase time")
@@ -122,10 +203,11 @@ extension EditingView {
         /// user starts dragging the timeline while playing. Idempotent: safe to
         /// call even when already paused.
         func pause() {
-            if player.timeControlStatus == .playing {
+            if player.timeControlStatus != .paused {      // also while still starting up
                 player.pause()
             }
             isPlaying = false
+            clearWindow()
         }
         
         private func setupTimeObserver() {
@@ -138,11 +220,17 @@ extension EditingView {
                 // from timeline scrolling — letting this observer overwrite it every
                 // 50ms fought that, making the ruler/readout appear frozen no matter
                 // how far you scrolled.
-                if self.player.timeControlStatus == .playing {
+                let status = self.player.timeControlStatus
+                if status == .playing {
                     self.currentTime = time.seconds
                     self.isPlaying = true
+                    // Reverse playback reached the start of the timeline: stop (Android does too).
+                    if self.player.rate < 0, time.seconds <= 0.02 {
+                        self.pause()
+                    }
                 } else {
                     self.isPlaying = false
+                    if status == .paused { self.clearWindow() }     // playback ended by itself
                 }
             }
         }
@@ -189,6 +277,7 @@ extension EditingView {
             let composition = built.composition
             let scale: CMTimeScale = 600
             let item = AVPlayerItem(asset: composition)
+            item.audioTimePitchAlgorithm = .timeDomain      // keep the pitch when the preview speed != 1
             let end = composition.duration
             if let videoComposition = built.videoComposition {
                 item.videoComposition = videoComposition

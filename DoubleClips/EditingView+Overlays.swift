@@ -6,6 +6,7 @@ extension EditingView {
         var id: String { rawValue }
         case videoProperties
         case textEdit
+        case effectEdit
         case projectFiles
         case transition
     }
@@ -46,6 +47,8 @@ extension EditingView {
                                                      playhead: playhead, frameRate: frameRate, onChanged: onChanged)
                             case .textEdit:
                                 TextClipEditor(clip: clip, commandManager: commandManager, onChanged: onChanged)
+                            case .effectEdit:
+                                EffectClipEditor(clip: clip, commandManager: commandManager, onChanged: onChanged)
                             case .projectFiles, .transition:
                                 EmptyView()     // have their own panels (ProjectFilesPanel / TransitionPanel)
                             }
@@ -66,6 +69,7 @@ extension EditingView {
             switch type {
             case .videoProperties: return "Clip Properties"
             case .textEdit: return "Edit Text"
+            case .effectEdit: return "Effect"
             case .projectFiles: return "Project Files"
             case .transition: return "Transition"
             }

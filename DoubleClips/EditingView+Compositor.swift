@@ -34,6 +34,8 @@ extension EditingView {
             case video(trackID: CMPersistentTrackID, preferredTransform: CGAffineTransform)
             case image(URL)
             case text(TextSpec)
+            /// Not a picture: filters everything drawn before it (EditingView+Effects.swift).
+            case effect(style: String, intensity: Float)
         }
         var kind: Kind
         var clipID: UUID
@@ -138,8 +140,15 @@ extension EditingView {
                     for entry in instruction.entries {
                         switch entry {
                         case .layer(let layer):
-                            if let image = render(layer, request: request, canvas: canvas,
-                                                  time: time, stretchToFull: instruction.stretchToFull) {
+                            if case .effect(let style, let intensity) = layer.kind {
+                                // Adjustment layer: process the picture built so far, tracks after it stay clean.
+                                let elapsed = time - layer.startTime
+                                let progress = layer.duration > 0 ? min(max(elapsed / layer.duration, 0), 1) : 0
+                                frame = EffectRenderer.apply(style: style, intensity: CGFloat(intensity), to: frame,
+                                                             progress: CGFloat(progress), time: time,
+                                                             elapsed: elapsed, canvas: canvasRect)
+                            } else if let image = render(layer, request: request, canvas: canvas,
+                                                         time: time, stretchToFull: instruction.stretchToFull) {
                                 frame = image.composited(over: frame)
                             }
                         case .transition(let transition):
@@ -194,6 +203,9 @@ extension EditingView {
                 guard let source = Self.cachedImage(url) else { return nil }
                 return place(source, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull,
                              anim: Self.animationFrame(layer, at: time))
+                
+            case .effect:
+                return nil      // handled where the layers are composited
             }
         }
         

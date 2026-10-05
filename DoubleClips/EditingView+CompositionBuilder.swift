@@ -185,6 +185,16 @@ extension EditingView {
                         drawOrder += 1
                         contentEnd = max(contentEnd, clip.startTime + clip.duration)
                         
+                    case .effect:
+                        // Adjustment layer: no media. It sits in the draw order at its track's place and
+                        // filters whatever the earlier tracks produced during [startTime, endTime).
+                        let template = clip.effect
+                        let style = template?.style ?? ""
+                        if !style.isEmpty {
+                            layers.append((snapshot(.effect(style: style, intensity: template?.intensity ?? 1)), window, drawOrder))
+                            drawOrder += 1
+                        }
+                        
                     default:
                         break // EFFECT / SCENE_3D: not composited in the preview yet
                     }

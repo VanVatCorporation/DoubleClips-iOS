@@ -143,9 +143,12 @@ struct ClipWaveformView: View {
     var isBand: Bool = false
     @State private var envelope: WaveformEnvelope?
     
-    // Android: thumbnailAudioBarWidth / thumbnailAudioBarGap (px). A little wider in points.
-    private let barWidth: CGFloat = 2
-    private let barGap: CGFloat = 1
+    // Android: thumbnailAudioBarWidth / thumbnailAudioBarGap. Edited live in the project settings
+    // panel ("Thumbnail Preview"); the canvas redraws when they change.
+    @AppStorage(Constants.PREF_WAVEFORM_BAR_WIDTH_KEY) private var barWidthSetting = Constants.WAVEFORM_BAR_WIDTH_DEFAULT
+    @AppStorage(Constants.PREF_WAVEFORM_BAR_GAP_KEY) private var barGapSetting = Constants.WAVEFORM_BAR_GAP_DEFAULT
+    private var barWidth: CGFloat { CGFloat(min(max(barWidthSetting, 1), Constants.WAVEFORM_BAR_MAX)) }
+    private var barGap: CGFloat { CGFloat(min(max(barGapSetting, 0), Constants.WAVEFORM_BAR_MAX)) }
     
     var body: some View {
         let loadedEnvelope = self.envelope      // (own name: the .task below assigns the @State `envelope`)
