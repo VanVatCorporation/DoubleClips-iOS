@@ -8,6 +8,12 @@ import CoreMedia
 // `EditingPlayer.rebuildComposition`. Export has to render EXACTLY what the preview shows, so the
 // logic now lives here and both callers use it: the preview wraps the result in an AVPlayerItem,
 // the exporter feeds it to AVAssetReader/AVAssetWriter. Same compositor, same math, same frames.
+//
+// Transitions (EditingView+TransitionPlan.swift): while two clips of a track blend, both must be
+// decodable at the same moment, so each clip goes on a "lane" (a composition video track) that has
+// no other media at that time: normally one lane per timeline track, a second one only around a
+// transition. B also gets its pre-roll and A its post-roll footage inserted next to its own range
+// (the real footage when the file has it, otherwise a held first / last frame).
 
 extension EditingView {
 
@@ -34,21 +40,45 @@ extension EditingView {
             func cm(_ seconds: Float) -> CMTime { CMTime(seconds: Double(seconds), preferredTimescale: scale) }
             
             /// Draw order: track order, later tracks on top (FFmpegEdit's overlay chain order).
-            var layers: [(layer: RenderLayer, range: CMTimeRange)] = []
+            /// `range` is where the clip's picture is shown: its own range, or wider around a transition.
+            var layers: [(layer: RenderLayer, range: CMTimeRange, order: Int)] = []
+            var transitionSpecs: [(from: UUID, to: UUID, style: String, start: Float, end: Float)] = []
+            var layerByClip: [UUID: RenderLayer] = [:]
+            var drawOrder = 0
             var contentEnd: Float = 0
             var scrubSources: [ScrubSource] = []
             
             for trackModel in timeline.tracks.sorted(by: { $0.timelineIndex < $1.timelineIndex }) {
-                var compositionVideoTrack: AVMutableCompositionTrack?
+                /// Video lanes of this track (see the header). Reused whenever they are free.
+                var lanes: [AVMutableCompositionTrack] = []
                 var compositionAudioTrack: AVMutableCompositionTrack?
                 
-                // Sequential inserts require ascending order within a track.
-                for clip in trackModel.clips.sorted(by: { $0.startTime < $1.startTime }) {
+                func lane(freeFrom time: CMTime) -> AVMutableCompositionTrack? {
+                    if let free = lanes.first(where: { CMTimeCompare($0.timeRange.end, time) <= 0 }) { return free }
+                    guard let created = composition.addMutableTrack(withMediaType: .video,
+                                                                     preferredTrackID: kCMPersistentTrackID_Invalid) else { return nil }
+                    lanes.append(created)
+                    return created
+                }
+                
+                // Sequential inserts require ascending order within a lane.
+                let sortedClips = trackModel.clips.sorted(by: { $0.startTime < $1.startTime })
+                let plan = TransitionPlan.make(clips: sortedClips)
+                transitionSpecs += plan.windows.map { ($0.aID, $0.bID, $0.style, $0.start, $0.end) }
+                
+                for clip in sortedClips {
                     guard clip.duration > 0 else { continue }
                     let start = cm(clip.startTime)
                     let duration = cm(clip.duration)
                     let window = CMTimeRange(start: start, duration: duration)
                     let clipURL = clip.mediaURL(projectPath: projectDir.path)
+                    
+                    // Where the picture is shown: wider than the clip while it takes part in a blend.
+                    let shownStart = cm(max(0, plan.visibleStart[clip.id] ?? clip.startTime))
+                    let shownEnd = cm(plan.visibleEnd[clip.id] ?? (clip.startTime + clip.duration))
+                    let shown = CMTimeRange(start: shownStart, end: CMTimeMaximum(shownEnd, shownStart))
+                    let preRoll = Double(plan.preRoll[clip.id] ?? 0)
+                    let postRoll = Double(plan.postRoll[clip.id] ?? 0)
                     
                     func snapshot(_ kind: RenderLayer.Kind) -> RenderLayer {
                         RenderLayer(kind: kind, clipID: clip.id, startTime: clip.startTime,
@@ -65,12 +95,38 @@ extension EditingView {
                         let sourceRange = CMTimeRange(start: cm(clip.startClipTrim), duration: duration)
                         
                         if clip.type == .video, let sourceTrack = asset.tracks(withMediaType: .video).first {
-                            if compositionVideoTrack == nil {
-                                compositionVideoTrack = composition.addMutableTrack(withMediaType: .video,
-                                                                                    preferredTrackID: kCMPersistentTrackID_Invalid)
-                            }
-                            if let target = compositionVideoTrack,
-                               (try? target.insertTimeRange(sourceRange, of: sourceTrack, at: start)) != nil {
+                            // Footage around the trimmed range, for the blend (pre-roll / post-roll).
+                            let trim = Double(clip.startClipTrim)
+                            let length = Double(clip.duration)
+                            let sourceEnd = max(sourceTrack.timeRange.end.seconds, 0)
+                            let preReal = min(preRoll, max(0, trim))
+                            let preHold = max(0, preRoll - preReal)
+                            let postReal = min(postRoll, max(0, sourceEnd - (trim + length)))
+                            let postHold = max(0, postRoll - postReal)
+                            
+                            let firstNeeded = cm(clip.startTime - Float(preRoll))
+                            if let target = lane(freeFrom: firstNeeded) {
+                                let hold = CMTime(seconds: Constants.TRANSITION_HOLD_SAMPLE_SECONDS, preferredTimescale: scale)
+                                /// A frozen frame: one sample of the source stretched over `seconds`.
+                                func insertHold(sourceAt: Double, at: CMTime, seconds: Double) {
+                                    guard seconds > 0.001 else { return }
+                                    let at0 = max(0, min(sourceAt, max(0, sourceEnd - Constants.TRANSITION_HOLD_SAMPLE_SECONDS)))
+                                    let range = CMTimeRange(start: CMTime(seconds: at0, preferredTimescale: scale), duration: hold)
+                                    guard (try? target.insertTimeRange(range, of: sourceTrack, at: at)) != nil else { return }
+                                    target.scaleTimeRange(CMTimeRange(start: at, duration: hold),
+                                                          toDuration: CMTime(seconds: seconds, preferredTimescale: scale))
+                                }
+                                
+                                // Before the clip (it is the B of a transition): held first frame, then real footage.
+                                insertHold(sourceAt: trim - preReal, at: cm(clip.startTime - Float(preRoll)), seconds: preHold)
+                                if preReal > 0.001 {
+                                    let range = CMTimeRange(start: CMTime(seconds: trim - preReal, preferredTimescale: scale),
+                                                            duration: CMTime(seconds: preReal, preferredTimescale: scale))
+                                    _ = try? target.insertTimeRange(range, of: sourceTrack,
+                                                                    at: cm(clip.startTime - Float(preReal)))
+                                }
+                                
+                                if (try? target.insertTimeRange(sourceRange, of: sourceTrack, at: start)) != nil {
                                 // Speed: Android does setpts=PTS/speed inside the fixed [start, start+duration]
                                 // window — the source range keeps its length, it just plays faster/slower.
                                 let speed = Double(max(0.1, clip.videoProperties.valueSpeed))
@@ -82,9 +138,22 @@ extension EditingView {
                                         target.removeTimeRange(CMTimeRange(start: window.end, end: scaledEnd))
                                     }
                                 }
-                                layers.append((snapshot(.video(trackID: target.trackID,
-                                                                preferredTransform: sourceTrack.preferredTransform)), window))
-                                contentEnd = max(contentEnd, clip.startTime + clip.duration)
+                                    let layer = snapshot(.video(trackID: target.trackID,
+                                                                preferredTransform: sourceTrack.preferredTransform))
+                                    layers.append((layer, shown, drawOrder))
+                                    layerByClip[clip.id] = layer
+                                    drawOrder += 1
+                                    contentEnd = max(contentEnd, clip.startTime + clip.duration)
+                                    
+                                    // After the clip (it is the A of a transition): real footage, then a held last frame.
+                                    if postReal > 0.001 {
+                                        let range = CMTimeRange(start: CMTime(seconds: trim + length, preferredTimescale: scale),
+                                                                duration: CMTime(seconds: postReal, preferredTimescale: scale))
+                                        _ = try? target.insertTimeRange(range, of: sourceTrack, at: window.end)
+                                    }
+                                    insertHold(sourceAt: trim + length + postReal - Constants.TRANSITION_HOLD_SAMPLE_SECONDS,
+                                               at: CMTimeAdd(window.end, cm(Float(postReal))), seconds: postHold)
+                                }
                             }
                         }
                         
@@ -102,11 +171,15 @@ extension EditingView {
                         }
                         
                     case .image:
-                        layers.append((snapshot(.image(clipURL)), window))
+                        let layer = snapshot(.image(clipURL))
+                        layers.append((layer, shown, drawOrder))
+                        layerByClip[clip.id] = layer
+                        drawOrder += 1
                         contentEnd = max(contentEnd, clip.startTime + clip.duration)
                         
                     case .text:
-                        layers.append((snapshot(.text(clip.textContent ?? "", CGFloat(clip.fontSize ?? 30))), window))
+                        layers.append((snapshot(.text(clip.textContent ?? "", CGFloat(clip.fontSize ?? 30))), window, drawOrder))
+                        drawOrder += 1
                         contentEnd = max(contentEnd, clip.startTime + clip.duration)
                         
                     default:
@@ -114,6 +187,8 @@ extension EditingView {
                     }
                 }
             }
+            
+            // (transitions of every track are collected below, once all layers exist)
             
             // Images and text add no media, so they'd leave the composition shorter than the timeline.
             // An empty edit on a dummy track stretches the composition to the last clip's end.
@@ -142,8 +217,31 @@ extension EditingView {
                     let active = layers.filter {
                         CMTimeCompare($0.range.start, a) <= 0 && CMTimeCompare($0.range.end, b) >= 0
                     }.map { $0.layer }
+                    
+                    // A transition replaces its two clips (same track, so same place in the stack)
+                    // for exactly the stretch its window covers.
+                    let segStart = Float(a.seconds), segEnd = Float(b.seconds)
+                    let activeIDs = Set(active.map { $0.clipID })
+                    var entries: [RenderEntry] = []
+                    var consumed = Set<UUID>()
+                    for layer in active {
+                        if consumed.contains(layer.clipID) { continue }
+                        if let spec = transitionSpecs.first(where: {
+                            ($0.from == layer.clipID || $0.to == layer.clipID)
+                                && activeIDs.contains($0.from) && activeIDs.contains($0.to)
+                                && $0.start <= segStart + 0.001 && $0.end >= segEnd - 0.001
+                        }), let from = layerByClip[spec.from], let to = layerByClip[spec.to] {
+                            consumed.insert(spec.from)
+                            consumed.insert(spec.to)
+                            entries.append(.transition(RenderTransition(from: from, to: to, style: spec.style,
+                                                                        start: spec.start,
+                                                                        duration: spec.end - spec.start)))
+                        } else {
+                            entries.append(.layer(layer))
+                        }
+                    }
                     instructions.append(CompositorInstruction(timeRange: CMTimeRange(start: a, end: b),
-                                                              layers: active,
+                                                              entries: entries,
                                                               stretchToFull: projectSettings.isStretchToFull))
                 }
                 

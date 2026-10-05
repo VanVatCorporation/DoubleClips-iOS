@@ -47,24 +47,49 @@ extension EditingView {
         var duration: Float = 0
     }
     
+    /// A transition between two clips of one track (EditingView+TransitionPlan.swift): both sides are
+    /// rendered as full-canvas pictures at the SAME timeline time and blended by `progress`.
+    struct RenderTransition {
+        var from: RenderLayer
+        var to: RenderLayer
+        /// Normalized style key (trimmed, lower case).
+        var style: String
+        var start: Float
+        var duration: Float
+    }
+    
+    /// One thing to draw in a stretch of the timeline: a plain layer, or a transition standing in for
+    /// the two clips it joins.
+    enum RenderEntry {
+        case layer(RenderLayer)
+        case transition(RenderTransition)
+    }
+    
     final class CompositorInstruction: NSObject, AVVideoCompositionInstructionProtocol {
         let timeRange: CMTimeRange
         let enablePostProcessing = false
         let containsTweening = true
         let requiredSourceTrackIDs: [NSValue]?
         let passthroughTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
-        let layers: [RenderLayer]
+        /// Draw order, bottom to top.
+        let entries: [RenderEntry]
         let stretchToFull: Bool
         
-        init(timeRange: CMTimeRange, layers: [RenderLayer], stretchToFull: Bool) {
+        init(timeRange: CMTimeRange, entries: [RenderEntry], stretchToFull: Bool) {
             self.timeRange = timeRange
-            self.layers = layers
+            self.entries = entries
             self.stretchToFull = stretchToFull
             var ids: [NSValue] = []
             var seen = Set<CMPersistentTrackID>()
-            for layer in layers {
+            func collect(_ layer: RenderLayer) {
                 if case .video(let id, _) = layer.kind, seen.insert(id).inserted {
                     ids.append(NSNumber(value: id))
+                }
+            }
+            for entry in entries {
+                switch entry {
+                case .layer(let layer): collect(layer)
+                case .transition(let transition): collect(transition.from); collect(transition.to)
                 }
             }
             self.requiredSourceTrackIDs = ids
@@ -108,10 +133,26 @@ extension EditingView {
                     let time = Float(request.compositionTime.seconds)
                     
                     var frame = CIImage(color: .black).cropped(to: canvasRect)
-                    for layer in instruction.layers {
-                        if let image = render(layer, request: request, canvas: canvas,
-                                              time: time, stretchToFull: instruction.stretchToFull) {
-                            frame = image.composited(over: frame)
+                    for entry in instruction.entries {
+                        switch entry {
+                        case .layer(let layer):
+                            if let image = render(layer, request: request, canvas: canvas,
+                                                  time: time, stretchToFull: instruction.stretchToFull) {
+                                frame = image.composited(over: frame)
+                            }
+                        case .transition(let transition):
+                            // Both clips as full-canvas pictures at this very time, then the blend
+                            // (Android: two offscreen layers + TransitionBlendShader).
+                            let from = render(transition.from, request: request, canvas: canvas,
+                                              time: time, stretchToFull: instruction.stretchToFull)
+                            let to = render(transition.to, request: request, canvas: canvas,
+                                            time: time, stretchToFull: instruction.stretchToFull)
+                            let progress = transition.duration > 0
+                                ? CGFloat(min(max((time - transition.start) / transition.duration, 0), 1)) : 1
+                            if let blended = Self.blend(from, to, style: transition.style,
+                                                        progress: progress, canvas: canvasRect) {
+                                frame = blended.composited(over: frame)
+                            }
                         }
                     }
                     ciContext.render(frame, to: output, bounds: canvasRect, colorSpace: colorSpace)

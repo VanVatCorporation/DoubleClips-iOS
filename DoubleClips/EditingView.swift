@@ -18,6 +18,8 @@ struct EditingView: View {
     /// Ghost of the clip being long-press-dragged (nil = no drag). See EditingView+ClipDrag.swift.
     @State private var clipGhost: ClipGhost?
     /// Track reorder (EditingView+TrackReorder.swift): grips shown / the track being dragged.
+    /// The clip (A) whose end transition the transition panel is editing.
+    @State private var transitionClipID: UUID?
     @State private var isReorderingTracks = false
     @State private var trackReorder: TrackReorderDrag?
     
@@ -393,7 +395,10 @@ struct EditingView: View {
                                                     onKeyframeTap: { time in
                                                         engine.pause()
                                                         engine.seek(to: Double(max(0, time)))
-                                                    }
+                                                    },
+                                                    showKnots: selectedClipID == nil && selectedClipIDs.isEmpty
+                                                        && !isReorderingTracks && clipGhost == nil,
+                                                    onKnotTap: { clip in openTransition(for: clip) }
                                                 )
                                                 .offset(y: reorderOffset(forRowAt: index))
                                                 .animation(reorderAnimation(for: track), value: reorderOffset(forRowAt: index))
@@ -512,7 +517,26 @@ struct EditingView: View {
                 
                 // Specific Edit Overlays (slides up over editingZone)
                 if let overlayType = activeOverlay {
-                    if overlayType == .projectFiles {
+                    if overlayType == .transition {
+                        if let a = timeline.tracks.flatMap({ $0.clips }).first(where: { $0.id == transitionClipID }),
+                           let track = timeline.tracks.first(where: { $0.clips.contains(where: { $0.id == a.id }) }),
+                           let b = TransitionPlan.adjacentPairs(in: track.clips).first(where: { $0.a.id == a.id })?.b {
+                            TransitionPanel(
+                                clipA: a, clipB: b, track: track,
+                                commandManager: commandManager,
+                                onChanged: { rebuildPreview() },
+                                onPlay: { time in
+                                    engine.pause()
+                                    engine.seek(to: Double(time))
+                                    engine.togglePlayPause()
+                                },
+                                onClose: { withAnimation { activeOverlay = nil } }
+                            )
+                        } else {
+                            // The clips moved apart or were removed: nothing left to edit.
+                            Color.clear.onAppear { withAnimation { activeOverlay = nil } }
+                        }
+                    } else if overlayType == .projectFiles {
                         ProjectFilesPanel(
                             projectPath: project.projectPath,
                             timeline: timeline,
@@ -906,6 +930,13 @@ struct EditingView: View {
             description: "Move Track",
             undo: { apply(before) },
             redo: { apply(after) }))
+    }
+    
+    /// Knot tap: open the transition panel for the cut after `clip`.
+    private func openTransition(for clip: EditingView.Clip) {
+        engine.pause()
+        transitionClipID = clip.id
+        withAnimation { activeOverlay = .transition }
     }
     
     /// Toolbar "Files": the project's media library (EditingView+ProjectFiles.swift).
@@ -1380,6 +1411,9 @@ private struct TrackRowView: View {
     var onClipDragBegin: () -> Void = {}
     /// A keyframe diamond was tapped: the argument is its time on the timeline (Android: setCurrentTime).
     var onKeyframeTap: (Float) -> Void = { _ in }
+    /// Transition knots between touching clips (hidden while a clip is selected, like Android).
+    var showKnots: Bool = false
+    var onKnotTap: (EditingView.Clip) -> Void = { _ in }
     
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -1409,6 +1443,17 @@ private struct TrackRowView: View {
                 .offset(x: CGFloat(clip.startTime) * pps, y: Constants.TRACK_CLIP_INSET)
                 .onTapGesture {
                     onClipTap(clip)
+                }
+            }
+            
+            // Knots sit on the cut between two touching pictures (EditingView+Transitions.swift).
+            if showKnots {
+                ForEach(Array(TransitionPlan.adjacentPairs(in: track.clips).enumerated()), id: \.offset) { _, pair in
+                    if TransitionPlan.isPicture(pair.a) && TransitionPlan.isPicture(pair.b) {
+                        TransitionKnotHost(clipA: pair.a, onTap: { onKnotTap(pair.a) })
+                            .position(x: CGFloat(pair.a.startTime + pair.a.duration) * pps,
+                                      y: Constants.TRACK_HEIGHT / 2)
+                    }
                 }
             }
         }

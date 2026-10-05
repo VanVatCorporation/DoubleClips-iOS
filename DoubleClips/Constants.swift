@@ -81,6 +81,17 @@ enum Constants {
         "mp4", "mov", "m4v", "mkv", "webm", "3gp", "m4a", "mp3", "aac", "ogg", "opus", "flac",
         "jpg", "jpeg", "png", "heic", "gif", "webp", "zip"
     ]
+    // MARK: - Transitions
+    static let TRANSITION_KNOT_SIZE: CGFloat        = 28     // Android: 28 dp
+    static let TRANSITION_KNOT_HIT: CGFloat         = 38
+    /// New transitions (Android creates its knots with 0.2 s; half a second reads better on a phone).
+    static let TRANSITION_DEFAULT_SECONDS: Float    = 0.5
+    static let TRANSITION_MIN_SECONDS: Float        = 0.1
+    static let TRANSITION_MAX_SECONDS: Float        = 5
+    /// A frozen first / last frame (when a clip has no footage beyond its trim) is one source sample
+    /// this long, stretched over the blend.
+    static let TRANSITION_HOLD_SAMPLE_SECONDS: Double = 0.02
+
     // MARK: - Track reorder
     /// How fast the other rows slide out of the way while a track is dragged.
     static let TRACK_REORDER_SLIDE_SECONDS: Double = 0.15

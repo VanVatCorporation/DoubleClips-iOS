@@ -7,6 +7,7 @@ extension EditingView {
         case videoProperties
         case textEdit
         case projectFiles
+        case transition
     }
     
     // MARK: - Overlays Container
@@ -45,8 +46,8 @@ extension EditingView {
                                                      playhead: playhead, frameRate: frameRate, onChanged: onChanged)
                             case .textEdit:
                                 TextClipEditor(clip: clip, commandManager: commandManager, onChanged: onChanged)
-                            case .projectFiles:
-                                EmptyView()     // has its own panel (ProjectFilesPanel), never routed here
+                            case .projectFiles, .transition:
+                                EmptyView()     // have their own panels (ProjectFilesPanel / TransitionPanel)
                             }
                         } else {
                             Text("No clip selected").foregroundColor(.white)
@@ -66,6 +67,7 @@ extension EditingView {
             case .videoProperties: return "Clip Properties"
             case .textEdit: return "Edit Text"
             case .projectFiles: return "Project Files"
+            case .transition: return "Transition"
             }
         }
     }
