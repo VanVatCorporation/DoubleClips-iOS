@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Text clip editor
 //
@@ -15,6 +16,7 @@ extension EditingView {
     struct TextClipEditor: View {
         @ObservedObject var clip: EditingView.Clip
         let commandManager: CommandManager
+        let projectPath: String
         let onChanged: () -> Void
         
         @State private var draft: String = ""
@@ -25,6 +27,12 @@ extension EditingView {
         @State private var committedOut = EditingView.AnimationClip()
         @State private var commitTask: Task<Void, Never>?
         @State private var showAllFonts = false
+        // Style presets / imported fonts (EditingView+TextStyles.swift)
+        @State private var showStyles = false
+        @State private var savedStyles: [SavedTextStyle] = []
+        @State private var projectFonts: [ProjectFonts.Entry] = []
+        @State private var showFontImporter = false
+        @State private var fontError: String?
         
         private var style: TextStyle { clip.textStyle ?? TextStyle() }
         
@@ -43,6 +51,22 @@ extension EditingView {
                         clip.textContent = draft
                         scheduleCommit()
                     }
+                
+                section("STYLE")
+                HStack {
+                    Text(currentStyleName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    Spacer()
+                    Button { savedStyles = TextStyleLibrary.load(); showStyles = true } label: {
+                        Label("Browse styles…", systemImage: "square.grid.2x2")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(Capsule().fill(Color.mdPrimary))
+                    }
+                }
                 
                 section("FONT")
                 fontChips
@@ -145,14 +169,43 @@ extension EditingView {
                 committedStyle = style
                 committedIn = clip.inAnimation
                 committedOut = clip.outAnimation
+                savedStyles = TextStyleLibrary.load()
+                projectFonts = ProjectFonts.list(projectPath: projectPath)
             }
             .onDisappear { commitNow() }
             .background(Color.clear.sheet(isPresented: $showAllFonts) {
                 AllFontsSheet(selected: style.fontName) { name in
-                    mutate { $0.fontName = name }
+                    mutate { $0.fontName = name; $0.fontFile = "" }
                     commitNow()
                 }
             })
+            .background(Color.clear.sheet(isPresented: $showStyles) {
+                TextStyleBrowser(
+                    saved: savedStyles,
+                    selectedID: currentStyleID,
+                    onPickBuiltIn: { applyBuiltIn($0) },
+                    onPickSaved: { applySaved($0) },
+                    onSave: { name in
+                        TextStyleLibrary.save(name: name, style: style,
+                                              inId: animationID(clip.inAnimation), outId: animationID(clip.outAnimation))
+                        savedStyles = TextStyleLibrary.load()
+                    },
+                    onDelete: { item in
+                        TextStyleLibrary.delete(id: item.id)
+                        savedStyles = TextStyleLibrary.load()
+                    })
+                .presentationDetents([.medium, .large])
+            })
+            .background(Color.clear.fileImporter(isPresented: $showFontImporter,
+                                                 allowedContentTypes: ProjectFonts.contentTypes) { result in
+                importFont(result)
+            })
+            .alert("Couldn't import the font", isPresented: Binding(get: { fontError != nil },
+                                                                     set: { if !$0 { fontError = nil } })) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(fontError ?? "")
+            }
         }
         
         // MARK: Pieces
@@ -164,10 +217,30 @@ extension EditingView {
         private var fontChips: some View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
+                    Button { showFontImporter = true } label: {
+                        Label("Import…", systemImage: "square.and.arrow.down")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(Capsule().stroke(Color.white.opacity(0.4), lineWidth: 1))
+                    }
+                    ForEach(projectFonts) { entry in
+                        let selected = style.fontName == entry.name
+                        Button {
+                            mutate { $0.fontName = entry.name; $0.fontFile = entry.file }
+                            commitNow()
+                        } label: {
+                            Text(entry.title)
+                                .font(Font(TextFonts.font(TextStyle(fontName: entry.name), size: 14) as CTFont))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12).padding(.vertical, 7)
+                                .background(Capsule().fill(selected ? Color.mdPrimary : Color.white.opacity(0.1)))
+                        }
+                    }
                     ForEach(TextFonts.curated) { entry in
                         let selected = style.fontName == entry.name
                         Button {
-                            mutate { $0.fontName = entry.name }
+                            mutate { $0.fontName = entry.name; $0.fontFile = "" }
                             commitNow()
                         } label: {
                             Text(entry.title)
@@ -216,6 +289,69 @@ extension EditingView {
                 }), supportsOpacity: true)
             .font(.system(size: 12))
             .foregroundColor(.white.opacity(0.8))
+        }
+        
+        // MARK: Styles and fonts
+        
+        private func animationID(_ a: EditingView.AnimationClip) -> String? {
+            a.type.isEmpty || a.type == "none" ? nil : a.type
+        }
+        
+        private var currentBuiltIn: TextStylePreset? {
+            TextStyleCatalog.match(style, inAnimation: clip.inAnimation, outAnimation: clip.outAnimation)
+        }
+        private var currentSaved: SavedTextStyle? {
+            TextStyleCatalog.match(style, inAnimation: clip.inAnimation, outAnimation: clip.outAnimation, in: savedStyles)
+        }
+        /// The preset the clip's values still match, "Custom" once they differ.
+        private var currentStyleName: String { currentSaved?.name ?? currentBuiltIn?.name ?? "Custom" }
+        private var currentStyleID: String? { currentSaved?.id ?? currentBuiltIn?.id }
+        
+        /// A built-in keeps the clip's own font, bold / italic, alignment, spacing, shadow and box.
+        private func applyBuiltIn(_ preset: TextStylePreset) {
+            ClipAnimationStore.loadAll()
+            var s = style
+            preset.merge(into: &s)
+            clip.textStyle = s == TextStyle() ? nil : s
+            // Only animations that are installed are put on the clip; none = leave the clip's own.
+            if let id = preset.inAnimationId, ClipAnimationLoader.get(id, direction: .in) != nil {
+                clip.inAnimation = EditingView.AnimationClip(type: id, duration: Constants.TEXT_UNIT_DEFAULT_WINDOW_SECONDS)
+            }
+            if let id = preset.outAnimationId, ClipAnimationLoader.get(id, direction: .out) != nil {
+                clip.outAnimation = EditingView.AnimationClip(type: id, duration: Constants.TEXT_UNIT_DEFAULT_WINDOW_SECONDS)
+            }
+            commitNow()
+        }
+        
+        /// A saved style is the whole look: every style setting comes from it (text and size stay).
+        private func applySaved(_ saved: SavedTextStyle) {
+            ClipAnimationStore.loadAll()
+            clip.textStyle = saved.style == TextStyle() ? nil : saved.style
+            if let id = saved.inAnimationId, ClipAnimationLoader.get(id, direction: .in) != nil {
+                clip.inAnimation = EditingView.AnimationClip(type: id, duration: clip.inAnimation.duration)
+            }
+            if let id = saved.outAnimationId, ClipAnimationLoader.get(id, direction: .out) != nil {
+                clip.outAnimation = EditingView.AnimationClip(type: id, duration: clip.outAnimation.duration)
+            }
+            commitNow()
+        }
+        
+        private func importFont(_ result: Result<URL, Error>) {
+            switch result {
+            case .failure(let error):
+                fontError = error.localizedDescription
+            case .success(let url):
+                do {
+                    let faces = try ProjectFonts.importFont(from: url, projectPath: projectPath)
+                    projectFonts = ProjectFonts.list(projectPath: projectPath)
+                    if let first = faces.first {
+                        mutate { $0.fontName = first.name; $0.fontFile = first.file }
+                        commitNow()
+                    }
+                } catch {
+                    fontError = error.localizedDescription
+                }
+            }
         }
         
         // MARK: Animation

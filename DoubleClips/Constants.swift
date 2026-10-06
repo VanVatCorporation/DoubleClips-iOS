@@ -116,6 +116,15 @@ enum Constants {
     static let TEXT_UNIT_DEFAULT_ANIMATION_ID       = "pop-in"
     /// ...over this many seconds (a whole-text animation window; each unit gets a share of it).
     static let TEXT_UNIT_DEFAULT_WINDOW_SECONDS: Float = 1.0
+    
+    // MARK: - Text styles and fonts (EditingView+TextStyles.swift)
+    static let TEXT_STYLE_BUILTIN_AUTHOR            = "@doubleclips"
+    /// Saved styles ("My styles") live here, in Application Support: one list for every project.
+    static let TEXT_STYLES_FILENAME                 = "text-styles.json"
+    static let TEXT_STYLE_TILE_SAMPLE               = "Aa"
+    static let TEXT_STYLE_TILE_FONT_SIZE: CGFloat   = 54
+    /// Imported font files are copied into this folder of the project.
+    static let PROJECT_FONTS_DIRECTORY              = "Fonts"
 
     // MARK: - Effects
     /// Shown under every built-in effect in the picker.

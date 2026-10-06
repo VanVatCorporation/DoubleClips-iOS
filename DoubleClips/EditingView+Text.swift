@@ -16,6 +16,9 @@ extension EditingView {
     struct TextStyle: Codable, Hashable {
         /// PostScript name of the font ("" = the system font).
         var fontName: String = ""
+        /// Project-relative path of an imported font file ("Fonts/Name.ttf"), "" for an installed font.
+        /// The renderer only uses `fontName`; the project's Fonts folder is registered when it opens.
+        var fontFile: String = ""
         var bold: Bool = false
         var italic: Bool = false
         var colorHex: String = Constants.TEXT_DEFAULT_COLOR_HEX
@@ -56,7 +59,7 @@ extension EditingView {
         init(fontName: String) { self.fontName = fontName }
         
         enum CodingKeys: String, CodingKey {
-            case fontName, bold, italic, colorHex, alignment, letterSpacing, lineSpacing
+            case fontName, fontFile, bold, italic, colorHex, alignment, letterSpacing, lineSpacing
             case outlineWidth, outlineColorHex, shadowBlur, shadowOffsetX, shadowOffsetY, shadowColorHex
             case backgroundColorHex, backgroundPadding, backgroundRadius, wrapWidth
             case unitMode, stagger, order
@@ -68,6 +71,7 @@ extension EditingView {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             let d = TextStyle()
             fontName = try c.decodeIfPresent(String.self, forKey: .fontName) ?? d.fontName
+            fontFile = try c.decodeIfPresent(String.self, forKey: .fontFile) ?? d.fontFile
             bold = try c.decodeIfPresent(Bool.self, forKey: .bold) ?? d.bold
             italic = try c.decodeIfPresent(Bool.self, forKey: .italic) ?? d.italic
             colorHex = try c.decodeIfPresent(String.self, forKey: .colorHex) ?? d.colorHex

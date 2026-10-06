@@ -567,6 +567,7 @@ struct EditingView: View {
                             type: overlayType,
                             clip: selectedClip,
                             commandManager: commandManager,
+                            projectPath: project.projectPath,
                             playhead: Float(engine.currentTime),
                             frameRate: projectFrameRate,
                             onChanged: { rebuildPreview() }
@@ -810,6 +811,7 @@ struct EditingView: View {
         timeline.tracks = result.timeline.tracks
         timeline.duration = result.timeline.duration
         engine.settings = result.settings
+        ProjectFonts.registerAll(projectPath: project.projectPath)   // imported fonts, usable by name
         loadNote = result.recoveryNote
         // Only after this point may anything be written — an empty timeline can never
         // replace real data that simply hadn't been read yet.

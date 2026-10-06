@@ -17,6 +17,7 @@ extension EditingView {
         let type: OverlayType
         let clip: EditingView.Clip?
         let commandManager: CommandManager
+        let projectPath: String
         let playhead: Float
         let frameRate: Int
         let onChanged: () -> Void
@@ -46,7 +47,7 @@ extension EditingView {
                                 ClipPropertiesEditor(clip: clip, commandManager: commandManager,
                                                      playhead: playhead, frameRate: frameRate, onChanged: onChanged)
                             case .textEdit:
-                                TextClipEditor(clip: clip, commandManager: commandManager, onChanged: onChanged)
+                                TextClipEditor(clip: clip, commandManager: commandManager, projectPath: projectPath, onChanged: onChanged)
                             case .effectEdit:
                                 EffectClipEditor(clip: clip, commandManager: commandManager, onChanged: onChanged)
                             case .projectFiles, .transition:
