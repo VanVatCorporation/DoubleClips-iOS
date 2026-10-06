@@ -39,6 +39,17 @@ extension EditingView {
         /// Wrap long lines at this fraction of the canvas width (0 = never wrap).
         var wrapWidth: Float = 0
         
+        // Per-unit animation (EditingView+TextUnits.swift): the clip's In / Out animation runs on each
+        // character / word / line instead of on the whole text, each one starting a little after the last.
+        /// "none" (whole text), "character", "word" or "line".
+        var unitMode: String = "none"
+        /// Share of the animation window spent staggering the units' starts, 0...0.95 (0 = all together).
+        var stagger: Float = 0.6
+        /// Which unit goes first: "forward", "reverse", "centerOut" or "random" (stable for a given text).
+        var order: String = "forward"
+        
+        var animatesPerUnit: Bool { unitMode == "character" || unitMode == "word" || unitMode == "line" }
+        
         init() {}
         
         /// Handy for previews of a single font (`TextStyle(fontName: "Georgia")`).
@@ -48,6 +59,7 @@ extension EditingView {
             case fontName, bold, italic, colorHex, alignment, letterSpacing, lineSpacing
             case outlineWidth, outlineColorHex, shadowBlur, shadowOffsetX, shadowOffsetY, shadowColorHex
             case backgroundColorHex, backgroundPadding, backgroundRadius, wrapWidth
+            case unitMode, stagger, order
         }
         
         /// Every field is optional on read, so a style written by another platform (or a later
@@ -72,6 +84,9 @@ extension EditingView {
             backgroundPadding = try c.decodeIfPresent(Float.self, forKey: .backgroundPadding) ?? d.backgroundPadding
             backgroundRadius = try c.decodeIfPresent(Float.self, forKey: .backgroundRadius) ?? d.backgroundRadius
             wrapWidth = try c.decodeIfPresent(Float.self, forKey: .wrapWidth) ?? d.wrapWidth
+            unitMode = try c.decodeIfPresent(String.self, forKey: .unitMode) ?? d.unitMode
+            stagger = try c.decodeIfPresent(Float.self, forKey: .stagger) ?? d.stagger
+            order = try c.decodeIfPresent(String.self, forKey: .order) ?? d.order
         }
     }
     
@@ -227,7 +242,75 @@ enum TextRenderer {
         return CGSize(width: h * 2, height: h)
     }
     
-    private static func draw(_ spec: EditingView.TextSpec ) -> Rendered? {
+    /// Everything about a text block's layout that doesn't depend on which pass draws it. The per-unit
+    /// renderer (EditingView+TextUnits.swift) reads the same numbers, so a unit lands exactly where the
+    /// whole block would put it.
+    struct Metrics {
+        let spec: EditingView.TextSpec
+        let font: UIFont
+        let paragraph: NSParagraphStyle
+        let options: NSStringDrawingOptions
+        /// The text itself, without padding.
+        let textW: CGFloat
+        let textH: CGFloat
+        let outline: CGFloat
+        let shadowOn: Bool
+        let shadowReach: CGFloat
+        let boxOn: Bool
+        let boxPad: CGFloat
+        /// Padding around the text for outline / shadow / box.
+        let pad: CGFloat
+        /// Bitmap size (text + padding) and where the text sits in it.
+        let size: CGSize
+        let textRect: CGRect
+        
+        func attributes(_ extra: [NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any] {
+            var a: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: paragraph]
+            if spec.style.letterSpacing != 0 { a[.kern] = CGFloat(spec.style.letterSpacing) }
+            for (k, v) in extra { a[k] = v }
+            return a
+        }
+        
+        func shadow() -> NSShadow {
+            let style = spec.style
+            let s = NSShadow()
+            s.shadowBlurRadius = CGFloat(max(0, style.shadowBlur))
+            s.shadowOffset = CGSize(width: CGFloat(style.shadowOffsetX), height: CGFloat(style.shadowOffsetY))
+            s.shadowColor = HexColor.ui(style.shadowColorHex, fallback: UIColor.black.withAlphaComponent(0.6))
+            return s
+        }
+        
+        /// Outline pass: a stroke-only pass (positive stroke width = stroke without fill), centred on the
+        /// glyph edge, so it is twice as wide as asked and the fill pass covers the inner half.
+        var outlineExtra: [NSAttributedString.Key: Any] {
+            let style = spec.style
+            var extra: [NSAttributedString.Key: Any] = [
+                .strokeColor: HexColor.ui(style.outlineColorHex, fallback: .black),
+                .strokeWidth: (outline * 2 / max(spec.fontSize, 1)) * 100,
+                .foregroundColor: HexColor.ui(style.outlineColorHex, fallback: .black)
+            ]
+            if shadowOn { extra[.shadow] = shadow() }
+            return extra
+        }
+        
+        /// Fill pass; it carries the shadow when there is no outline pass.
+        var fillExtra: [NSAttributedString.Key: Any] {
+            var fill: [NSAttributedString.Key: Any] = [.foregroundColor: HexColor.ui(spec.style.colorHex, fallback: .white)]
+            if shadowOn && outline == 0 { fill[.shadow] = shadow() }
+            return fill
+        }
+        
+        /// The background box, into the current graphics context.
+        func drawBox() {
+            let style = spec.style
+            let box = textRect.insetBy(dx: -boxPad, dy: -boxPad)
+            let radius = min(CGFloat(max(0, style.backgroundRadius)), min(box.width, box.height) / 2)
+            HexColor.ui(style.backgroundColorHex, fallback: .clear).setFill()
+            UIBezierPath(roundedRect: box, cornerRadius: radius).fill()
+        }
+    }
+    
+    static func metrics(_ spec: EditingView.TextSpec) -> Metrics? {
         guard !spec.text.isEmpty else { return nil }
         let style = spec.style
         let font = TextFonts.font(style, size: spec.fontSize)
@@ -241,19 +324,15 @@ enum TextRenderer {
         paragraph.lineSpacing = CGFloat(style.lineSpacing)
         paragraph.lineBreakMode = .byWordWrapping
         
-        func attributes(_ extra: [NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any] {
-            var a: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: paragraph]
-            if style.letterSpacing != 0 { a[.kern] = CGFloat(style.letterSpacing) }
-            for (k, v) in extra { a[k] = v }
-            return a
-        }
+        var base: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: paragraph]
+        if style.letterSpacing != 0 { base[.kern] = CGFloat(style.letterSpacing) }
         
         let maxWidth: CGFloat = style.wrapWidth > 0.01
             ? max(20, CGFloat(style.wrapWidth) * spec.canvasWidth) : .greatestFiniteMagnitude
         let options: NSStringDrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading]
         let measured = (spec.text as NSString).boundingRect(
             with: CGSize(width: maxWidth, height: .greatestFiniteMagnitude),
-            options: options, attributes: attributes([:]), context: nil)
+            options: options, attributes: base, context: nil)
         let textW = ceil(measured.width), textH = ceil(measured.height)
         guard textW > 0, textH > 0 else { return nil }
         
@@ -265,45 +344,29 @@ enum TextRenderer {
         let boxPad = boxOn ? CGFloat(max(0, style.backgroundPadding)) : 0
         let pad = ceil(2 + outline + shadowReach + boxPad)
         
-        let size = CGSize(width: textW + pad * 2, height: textH + pad * 2)
-        let textRect = CGRect(x: pad, y: pad, width: textW, height: textH)
+        return Metrics(spec: spec, font: font, paragraph: paragraph, options: options,
+                       textW: textW, textH: textH, outline: outline, shadowOn: shadowOn,
+                       shadowReach: shadowReach, boxOn: boxOn, boxPad: boxPad, pad: pad,
+                       size: CGSize(width: textW + pad * 2, height: textH + pad * 2),
+                       textRect: CGRect(x: pad, y: pad, width: textW, height: textH))
+    }
+    
+    private static func draw(_ spec: EditingView.TextSpec ) -> Rendered? {
+        guard let m = metrics(spec) else { return nil }
         
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = false
-        let rendered = UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            if boxOn {
-                let box = textRect.insetBy(dx: -boxPad, dy: -boxPad)
-                let radius = min(CGFloat(max(0, style.backgroundRadius)), min(box.width, box.height) / 2)
-                HexColor.ui(style.backgroundColorHex, fallback: .clear).setFill()
-                UIBezierPath(roundedRect: box, cornerRadius: radius).fill()
+        let rendered = UIGraphicsImageRenderer(size: m.size, format: format).image { _ in
+            if m.boxOn { m.drawBox() }
+            if m.outline > 0 {
+                (spec.text as NSString).draw(with: m.textRect, options: m.options,
+                                             attributes: m.attributes(m.outlineExtra), context: nil)
             }
-            
-            func shadow() -> NSShadow {
-                let s = NSShadow()
-                s.shadowBlurRadius = CGFloat(max(0, style.shadowBlur))
-                s.shadowOffset = CGSize(width: CGFloat(style.shadowOffsetX), height: CGFloat(style.shadowOffsetY))
-                s.shadowColor = HexColor.ui(style.shadowColorHex, fallback: UIColor.black.withAlphaComponent(0.6))
-                return s
-            }
-            
-            // Outline: a stroke-only pass (positive stroke width = stroke without fill), centred on
-            // the glyph edge, so it is twice as wide as asked and the fill pass covers the inner half.
-            if outline > 0 {
-                var extra: [NSAttributedString.Key: Any] = [
-                    .strokeColor: HexColor.ui(style.outlineColorHex, fallback: .black),
-                    .strokeWidth: (outline * 2 / max(spec.fontSize, 1)) * 100,
-                    .foregroundColor: HexColor.ui(style.outlineColorHex, fallback: .black)
-                ]
-                if shadowOn { extra[.shadow] = shadow() }
-                (spec.text as NSString).draw(with: textRect, options: options, attributes: attributes(extra), context: nil)
-            }
-            
-            var fill: [NSAttributedString.Key: Any] = [.foregroundColor: HexColor.ui(style.colorHex, fallback: .white)]
-            if shadowOn && outline == 0 { fill[.shadow] = shadow() }
-            (spec.text as NSString).draw(with: textRect, options: options, attributes: attributes(fill), context: nil)
+            (spec.text as NSString).draw(with: m.textRect, options: m.options,
+                                         attributes: m.attributes(m.fillExtra), context: nil)
         }
         guard let cg = rendered.cgImage else { return nil }
-        return Rendered(image: CIImage(cgImage: cg), size: size)
+        return Rendered(image: CIImage(cgImage: cg), size: m.size)
     }
 }

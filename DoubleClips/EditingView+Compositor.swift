@@ -183,6 +183,11 @@ extension EditingView {
             
             switch layer.kind {
             case .text(let spec):
+                // Per-character / word / line animation, while an In / Out window is open.
+                if spec.style.animatesPerUnit,
+                   let units = renderTextUnits(layer, spec: spec, props: props, canvas: canvas, time: time) {
+                    return units
+                }
                 guard let rendered = TextRenderer.render(spec) else { return nil }
                 // The bitmap is the clip's own box; PosX/PosY move its top-left from the canvas-centred spot.
                 var box = layer
@@ -207,6 +212,96 @@ extension EditingView {
             case .effect:
                 return nil      // handled where the layers are composited
             }
+        }
+        
+        // MARK: Per-unit text (EditingView+TextUnits.swift)
+        //
+        // Android's OpenGLEdit.buildTextUnitCommands: the clip's In / Out animation is evaluated per unit,
+        // each unit starting a little after the previous one (stagger), and applied about the unit's OWN
+        // centre on top of the clip's (keyframed) position / scale / rotation / pivot, which move the
+        // whole block. Returns nil when the whole-block path should draw: no In / Out window is open
+        // (every unit would be neutral anyway) or the text can't be split.
+        
+        private func renderTextUnits(_ layer: RenderLayer, spec: TextSpec, props: VideoProperties,
+                                     canvas: CGSize, time t: Float) -> CIImage? {
+            let inDef = ClipAnimationLoader.get(layer.inAnimation.type, direction: .in)
+            let outDef = ClipAnimationLoader.get(layer.outAnimation.type, direction: .out)
+            if inDef == nil && outDef == nil { return nil }
+            let inRaw: Float = inDef != nil ? layer.inAnimation.duration : 0
+            let outRaw: Float = outDef != nil ? layer.outAnimation.duration : 0
+            let inDur: Float = inDef != nil ? ClipAnimation.fitDuration(inRaw, other: outRaw, clip: layer.duration) : 0
+            let outDur: Float = outDef != nil ? ClipAnimation.fitDuration(outRaw, other: inRaw, clip: layer.duration) : 0
+            let clipEnd = layer.startTime + layer.duration
+            let local = t - layer.startTime
+            let inOpen = inDef != nil && inDur > 0 && local >= 0 && local < inDur
+            let outOpen = outDef != nil && outDur > 0 && t >= clipEnd - outDur
+            guard inOpen || outOpen else { return nil }
+            guard let set = TextUnitRenderer.render(spec), !set.units.isEmpty else { return nil }
+            
+            let n = set.units.count
+            let stagger = min(max(spec.style.stagger, 0), 0.95)
+            let ranks = TextUnitRenderer.ranks(count: n, order: spec.style.order, seedText: spec.text)
+            
+            // The block's transform: the same quantities place() reads, without the clip-level animation.
+            let tw = set.blockSize.width, th = set.blockSize.height
+            let scaleX = CGFloat(props.valueScaleX), scaleY = CGFloat(props.valueScaleY)
+            let pivotX = CGFloat(props.valuePivotX), pivotY = CGFloat(props.valuePivotY)
+            let originX = (canvas.width - tw) / 2, originY = (canvas.height - th) / 2
+            let pivotCanvasX = CGFloat(props.valuePosX) + originX + pivotX * tw
+            let pivotCanvasY = CGFloat(props.valuePosY) + originY + pivotY * th
+            let blockRot = CGFloat(props.value(.rotInRadians))
+            let cosB = cos(blockRot), sinB = sin(blockRot)
+            
+            // The background box stays still under the units.
+            var result: CIImage?
+            if let box = set.box {
+                var boxLayer = layer
+                boxLayer.width = tw
+                boxLayer.height = th
+                result = place(box, layer: boxLayer, props: props, canvas: canvas, stretchToFull: false,
+                               anim: .neutral, origin: CGPoint(x: originX, y: originY))
+            }
+            
+            for (i, unit) in set.units.enumerated() {
+                let frac: Float = n > 1 ? Float(ranks[i]) / Float(n - 1) : 0
+                var anim = ClipAnimationFrame.neutral
+                if inOpen, let inDef {
+                    let delay = stagger * inDur * frac
+                    let length = max(inDur * (1 - stagger), 0.001)
+                    let e = local - delay
+                    if e < 0 { anim = inDef.evaluate(0) }                  // not started: held at the first frame
+                    else if e < length { anim = inDef.evaluate(e / length) }
+                    // else finished: neutral
+                } else if let outDef {
+                    let delay = stagger * outDur * frac
+                    let length = max(outDur * (1 - stagger), 0.001)
+                    let e = t - (clipEnd - outDur) - delay
+                    if e >= length { anim = outDef.evaluate(1) }           // finished: held at the last frame
+                    else if e >= 0 { anim = outDef.evaluate(e / length) }
+                    // else not started: neutral
+                }
+                
+                // Unit centre on the canvas (y down): block-relative, scaled and turned about the pivot.
+                let dx = (unit.rect.midX - pivotX * tw) * scaleX
+                let dy = (unit.rect.midY - pivotY * th) * scaleY
+                let cx = pivotCanvasX + dx * cosB - dy * sinB + CGFloat(anim.offsetX) * canvas.width
+                let cy = pivotCanvasY + dx * sinB + dy * cosB + CGFloat(anim.offsetY) * canvas.height
+                let rotation = blockRot + CGFloat(anim.rotationDegrees) * .pi / 180
+                let sx = scaleX * CGFloat(anim.scale), sy = scaleY * CGFloat(anim.scale)
+                guard sx > 0, sy > 0 else { continue }
+                
+                var image = Self.colorAdjusted(unit.image, props, anim: anim)
+                if anim.hasWarp { image = Self.warped(image, anim: anim) }
+                // Blur isn't applied per unit (Android doesn't either).
+                let w = unit.rect.width, h = unit.rect.height
+                let transform = CGAffineTransform(translationX: -w / 2, y: -h / 2)
+                    .concatenating(CGAffineTransform(scaleX: sx, y: sy))
+                    .concatenating(CGAffineTransform(rotationAngle: -rotation))      // y-up: clockwise is negative
+                    .concatenating(CGAffineTransform(translationX: cx, y: canvas.height - cy))
+                let placed = image.transformed(by: transform)
+                result = result.map { placed.composited(over: $0) } ?? placed
+            }
+            return result
         }
         
         /// Color adjustments (same order as FFmpegEdit: hue/sat/brightness → temperature → opacity),

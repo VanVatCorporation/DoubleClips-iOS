@@ -21,6 +21,8 @@ extension EditingView {
         @State private var committedText: String = ""
         @State private var committedSize: Float = 30
         @State private var committedStyle: TextStyle = TextStyle()
+        @State private var committedIn = EditingView.AnimationClip()
+        @State private var committedOut = EditingView.AnimationClip()
         @State private var commitTask: Task<Void, Never>?
         @State private var showAllFonts = false
         
@@ -96,6 +98,35 @@ extension EditingView {
                 Text("The box shows once its colour has some opacity.")
                     .font(.system(size: 10)).foregroundColor(.white.opacity(0.45))
                 
+                section("ANIMATION")
+                animationMenu("In", \.inAnimation, .in)
+                animationMenu("Out", \.outAnimation, .out)
+                Picker("Animate by", selection: Binding(get: { style.unitMode }, set: { setUnitMode($0) })) {
+                    Text("Whole").tag("none")
+                    Text("Letters").tag("character")
+                    Text("Words").tag("word")
+                    Text("Lines").tag("line")
+                }
+                .pickerStyle(.segmented)
+                if style.animatesPerUnit {
+                    slider("Stagger", get: { style.stagger }, set: { v in mutate { $0.stagger = min(max(v, 0), 0.95) } },
+                           range: 0...0.95, resetTo: 0.6)
+                    HStack {
+                        Text("Order").font(.system(size: 12)).foregroundColor(.white.opacity(0.8))
+                            .frame(width: 80, alignment: .leading)
+                        Picker("Order", selection: Binding(get: { style.order },
+                                                           set: { value in mutate { $0.order = value }; commitNow() })) {
+                            Text("Forward").tag("forward")
+                            Text("Reverse").tag("reverse")
+                            Text("Centre out").tag("centerOut")
+                            Text("Random").tag("random")
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+                Text("Letters, words or lines enter and leave one after another using the In / Out animation. A background box stays still. Very long text (over \(Constants.TEXT_UNIT_MAX_COUNT) pieces) animates as a whole.")
+                    .font(.system(size: 10)).foregroundColor(.white.opacity(0.45))
+                
                 Button {
                     mutate { $0 = TextStyle() }
                     commitNow()
@@ -112,6 +143,8 @@ extension EditingView {
                 committedText = draft
                 committedSize = clip.fontSize ?? 30
                 committedStyle = style
+                committedIn = clip.inAnimation
+                committedOut = clip.outAnimation
             }
             .onDisappear { commitNow() }
             .background(Color.clear.sheet(isPresented: $showAllFonts) {
@@ -185,6 +218,69 @@ extension EditingView {
             .foregroundColor(.white.opacity(0.8))
         }
         
+        // MARK: Animation
+        
+        /// In / Out animation of the clip: a menu and a length. (The same slots as the clip properties
+        /// panel; the unit mode above decides whether they run on the whole text or on each unit.)
+        @ViewBuilder
+        private func animationMenu(_ label: String,
+                                   _ kp: ReferenceWritableKeyPath<EditingView.Clip, EditingView.AnimationClip>,
+                                   _ direction: ClipAnimation.Direction) -> some View {
+            let _ = ClipAnimationStore.loadAll()
+            let current = clip[keyPath: kp].type
+            let installed = ClipAnimationLoader.list(direction)
+            let isNone = current.isEmpty || current == "none"
+            let currentName = isNone ? "None"
+                : (installed.first(where: { $0.id == current })?.name ?? "\(current) (not installed)")
+            
+            HStack {
+                Text("\(label) animation").font(.system(size: 12)).foregroundColor(.white.opacity(0.8))
+                    .frame(width: 80, alignment: .leading)
+                Menu {
+                    Button("None") { setAnimation(kp, id: "none") }
+                    ForEach(installed, id: \.id) { animation in
+                        Button(animation.name) { setAnimation(kp, id: animation.id) }
+                    }
+                } label: {
+                    HStack {
+                        Text(currentName).font(.system(size: 13)).foregroundColor(.white).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundColor(.white.opacity(0.6))
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 7)
+                    .background(Color.white.opacity(0.08))
+                    .cornerRadius(6)
+                }
+            }
+            if !isNone {
+                slider("\(label) length", get: { clip[keyPath: kp].duration },
+                       set: { v in clip[keyPath: kp].duration = max(0, v); scheduleCommit() },
+                       range: 0.05...4, resetTo: 0.5)
+            }
+        }
+        
+        private func setAnimation(_ kp: ReferenceWritableKeyPath<EditingView.Clip, EditingView.AnimationClip>, id: String) {
+            guard clip[keyPath: kp].type != id else { return }
+            clip[keyPath: kp].type = id
+            if let animation = ClipAnimationLoader.get(id) {
+                clip[keyPath: kp].duration = animation.defaultDuration
+            }
+            commitNow()
+        }
+        
+        /// Picking letters / words / lines on a clip with no animation yet gives it the default In
+        /// animation, otherwise the choice would show nothing.
+        private func setUnitMode(_ mode: String) {
+            mutate { $0.unitMode = mode }
+            let hasNone = { (a: EditingView.AnimationClip) in a.type.isEmpty || a.type == "none" }
+            if mode != "none", hasNone(clip.inAnimation), hasNone(clip.outAnimation),
+               ClipAnimationLoader.get(Constants.TEXT_UNIT_DEFAULT_ANIMATION_ID, direction: .in) != nil {
+                clip.inAnimation = EditingView.AnimationClip(type: Constants.TEXT_UNIT_DEFAULT_ANIMATION_ID,
+                                                             duration: Constants.TEXT_UNIT_DEFAULT_WINDOW_SECONDS)
+            }
+            commitNow()
+        }
+        
         // MARK: Editing / undo
         
         /// Remembers the state to undo to, once per burst of edits.
@@ -215,11 +311,16 @@ extension EditingView {
             let oldText = committedText, newText = clip.textContent ?? ""
             let oldSize = committedSize, newSize = clip.fontSize ?? 30
             let oldStyle = committedStyle, newStyle = clip.textStyle ?? TextStyle()
-            guard oldText != newText || oldSize != newSize || oldStyle != newStyle else { return }
+            let oldIn = committedIn, newIn = clip.inAnimation
+            let oldOut = committedOut, newOut = clip.outAnimation
+            guard oldText != newText || oldSize != newSize || oldStyle != newStyle
+                    || oldIn != newIn || oldOut != newOut else { return }
             
             committedText = newText
             committedSize = newSize
             committedStyle = newStyle
+            committedIn = newIn
+            committedOut = newOut
             let changed = onChanged
             
             commandManager.execute(GenericCommand(description: "Edit text",
@@ -227,12 +328,16 @@ extension EditingView {
                     target.textContent = oldText
                     target.fontSize = oldSize
                     target.textStyle = oldStyle == TextStyle() ? nil : oldStyle
+                    target.inAnimation = oldIn
+                    target.outAnimation = oldOut
                     changed()
                 },
                 redo: {
                     target.textContent = newText
                     target.fontSize = newSize
                     target.textStyle = newStyle == TextStyle() ? nil : newStyle
+                    target.inAnimation = newIn
+                    target.outAnimation = newOut
                     changed()
                 }))
             changed()

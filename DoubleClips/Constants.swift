@@ -107,6 +107,15 @@ enum Constants {
     static let TEXT_DEFAULT_COLOR_HEX               = "#FFFFFF"
     /// Edits to a text style are committed this long after the last change (colour pickers fire continuously).
     static let TEXT_STYLE_COMMIT_DELAY_SECONDS: Double = 0.5
+    /// Per-character / word / line animation: more units than this and the whole text animates as one
+    /// (every unit is its own layer, so a long paragraph would make the preview crawl).
+    static let TEXT_UNIT_MAX_COUNT: Int             = 160
+    /// Extra bitmap room beside each unit for slanted letters (a fraction of the font size).
+    static let TEXT_UNIT_OVERHANG_FACTOR: CGFloat   = 0.2
+    /// Picking a unit mode on a clip with no In / Out animation gives it this In animation...
+    static let TEXT_UNIT_DEFAULT_ANIMATION_ID       = "pop-in"
+    /// ...over this many seconds (a whole-text animation window; each unit gets a share of it).
+    static let TEXT_UNIT_DEFAULT_WINDOW_SECONDS: Float = 1.0
 
     // MARK: - Effects
     /// Shown under every built-in effect in the picker.
