@@ -125,6 +125,8 @@ extension EditingView {
         /// pickers below re-read the animation registry.
         @State private var showAnimationPacks = false
         @State private var registryVersion = 0
+        /// The fade length a slider drag started from (for its one undo step).
+        @State private var fadeBefore: Float?
         
         private var isVisual: Bool { clip.type == .video || clip.type == .image || clip.type == .text }
         private var hasAudio: Bool { clip.type == .video || clip.type == .audio }
@@ -169,6 +171,10 @@ extension EditingView {
                     slider("Speed", \.valueSpeed, 0.1...4, reset: 1)
                     field("Volume", \.valueVolume)
                     toggle("Mute audio", clip.isMute) { $0.isMute = $1 }
+                    if clip.isClipHasAudio && !clip.isMute {
+                        fadeSlider("Fade in", \.audioFadeIn)
+                        fadeSlider("Fade out", \.audioFadeOut)
+                    }
                     if clip.type == .video {
                         toggle("Reverse", clip.isReverse) { $0.isReverse = $1 }
                     }
@@ -246,6 +252,30 @@ extension EditingView {
                             _ range: ClosedRange<Float>, reset: Float) -> some View {
             PropertySlider(label: label, value: binding(kp), range: range, resetTo: reset,
                            onEditingBegan: beginEdit, onEditingEnded: endEdit)
+        }
+        
+        /// Audio fade of the clip (seconds): a clip property rather than a keyframeable value, so its own
+        /// undo step. The preview re-renders when the drag ends.
+        private func fadeSlider(_ label: String, _ kp: ReferenceWritableKeyPath<EditingView.Clip, Float>) -> some View {
+            let limit = max(0.1, min(clip.duration, Constants.AUDIO_FADE_MAX_SECONDS))
+            return PropertySlider(
+                label: label,
+                value: Binding(get: { clip[keyPath: kp] }, set: { clip[keyPath: kp] = max(0, $0) }),
+                range: 0...limit, resetTo: 0,
+                onEditingBegan: { if fadeBefore == nil { fadeBefore = clip[keyPath: kp] } },
+                onEditingEnded: {
+                    guard let before = fadeBefore else { return }
+                    fadeBefore = nil
+                    let after = clip[keyPath: kp]
+                    guard before != after else { return }
+                    let target = clip
+                    commandManager.execute(GenericCommand(
+                        description: "\(label): \(clip.clipName)",
+                        undo: { target[keyPath: kp] = before; onChanged() },
+                        redo: { target[keyPath: kp] = after; onChanged() }
+                    ))
+                    onChanged()
+                })
         }
         
         private func trimBinding(start: Bool) -> Binding<Float> {

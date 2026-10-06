@@ -126,6 +126,9 @@ extension EditingView {
         /// Desktop-only field (ClipRenderer / AudioUtils apply it). Android has no such field.
         /// When missing: 1 for clips with audio, like the desktop constructor, instead of Gson's 0.
         @Published var audioVolume: Float = 1
+        /// Seconds the clip's audio takes to fade in from its start / out to its end (iOS-only optional keys).
+        @Published var audioFadeIn: Float = 0
+        @Published var audioFadeOut: Float = 0
         
         @Published var additionalFFmpegCommand: String?
         @Published var sceneConfig: String?        // SCENE_3D
@@ -160,6 +163,7 @@ extension EditingView {
             case isReverse
             case removeBackground
             case audioVolume
+            case audioFadeIn, audioFadeOut
             case additionalFFmpegCommand
             case sceneConfig
             case textureClipName
@@ -218,6 +222,8 @@ extension EditingView {
             self.isReverse = try container.decodeIfPresent(Bool.self, forKey: .isReverse) ?? false
             self.audioVolume = try container.decodeIfPresent(Float.self, forKey: .audioVolume) ?? (self.isClipHasAudio ? 1 : 0)
             self.removeBackground = try container.decodeIfPresent(Bool.self, forKey: .removeBackground) ?? false
+            self.audioFadeIn = try container.decodeIfPresent(Float.self, forKey: .audioFadeIn) ?? 0
+            self.audioFadeOut = try container.decodeIfPresent(Float.self, forKey: .audioFadeOut) ?? 0
             self.additionalFFmpegCommand = try container.decodeIfPresent(String.self, forKey: .additionalFFmpegCommand)
             self.sceneConfig = try container.decodeIfPresent(String.self, forKey: .sceneConfig)
             self.textureClipName = try container.decodeIfPresent(String.self, forKey: .textureClipName)
@@ -252,6 +258,8 @@ extension EditingView {
             try container.encode(isReverse, forKey: .isReverse)
             try container.encode(removeBackground, forKey: .removeBackground)
             try container.encode(audioVolume, forKey: .audioVolume)
+            try container.encode(audioFadeIn, forKey: .audioFadeIn)
+            try container.encode(audioFadeOut, forKey: .audioFadeOut)
             try container.encodeIfPresent(additionalFFmpegCommand, forKey: .additionalFFmpegCommand)
             try container.encodeIfPresent(sceneConfig, forKey: .sceneConfig)
             try container.encodeIfPresent(textureClipName, forKey: .textureClipName)
