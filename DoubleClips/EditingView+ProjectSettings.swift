@@ -42,6 +42,7 @@ struct ProjectSettingsSheet: View {
     @AppStorage(Constants.PREF_KEEP_PLAYING_SELECTION_KEY) private var keepPlayingWithSelection = false
     @AppStorage(Constants.PREF_WAVEFORM_BAR_WIDTH_KEY) private var barWidth = Constants.WAVEFORM_BAR_WIDTH_DEFAULT
     @AppStorage(Constants.PREF_WAVEFORM_BAR_GAP_KEY) private var barGap = Constants.WAVEFORM_BAR_GAP_DEFAULT
+    @AppStorage(Constants.PREF_CANVAS_SNAPPING_KEY) private var snapToGuides = true
     @State private var barWidthText: String
     @State private var barGapText: String
     
@@ -95,6 +96,7 @@ struct ProjectSettingsSheet: View {
                             .padding(.horizontal, 4)
                         playbackSection
                         thumbnailSection
+                        canvasSection
                     }
                     .padding(16)
                 }
@@ -268,6 +270,17 @@ struct ProjectSettingsSheet: View {
         .onChange(of: barGapText) { text in
             guard let value = Int(text.trimmingCharacters(in: .whitespaces)) else { return }
             barGap = min(max(value, 0), Constants.WAVEFORM_BAR_MAX)
+        }
+    }
+    
+    /// Not in Android's panel: touch has no Ctrl / Cmd key to turn snapping off for one drag.
+    private var canvasSection: some View {
+        ExportSection(title: "Canvas Editing") {
+            VStack(spacing: 0) {
+                SettingRow(icon: "rectangle.dashed", label: "Snap to Guides") {
+                    Toggle("", isOn: $snapToGuides).labelsHidden()
+                }
+            }
         }
     }
     

@@ -95,7 +95,11 @@ extension EditingView.Clip {
         let base = live?.properties ?? videoProperties
         let keys = live?.keyframes ?? keyframes
         let props = keys.resolved(base: base, clipStartTime: startTime, at: time)
-        
+        return quad(for: props, canvas: canvas, stretchToFull: stretchToFull)
+    }
+    
+    /// The quad these exact properties would give the clip (the gizmo uses it to try out a scale).
+    func quad(for props: VideoProperties, canvas: CGSize, stretchToFull: Bool) -> [CGPoint]? {
         switch type {
         case .video, .image:
             // Same fallbacks as ClipCompositor.place; clips without a stored size use the canvas.

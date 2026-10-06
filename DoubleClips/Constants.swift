@@ -117,6 +117,16 @@ enum Constants {
     /// ...over this many seconds (a whole-text animation window; each unit gets a share of it).
     static let TEXT_UNIT_DEFAULT_WINDOW_SECONDS: Float = 1.0
     
+    // MARK: - Canvas gizmo: resize handles + snapping (EditingView+PreviewHandles.swift)
+    /// Touch radius around a handle (the drawn dot is much smaller); handles win over the move area.
+    static let CANVAS_HANDLE_HIT_POINTS: CGFloat        = 22
+    /// An edge handle only appears when the edge is at least this long on screen.
+    static let CANVAS_EDGE_MIN_SCREEN_LENGTH: CGFloat   = 56
+    static let CANVAS_MIN_SCALE_FACTOR: CGFloat         = 0.02
+    /// Snapping pulls within this many SCREEN points, so it feels the same at any preview size.
+    static let CANVAS_SNAP_SCREEN_POINTS: CGFloat       = 8
+    static let PREF_CANVAS_SNAPPING_KEY                 = "editor.canvasSnapping"
+    
     // MARK: - Text styles and fonts (EditingView+TextStyles.swift)
     static let TEXT_STYLE_BUILTIN_AUTHOR            = "@doubleclips"
     /// Saved styles ("My styles") live here, in Application Support: one list for every project.
