@@ -287,7 +287,7 @@ extension EditingView {
         var valueTemperature: Float = 6500
         
         /// Same order/cases as Android's VideoProperties.ValueType.
-        enum ValueType: CaseIterable {
+        enum ValueType: String, Codable, CaseIterable {
             case posX, posY, rot, rotInRadians, scaleX, scaleY, pivotX, pivotY, opacity, speed, volume, hue, saturation, brightness, temperature
         }
         
@@ -314,21 +314,26 @@ extension EditingView {
         }
     }
     
-    struct AnimatedProperty: Codable {
+    struct AnimatedProperty: Codable, Equatable {
         var keyframes: [Keyframe] = []
     }
     
-    struct Keyframe: Codable {
+    struct Keyframe: Codable, Equatable {
         var time: Float // seconds in local clip time
         var frame: Int64 = 0 // local clip frame (Android: reassignKeyframes)
         var value: VideoProperties
         var easing: EasingType
+        /// The properties this keyframe animates (iOS-only optional key; EditingView+PerPropertyKeyframes.swift).
+        /// nil = all of them, which is what every keyframe from Android / desktop / older builds means.
+        var channels: [VideoProperties.ValueType]?
         
-        init(time: Float, value: VideoProperties, easing: EasingType = .none, frame: Int64 = 0) {
+        init(time: Float, value: VideoProperties, easing: EasingType = .none, frame: Int64 = 0,
+             channels: [VideoProperties.ValueType]? = nil) {
             self.time = time
             self.value = value
             self.easing = easing
             self.frame = frame
+            self.channels = channels
         }
         
         init(from decoder: Decoder) throws {
@@ -337,6 +342,12 @@ extension EditingView {
             frame = try c.decodeIfPresent(Int64.self, forKey: .frame) ?? 0
             value = try c.decodeIfPresent(VideoProperties.self, forKey: .value) ?? VideoProperties()
             easing = try c.decodeIfPresent(EasingType.self, forKey: .easing) ?? .none
+            // Unknown names are skipped rather than failing the whole project.
+            if let names = try c.decodeIfPresent([String].self, forKey: .channels) {
+                channels = names.compactMap { VideoProperties.ValueType(rawValue: $0) }.filter { $0 != .rotInRadians }
+            } else {
+                channels = nil
+            }
         }
     }
     

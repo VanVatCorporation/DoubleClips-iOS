@@ -45,8 +45,11 @@ extension EditingView {
         private var startProps = VideoProperties()
         private var startKeys = AnimatedProperty()
         private var basis = VideoProperties()
-        private var workingKeys = AnimatedProperty()
-        private var keyIndex: Int?
+        /// Seconds into the clip the gesture happens at, and the frame rate keyframes snap to.
+        private var localTime: Float = 0
+        private var frameRate = 30
+        /// The properties a gesture can change.
+        private static let gestureChannels: [VideoProperties.ValueType] = [.posX, .posY, .rot, .scaleX, .scaleY]
         
         private var translation: CGSize = .zero
         private var scale: CGFloat = 1
@@ -67,36 +70,17 @@ extension EditingView {
             translation = .zero; scale = 1; rotation = 0
             startProps = clip.videoProperties
             startKeys = clip.keyframes
-            workingKeys = clip.keyframes
-            keyIndex = nil
-            basis = clip.videoProperties
+            // What is on screen at the playhead (static values, or the animated ones).
+            basis = clip.keyframes.resolved(clip: clip, at: playhead)
+            localTime = max(0, min(playhead - clip.startTime, clip.duration))
+            self.frameRate = frameRate
             snapLines = CanvasGizmo.snapLines(canvas: canvas, others: otherQuads)
             snappingOn = UserDefaults.standard.object(forKey: Constants.PREF_CANVAS_SNAPPING_KEY) as? Bool ?? true
             guideX = nil; guideY = nil
             feedback.prepare()
-            // Whatever way `basis` ends up (static values or the keyframe at the playhead), the box the
-            // gesture started from:
-            defer {
-                startQuad = clip.quad(for: basis, canvas: canvas, stretchToFull: stretchToFull) ?? []
-                if startQuad.count != 4 { self.handle = nil }
-            }
-            
-            guard !clip.keyframes.keyframes.isEmpty else { return }
-            let local = playhead - clip.startTime
-            if let idx = workingKeys.keyframes.firstIndex(where: { abs($0.time - local) <= EditingView.minimumKeyframeSpacing }) {
-                keyIndex = idx
-                basis = workingKeys.keyframes[idx].value
-            } else {
-                // New keyframe starts from the CURRENT interpolated look so nothing jumps.
-                let current = clip.keyframes.resolved(clip: clip, at: playhead)
-                let clamped = max(0, min(local, clip.duration))
-                workingKeys.keyframes.append(Keyframe(time: clamped, value: current, easing: .none))
-                workingKeys.sortKeyframes()
-                workingKeys.reassignKeyframes(frameRate: frameRate)
-                let tolerance = 1.0 / Float(max(frameRate, 1))
-                keyIndex = workingKeys.keyframes.firstIndex(where: { abs($0.time - clamped) <= tolerance })
-                basis = current
-            }
+            // The box the gesture started from (what is drawn at the playhead).
+            startQuad = clip.quad(for: basis, canvas: canvas, stretchToFull: stretchToFull) ?? []
+            if startQuad.count != 4 { self.handle = nil }
         }
         
         func pan(_ t: CGSize) { translation = t; recompute() }
@@ -118,25 +102,35 @@ extension EditingView {
                 p.valueScaleX = basis.valueScaleX * Float(scale)
                 p.valueScaleY = basis.valueScaleY * Float(scale)
                 
-                var rot = basis.valueRot + Float(rotation * 180 / .pi)
-                rot = (rot + 360).truncatingRemainder(dividingBy: 720) - 360 // Android's [-360, 360) wrap
-                let snap = Constants.CANVAS_ROTATE_SNAP_DEGREE
-                let nearest = (rot / snap).rounded() * snap
-                if abs(rot - nearest) <= Constants.CANVAS_ROTATE_SNAP_THRESHOLD_DEGREE { rot = nearest }
-                p.valueRot = rot
+                if rotation != 0 {      // a plain move must not touch (or snap) the clip's rotation
+                    var rot = basis.valueRot + Float(rotation * 180 / .pi)
+                    rot = (rot + 360).truncatingRemainder(dividingBy: 720) - 360 // Android's [-360, 360) wrap
+                    let snap = Constants.CANVAS_ROTATE_SNAP_DEGREE
+                    let nearest = (rot / snap).rounded() * snap
+                    if abs(rot - nearest) <= Constants.CANVAS_ROTATE_SNAP_THRESHOLD_DEGREE { rot = nearest }
+                    p.valueRot = rot
+                }
             }
             // A pure move snaps; combined with a pinch / twist it would fight the gesture.
             if snappingOn, scale == 1, rotation == 0 { snapMove(&p) } else { setGuides(x: nil, y: nil) }
             }
             
-            let state: LiveClipState
-            if let idx = keyIndex, workingKeys.keyframes.indices.contains(idx) {
-                var keys = workingKeys
-                keys.keyframes[idx].value = p
-                state = LiveClipState(properties: clip.videoProperties, keyframes: keys)
-            } else {
-                state = LiveClipState(properties: p, keyframes: clip.keyframes)
+            // Per property: one the clip animates gets a keyframe at the playhead (or the one there changes),
+            // one it doesn't is just its static value. Properties the gesture didn't change are left alone,
+            // so a move never adds a keyframe for scale, opacity, ...
+            var props = clip.videoProperties
+            var keys = startKeys
+            for type in Self.gestureChannels {
+                let v = p.value(type)
+                guard v != basis.value(type) else { continue }
+                if keys.isAnimated(type) {
+                    keys.setKey(type, atLocal: localTime, value: v, base: clip.videoProperties,
+                                clipStartTime: clip.startTime, frameRate: frameRate)
+                } else {
+                    props.setValue(v, type)
+                }
             }
+            let state = LiveClipState(properties: props, keyframes: keys)
             LiveOverrides.shared.set(state, for: clip.id)
             
             infoText = String(format: "Pos X: %.0f | Pos Y: %.0f\nScale X: %.2f | Scale Y: %.2f | Rot: %.1f",
@@ -236,12 +230,7 @@ extension EditingView {
             ))
         }
         
-        private static func sameKeyframes(_ a: AnimatedProperty, _ b: AnimatedProperty) -> Bool {
-            guard a.keyframes.count == b.keyframes.count else { return false }
-            return !zip(a.keyframes, b.keyframes).contains {
-                $0.time != $1.time || $0.value != $1.value || $0.easing != $1.easing
-            }
-        }
+        private static func sameKeyframes(_ a: AnimatedProperty, _ b: AnimatedProperty) -> Bool { a == b }
     }
     
     // MARK: UIKit gesture surface

@@ -37,7 +37,7 @@ extension EditingView {
         
         /// Linear gain `local` seconds into the clip.
         func gain(atLocal local: Float) -> Float {
-            let volume = keys.keyframes.isEmpty
+            let volume = !keys.isAnimated(.volume)
                 ? props.valueVolume
                 : keys.resolved(base: props, clipStartTime: startTime, at: startTime + local).valueVolume
             var fade: Float = 1
@@ -48,7 +48,7 @@ extension EditingView {
         }
         
         /// No keyframes and no fades: one level for the whole clip.
-        var isConstant: Bool { keys.keyframes.isEmpty && fadeIn <= 0 && fadeOut <= 0 }
+        var isConstant: Bool { !keys.isAnimated(.volume) && fadeIn <= 0 && fadeOut <= 0 }
         
         /// Where the gain changes direction or speed, as seconds into the clip (always starts at 0 and ends
         /// at the clip's duration). Between two of them the gain is a straight ramp.
@@ -57,7 +57,7 @@ extension EditingView {
             if fadeIn > 0 { points.append(min(fadeIn, duration)) }
             if fadeOut > 0 { points.append(max(duration - fadeOut, 0)) }
             
-            let ordered = keys.keyframes.sorted { $0.time < $1.time }
+            let ordered = keys.keyframes.filter { $0.animates(.volume) }.sorted { $0.time < $1.time }
             for key in ordered where key.time > 0 && key.time < duration {
                 points.append(key.time)
                 // A hold (or a sharp easing) jumps at the keyframe: keep the jump short, not smeared.

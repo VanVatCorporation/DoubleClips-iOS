@@ -120,6 +120,7 @@ extension EditingView {
         
         /// Snapshot taken when a slider drag / field edit begins, so the whole gesture is one undo step.
         @State private var propertiesBefore: EditingView.VideoProperties?
+        @State private var keysBefore: EditingView.AnimatedProperty?
         
         /// Animation packs sheet; `registryVersion` bumps when a pack is imported / removed so the
         /// pickers below re-read the animation registry.
@@ -210,48 +211,134 @@ extension EditingView {
         // MARK: Property helpers
         
         private func beginEdit() {
-            if propertiesBefore == nil { propertiesBefore = clip.videoProperties }
+            if propertiesBefore == nil {
+                propertiesBefore = clip.videoProperties
+                keysBefore = clip.keyframes
+            }
         }
         
+        /// One undo step for a whole slider drag / field edit: the static values and the keyframes together.
         private func endEdit() {
-            guard let before = propertiesBefore else { return }
+            guard let beforeProps = propertiesBefore, let beforeKeys = keysBefore else { return }
             propertiesBefore = nil
-            let after = clip.videoProperties
-            guard before != after else { return }
-            // Editing a value while the playhead sits on a keyframe edits that keyframe too,
-            // otherwise the change would be overridden by the keyframe interpolation.
-            let idxBefore = keyframeIndexAtPlayhead()
-            let keysBefore = clip.keyframes
-            if let idx = idxBefore { clip.keyframes.keyframes[idx].value = after }
-            let keysAfter = clip.keyframes
+            keysBefore = nil
+            let afterProps = clip.videoProperties, afterKeys = clip.keyframes
+            guard beforeProps != afterProps || beforeKeys != afterKeys else { return }
             let target = clip
             commandManager.execute(GenericCommand(
                 description: "Change properties: \(clip.clipName)",
-                undo: { target.videoProperties = before; target.keyframes = keysBefore; onChanged() },
-                redo: { target.videoProperties = after; target.keyframes = keysAfter; onChanged() }
+                undo: { target.videoProperties = beforeProps; target.keyframes = beforeKeys; onChanged() },
+                redo: { target.videoProperties = afterProps; target.keyframes = afterKeys; onChanged() }
             ))
             onChanged()
         }
         
-        private func keyframeIndexAtPlayhead() -> Int? {
-            clip.keyframes.keyframes.firstIndex { abs(($0.time + clip.startTime) - playhead) <= EditingView.minimumKeyframeSpacing }
+        // MARK: Per-property keyframes
+        //
+        // A property with keyframes shows (and edits) its value AT THE PLAYHEAD: typing or dragging adds a
+        // keyframe for that property there, or changes the one that is there. A property without keyframes
+        // is edited as before. The diamond beside each row turns the property's animation on at the
+        // playhead, or takes its keyframe there off (when it was the last one, the property stays at that value).
+        
+        /// Seconds into the clip the playhead is at, kept inside the clip.
+        private var localTime: Float { min(max(playhead - clip.startTime, 0), clip.duration) }
+        private var playheadInsideClip: Bool {
+            playhead >= clip.startTime - 0.001 && playhead <= clip.startTime + clip.duration + 0.001
         }
         
-        private func binding(_ kp: WritableKeyPath<EditingView.VideoProperties, Float>) -> Binding<Float> {
-            Binding(get: { clip.videoProperties[keyPath: kp] }, set: { clip.videoProperties[keyPath: kp] = $0 })
+        private func currentValue(_ type: EditingView.VideoProperties.ValueType,
+                                  _ kp: WritableKeyPath<EditingView.VideoProperties, Float>) -> Float {
+            clip.keyframes.isAnimated(type)
+                ? clip.keyframes.value(for: type, base: clip.videoProperties, clipStartTime: clip.startTime,
+                                       at: clip.startTime + localTime)
+                : clip.videoProperties[keyPath: kp]
+        }
+        
+        private func writeValue(_ type: EditingView.VideoProperties.ValueType,
+                                _ kp: WritableKeyPath<EditingView.VideoProperties, Float>, _ newValue: Float) {
+            if clip.keyframes.isAnimated(type) {
+                clip.keyframes.setKey(type, atLocal: localTime, value: newValue, base: clip.videoProperties,
+                                      clipStartTime: clip.startTime, frameRate: frameRate)
+            } else {
+                clip.videoProperties[keyPath: kp] = newValue
+            }
+        }
+        
+        private func keyMode(_ type: EditingView.VideoProperties.ValueType) -> KeyDiamond.Mode {
+            guard clip.keyframes.isAnimated(type) else { return .off }
+            return clip.keyframes.keyframeIndex(atLocal: localTime, animating: type) != nil ? .onKey : .animated
+        }
+        
+        private func toggleKey(_ type: EditingView.VideoProperties.ValueType,
+                               _ kp: WritableKeyPath<EditingView.VideoProperties, Float>) {
+            guard playheadInsideClip else { return }
+            let beforeProps = clip.videoProperties, beforeKeys = clip.keyframes
+            var props = beforeProps, keys = beforeKeys
+            if keys.keyframeIndex(atLocal: localTime, animating: type) != nil {
+                if let removed = keys.removeKey(type, atLocal: localTime), !keys.isAnimated(type) {
+                    props.setValue(removed, type)     // no longer animated: stays where it was
+                }
+            } else {
+                keys.setKey(type, atLocal: localTime, value: currentValue(type, kp), base: beforeProps,
+                            clipStartTime: clip.startTime, frameRate: frameRate)
+            }
+            guard props != beforeProps || keys != beforeKeys else { return }
+            clip.videoProperties = props
+            clip.keyframes = keys
+            let target = clip
+            commandManager.execute(GenericCommand(
+                description: "Keyframe \(EditingView.VideoProperties.displayName(for: type)): \(clip.clipName)",
+                undo: { target.videoProperties = beforeProps; target.keyframes = beforeKeys; onChanged() },
+                redo: { target.videoProperties = props; target.keyframes = keys; onChanged() }
+            ))
+            onChanged()
+        }
+        
+        /// A property row with its keyframe diamond.
+        @ViewBuilder
+        private func keyedRow<Content: View>(_ type: EditingView.VideoProperties.ValueType?,
+                                             _ kp: WritableKeyPath<EditingView.VideoProperties, Float>,
+                                             @ViewBuilder _ content: () -> Content) -> some View {
+            HStack(spacing: 4) {
+                content()
+                if let type {
+                    KeyDiamond(mode: keyMode(type), enabled: playheadInsideClip) { toggleKey(type, kp) }
+                }
+            }
+        }
+        
+        private func binding(_ type: EditingView.VideoProperties.ValueType,
+                              _ kp: WritableKeyPath<EditingView.VideoProperties, Float>) -> Binding<Float> {
+            Binding(get: { currentValue(type, kp) }, set: { writeValue(type, kp, $0) })
         }
         
         private func field(_ label: String, _ kp: WritableKeyPath<EditingView.VideoProperties, Float>) -> some View {
-            NumberField(label: label, value: Binding(
-                get: { clip.videoProperties[keyPath: kp] },
-                set: { newValue in beginEdit(); clip.videoProperties[keyPath: kp] = newValue }
-            )) { endEdit() }
+            let type = EditingView.VideoProperties.channel(for: kp)
+            return keyedRow(type, kp) {
+                NumberField(label: label, value: Binding(
+                    get: { type.map { currentValue($0, kp) } ?? clip.videoProperties[keyPath: kp] },
+                    set: { newValue in
+                        beginEdit()
+                        if let type { writeValue(type, kp, newValue) } else { clip.videoProperties[keyPath: kp] = newValue }
+                    }
+                )) { endEdit() }
+            }
         }
         
         private func slider(_ label: String, _ kp: WritableKeyPath<EditingView.VideoProperties, Float>,
                             _ range: ClosedRange<Float>, reset: Float) -> some View {
-            PropertySlider(label: label, value: binding(kp), range: range, resetTo: reset,
-                           onEditingBegan: beginEdit, onEditingEnded: endEdit)
+            let type = EditingView.VideoProperties.channel(for: kp)
+            return keyedRow(type, kp) {
+                PropertySlider(
+                    label: label,
+                    value: Binding(
+                        get: { type.map { currentValue($0, kp) } ?? clip.videoProperties[keyPath: kp] },
+                        set: { newValue in
+                            if let type { writeValue(type, kp, newValue) } else { clip.videoProperties[keyPath: kp] = newValue }
+                        }),
+                    range: range, resetTo: reset,
+                    onEditingBegan: beginEdit, onEditingEnded: endEdit)
+            }
         }
         
         /// Audio fade of the clip (seconds): a clip property rather than a keyframeable value, so its own
@@ -380,7 +467,7 @@ extension EditingView {
         
         @ViewBuilder private var keyframeList: some View {
             if clip.keyframes.keyframes.isEmpty {
-                Text("No keyframes. Use the Keyframe button in the toolbar to add one at the playhead.")
+                Text("No keyframes. Tap the diamond beside a property to animate just that property, or use the Keyframe button in the toolbar to key everything at the playhead.")
                     .font(.system(size: 11)).foregroundColor(.white.opacity(0.5))
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -390,6 +477,10 @@ extension EditingView {
                         Text(String(format: "%.2fs", key.time))
                             .font(.system(size: 12, design: .monospaced)).foregroundColor(.white)
                             .frame(width: 60, alignment: .leading)
+                        Text(key.channelSummary)
+                            .font(.system(size: 10)).foregroundColor(.white.opacity(0.55))
+                            .lineLimit(2)
+                            .frame(maxWidth: 84, alignment: .leading)
                         Picker("Easing", selection: Binding(
                             get: { clip.keyframes.keyframes[safe: index]?.easing ?? .none },
                             set: { newEasing in setEasing(index, newEasing) }
@@ -424,12 +515,21 @@ extension EditingView {
         
         private func deleteKeyframe(_ index: Int) {
             guard clip.keyframes.keyframes.indices.contains(index) else { return }
-            let before = clip.keyframes
-            var after = before; after.keyframes.remove(at: index)
+            let beforeKeys = clip.keyframes, beforeProps = clip.videoProperties
+            var afterKeys = beforeKeys
+            let removed = afterKeys.keyframes.remove(at: index)
+            // A property that loses its last keyframe stays at the value that keyframe gave it.
+            var afterProps = beforeProps
+            for type in removed.channelList where !afterKeys.isAnimated(type) {
+                afterProps.setValue(removed.value.value(type), type)
+            }
+            clip.keyframes = afterKeys
+            clip.videoProperties = afterProps
             let target = clip
             commandManager.execute(GenericCommand(description: "Remove keyframe: \(clip.clipName)",
-                undo: { target.keyframes = before; onChanged() },
-                redo: { target.keyframes = after; onChanged() }))
+                undo: { target.keyframes = beforeKeys; target.videoProperties = beforeProps; onChanged() },
+                redo: { target.keyframes = afterKeys; target.videoProperties = afterProps; onChanged() }))
+            onChanged()
         }
         
         private func clearAll() {
@@ -438,6 +538,32 @@ extension EditingView {
             commandManager.execute(GenericCommand(description: "Clear keyframes: \(clip.clipName)",
                 undo: { target.keyframes = before; onChanged() },
                 redo: { target.keyframes = EditingView.AnimatedProperty(); onChanged() }))
+        }
+    }
+}
+
+// MARK: - Keyframe diamond
+
+extension EditingView {
+    /// The button beside a property: hollow = not animated, half = animated but no keyframe at the
+    /// playhead, filled = a keyframe of this property sits at the playhead.
+    struct KeyDiamond: View {
+        enum Mode { case off, animated, onKey }
+        let mode: Mode
+        let enabled: Bool
+        let action: () -> Void
+        
+        var body: some View {
+            Button(action: action) {
+                Image(systemName: mode == .onKey ? "diamond.fill" : (mode == .animated ? "diamond.lefthalf.filled" : "diamond"))
+                    .font(.system(size: 13))
+                    .foregroundColor(mode == .off ? Color.white.opacity(0.5) : Color.mdPrimary)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.3)
         }
     }
 }

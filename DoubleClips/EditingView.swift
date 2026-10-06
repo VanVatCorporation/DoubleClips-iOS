@@ -999,13 +999,22 @@ struct EditingView: View {
         let before = clip.keyframes
         let fps = projectFrameRate
         // Probe on a copy first so an out-of-range / duplicate press doesn't push a no-op undo entry.
+        // This button keys EVERY property, from the look at the playhead (so nothing jumps); the diamonds
+        // in the clip properties key a single property.
         var probe = before
         let local = time - clip.startTime
-        guard local >= 0, local <= clip.duration,
-              !probe.keyframes.contains(where: { abs($0.time - local) <= EditingView.minimumKeyframeSpacing }) else { return }
-        probe.keyframes.append(EditingView.Keyframe(time: local, value: clip.videoProperties, easing: .none))
-        probe.sortKeyframes()
-        probe.reassignKeyframes(frameRate: fps)
+        guard local >= 0, local <= clip.duration else { return }
+        let look = before.resolved(base: clip.videoProperties, clipStartTime: clip.startTime, at: time)
+        if let i = probe.keyframes.firstIndex(where: { abs($0.time - local) <= EditingView.minimumKeyframeSpacing }) {
+            // A keyframe of some properties is already here: make it hold all of them.
+            guard probe.keyframes[i].channels != nil else { return }
+            probe.keyframes[i].channels = nil
+            probe.keyframes[i].value = look
+        } else {
+            probe.keyframes.append(EditingView.Keyframe(time: local, value: look, easing: Constants.KEYFRAME_DEFAULT_EASING))
+            probe.sortKeyframes()
+            probe.reassignKeyframes(frameRate: fps)
+        }
         let after = probe
         commandManager.execute(GenericCommand(
             description: "Add Keyframe: \(clip.clipName)",

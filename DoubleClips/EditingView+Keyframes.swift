@@ -167,24 +167,30 @@ extension EditingView.AnimatedProperty {
     /// queue with a snapshot instead of touching the (main-thread) Clip object.
     func value(for type: EditingView.VideoProperties.ValueType, base: EditingView.VideoProperties,
                clipStartTime: Float, at playheadTime: Float) -> Float {
-        guard let first = keyframes.first, let last = keyframes.last else {
-            return base.value(type)
-        }
         let local = playheadTime - clipStartTime
         
-        var prev = first
-        for next in keyframes {
+        // Only the keyframes that hold this property take part (a keyframe from Android / desktop holds
+        // all of them); no such keyframe = the property's static value.
+        var prev: EditingView.Keyframe?
+        for next in keyframes where next.animates(type) {
+            guard let p = prev else {
+                // Before the first keyframe of this property it holds that keyframe's value.
+                if local < next.time { return next.value.value(type) }
+                prev = next
+                continue
+            }
             if local < next.time {
-                let span = next.time - prev.time
+                let span = next.time - p.time
                 // Android divides by zero here when playhead is before the first keyframe; the
                 // clamp then yields 0 → prev value. Guard explicitly so we never produce NaN.
-                let raw: Float = span > 0 ? (local - prev.time) / span : 0
+                let raw: Float = span > 0 ? (local - p.time) / span : 0
                 let t = max(0, min(1, raw))
-                let a = prev.value.value(type), b = next.value.value(type)
-                return a + (b - a) * prev.easing.apply(t)
+                let a = p.value.value(type), b = next.value.value(type)
+                return a + (b - a) * p.easing.apply(t)
             }
             prev = next
         }
+        guard let last = prev else { return base.value(type) }
         return last.value.value(type)
     }
     
