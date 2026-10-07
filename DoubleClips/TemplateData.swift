@@ -13,6 +13,12 @@ struct TemplateData: Identifiable, Codable, Hashable {
     var templateDuration: Int64
     var templateTotalClip: Int
     var additionalResourceName: [String]?
+    /// URL of the template's timeline JSON (same format as a project's project.timeline). Empty = the old,
+    /// ffmpeg-only kind of template. See DoubleClips-Template-Timeline-Contract.md.
+    var templateTimelineLink: String = ""
+    /// URL of a ZIP with the template's media (the locked clips' files, fonts, other resources), laid out
+    /// like a project folder (`Clips/…`, `Fonts/…`). Fetched when the user taps "Use template".
+    var templatePackageLink: String = ""
     var viewCount: Int
     var useCount: Int
     var heartCount: Int
@@ -40,6 +46,7 @@ extension TemplateData {
         case templateAuthor, templateId, templateTitle, templateDescription, ffmpegCommand
         case templateSnapshotLink, templateVideoLink, templateTimestamp, templateDuration
         case templateTotalClip, additionalResourceName, viewCount, useCount, heartCount
+        case templateTimelineLink, templatePackageLink
         case bookmarkCount, isLiked, isBookmarked
     }
 
@@ -63,6 +70,8 @@ extension TemplateData {
                   templateDuration: c.lenientInt64(.templateDuration),
                   templateTotalClip: Int(clamping: c.lenientInt64(.templateTotalClip)),
                   additionalResourceName: c.lenientStringArray(.additionalResourceName),
+                  templateTimelineLink: c.lenientString(.templateTimelineLink),
+                  templatePackageLink: c.lenientString(.templatePackageLink),
                   viewCount: Int(clamping: c.lenientInt64(.viewCount)),
                   useCount: Int(clamping: c.lenientInt64(.useCount)),
                   heartCount: Int(clamping: c.lenientInt64(.heartCount)),

@@ -117,6 +117,14 @@ enum Constants {
     /// ...over this many seconds (a whole-text animation window; each unit gets a share of it).
     static let TEXT_UNIT_DEFAULT_WINDOW_SECONDS: Float = 1.0
     
+    // MARK: - Template preview strip (TemplateTimelineStrip.swift)
+    /// How wide one second of the template timeline is in the preview strip.
+    static let TEMPLATE_STRIP_POINTS_PER_SECOND: CGFloat = 36
+    static let TEMPLATE_STRIP_HEIGHT: CGFloat           = 64
+    /// Room the strip block (legend + strip + gaps) takes above the "Use template" button.
+    static let TEMPLATE_STRIP_BLOCK_HEIGHT: CGFloat     = 96
+    static let TEMPLATE_TIMELINE_CACHE_FOLDER           = "TemplateTimelines"
+    
     // MARK: - Keyframes (EditingView+PerPropertyKeyframes.swift)
     /// Easing of a keyframe the editor creates (diamond, auto-key while editing, gestures, toolbar button).
     /// Hold (.none) makes a value jump at the next keyframe; linear animates between keyframes.

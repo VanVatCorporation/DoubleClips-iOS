@@ -78,7 +78,10 @@ struct TemplatePreviewItemView: View {
         index == currentIndex
     }
     
-    @State private var isPlaying: Bool = false
+    /// The preview video + its clock (the strip follows it); only holds a video while this page is on screen.
+    @StateObject private var preview = TemplatePreviewPlayer()
+    /// The template's clips for the strip under the video.
+    @State private var timelineInfo: TemplateTimelineInfo?
     
     // Mock States for interactivity
     @State private var isLiked: Bool = false
@@ -199,16 +202,10 @@ struct TemplatePreviewItemView: View {
             // 1. Media Layer (Thumbnail / Video Mock)
             Color.black
             
-            // Video Layer Logic: Only load VideoPlayer if this is the active page
-            if isActive, let videoURL = URL(string: template.templateVideoLink) {
-                VideoPlayerView(url: videoURL, isPlaying: $isPlaying)
+            // Video Layer Logic: Only load the video if this is the active page
+            if isActive, preview.hasVideo {
+                TemplatePlayerLayerView(player: preview.player)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onAppear {
-                        isPlaying = true
-                    }
-                    .onDisappear {
-                        isPlaying = false
-                    }
             } else {
                 // Fallback / Placeholder Thumbnail (Visible when not active or loading)
                 AsyncImage(url: URL(string: template.templateSnapshotLink)) { phase in
@@ -224,7 +221,7 @@ struct TemplatePreviewItemView: View {
             }
             
             // Paused Indicator (Only relevant if active)
-            if isActive && !isPlaying {
+            if isActive && preview.hasVideo && !preview.isPlaying {
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 60))
                     .foregroundColor(.white.opacity(0.7))
@@ -275,7 +272,7 @@ struct TemplatePreviewItemView: View {
                         )
                         .cornerRadius(4)
                 }
-                .padding(.bottom, 80) // Space for "Use Template" button
+                .padding(.bottom, 80 + Constants.TEMPLATE_STRIP_BLOCK_HEIGHT) // Space for the strip + "Use Template" button
                 .padding(.leading, 10)
                 
                 Spacer()
@@ -321,20 +318,26 @@ struct TemplatePreviewItemView: View {
                             .padding()
                             .shadow(radius: 2)
                     }
-                    .padding(.bottom, 80)
+                    .padding(.bottom, 80 + Constants.TEMPLATE_STRIP_BLOCK_HEIGHT)
                 }
                 .frame(width: 75)
             }
             .contentShape(Rectangle()) // Make empty areas tappable
             .onTapGesture {
-                isPlaying.toggle()
+                if preview.hasVideo { preview.toggle() }
             }
             
-            // Bottom "Use Template" Button
-            VStack {
+            // Bottom: the template's timeline (red playhead, clips by role) above the "Use Template" button
+            VStack(spacing: 10) {
                 Spacer()
+                if isActive, let info = timelineInfo, !info.clips.isEmpty {
+                    TemplateTimelineStrip(info: info, currentTime: preview.currentTime,
+                                          onScrub: { preview.scrub(to: $0) },
+                                          onScrubEnd: { preview.endScrub() })
+                        .padding(.horizontal, 10)
+                }
                 Button(action: {
-                    isPlaying = false          // stop the preview video behind the new screen
+                    preview.pause()          // stop the preview video behind the new screen
                     showTemplateExport = true
                 }) {
                     Text("Use template")
@@ -351,11 +354,25 @@ struct TemplatePreviewItemView: View {
         }
         
         .onAppear {
+            if isActive { activatePreview() }
             // Init mock counts
             likeCount = template.heartCount
             bookmarkCount = template.bookmarkCount
             isLiked = template.isLiked ?? false
             isBookmarked = template.isBookmarked ?? false
+        }
+        .onChange(of: isActive) { active in
+            if active { activatePreview() } else { preview.deactivate() }
+        }
+        .task(id: isActive) {
+            // The template's timeline for the strip: from the server's timeline JSON when it has one,
+            // otherwise one white stripe per clip slot.
+            guard isActive, timelineInfo == nil else { return }
+            if !template.templateTimelineLink.isEmpty, let info = try? await TemplateTimelineLoader.load(for: template) {
+                timelineInfo = info
+            } else {
+                timelineInfo = TemplateTimelineInfo.legacy(template)
+            }
         }
         .fullScreenCover(isPresented: $showTemplateExport) {
             TemplateExportView(template: template)
@@ -369,6 +386,10 @@ struct TemplatePreviewItemView: View {
         } message: {
             Text("Please login to like this template")
         }
+    }
+    
+    private func activatePreview() {
+        if let url = URL(string: template.templateVideoLink) { preview.activate(url) }
     }
     
     // Helper to format duration ms -> mm:ss
