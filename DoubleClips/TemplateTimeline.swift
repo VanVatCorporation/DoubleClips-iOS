@@ -89,9 +89,11 @@ struct TemplateTimelineInfo {
     }
     
     /// The old kind of template: no timeline, only a clip count and a duration.
-    static func legacy(_ template: TemplateData) -> TemplateTimelineInfo {
+    /// `duration` (seconds): the preview video's own length, for templates whose `templateDuration` is 0.
+    static func legacy(_ template: TemplateData, duration override: Double? = nil) -> TemplateTimelineInfo {
         let total = max(0, template.templateTotalClip)
-        let duration = Double(max(0, template.templateDuration)) / 1000
+        let stored = Double(max(0, template.templateDuration)) / 1000
+        let duration = stored > 0 ? stored : max(0, override ?? 0)
         guard total > 0, duration > 0 else {
             return TemplateTimelineInfo(clips: [], rowCount: 1, duration: duration, slots: [], timeline: nil)
         }
@@ -152,13 +154,14 @@ struct TemplateTimelineInfo {
 enum TemplateTimelineLoader {
     
     enum LoadError: LocalizedError {
-        case noLink, badLink, http(Int), notATimeline
+        case noLink, badLink, http(Int), notATimeline, unreadable(String)
         var errorDescription: String? {
             switch self {
             case .noLink: return "This template has no timeline."
             case .badLink: return "The template's timeline link isn't valid."
             case .http(let code): return "The template's timeline couldn't be downloaded (\(code))."
             case .notATimeline: return "The template's timeline file isn't readable."
+            case .unreadable(let start): return "The server's answer isn't a timeline: \(start)"
             }
         }
     }
@@ -169,7 +172,23 @@ enum TemplateTimelineLoader {
         let timeline: EditingView.Timeline?
     }
     
-    static func parse(_ data: Data) throws -> TemplateTimelineInfo {
+    /// A timeline stored in a JSON column often comes back wrapped: as a JSON string that holds the JSON
+    /// (`"{\"tracks\":[...]}"`), or as an array holding that string. Unwrap down to the timeline itself.
+    static func unwrap(_ data: Data, depth: Int = 0) -> Data {
+        guard depth < 3,
+              let json = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else { return data }
+        if let text = json as? String, let inner = text.data(using: .utf8) { return unwrap(inner, depth: depth + 1) }
+        if let array = json as? [Any], let first = array.first {
+            if let text = first as? String, let inner = text.data(using: .utf8) { return unwrap(inner, depth: depth + 1) }
+            if JSONSerialization.isValidJSONObject(first), let inner = try? JSONSerialization.data(withJSONObject: first) {
+                return inner
+            }
+        }
+        return data
+    }
+    
+    static func parse(_ rawData: Data) throws -> TemplateTimelineInfo {
+        let data = unwrap(rawData)
         let decoder = JSONDecoder()
         if let wrapped = try? decoder.decode(Wrapper.self, from: data), let timeline = wrapped.timeline {
             return TemplateTimelineInfo.make(from: timeline)
@@ -204,7 +223,14 @@ enum TemplateTimelineLoader {
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             throw LoadError.http(http.statusCode)
         }
-        let info = try parse(data)         // only a readable file is kept
+        let info: TemplateTimelineInfo
+        do {
+            info = try parse(data)         // only a readable file is kept
+        } catch {
+            // Say what came back (an error page, `null`, a route that doesn't exist...).
+            let start = String(decoding: data.prefix(120), as: UTF8.self).replacingOccurrences(of: "\n", with: " ")
+            throw LoadError.unreadable(start.isEmpty ? "(empty)" : start)
+        }
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
         try? data.write(to: cached, options: .atomic)
         return info

@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import Combine
 
 // MARK: - The preview timeline of a template
 //
@@ -215,5 +216,20 @@ struct TemplatePlayerLayerView: UIViewRepresentable {
     
     func updateUIView(_ uiView: PlayerView, context: Context) {
         if uiView.playerLayer.player !== player { uiView.playerLayer.player = player }
+    }
+}
+
+// MARK: - iOS 26 scroll edge effect
+
+extension View {
+    /// iOS 26 softens (blurs and fades) the edges of every scroll view. The template pages are a rotated
+    /// paging TabView, so the effect showed up as a blurred band down the screen's right side. Turn it off.
+    @ViewBuilder
+    func hidingScrollEdgeEffect() -> some View {
+        if #available(iOS 26.0, *) {
+            self.scrollEdgeEffectHidden(true, for: .all)
+        } else {
+            self
+        }
     }
 }

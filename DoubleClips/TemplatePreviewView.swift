@@ -34,6 +34,7 @@ struct TemplatePreviewView: View {
                     .rotationEffect(.degrees(90), anchor: .topLeading) // Rotate container
                     .offset(x: proxy.size.width) // Shift back to view coordinates
                     .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                    .hidingScrollEdgeEffect()
                 }
             }
         }
@@ -80,8 +81,13 @@ struct TemplatePreviewItemView: View {
     
     /// The preview video + its clock (the strip follows it); only holds a video while this page is on screen.
     @StateObject private var preview = TemplatePreviewPlayer()
-    /// The template's clips for the strip under the video.
+    /// The template's clips for the strip under the video (from its timeline JSON)...
     @State private var timelineInfo: TemplateTimelineInfo?
+    /// ...or, for an old template without a timeline, one white stripe per clip slot.
+    @State private var legacyInfo: TemplateTimelineInfo?
+    /// Why the timeline couldn't be loaded (the strip then says so instead of drawing stand-in stripes).
+    @State private var timelineError: String?
+    @State private var showOldTemplate = false
     
     // Mock States for interactivity
     @State private var isLiked: Bool = false
@@ -253,24 +259,14 @@ struct TemplatePreviewItemView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "hourglass.bottomhalf.fill") // baseline_hourglass_bottom_24
                                 .foregroundColor(.white)
-                            Text(formatDuration(template.templateDuration))
+                            // The list may say 0 (the server doesn't know it): then the video's own length.
+                            Text(formatDuration(template.templateDuration > 0
+                                                ? template.templateDuration : Int64(preview.duration * 1000)))
                                 .fontWeight(.bold)
                                 .foregroundColor(.white)
                         }
                     }
                     .font(.caption)
-                    
-                    // Timeline/Playhead Mock (FrameLayout + Playhead)
-                    // Simplified representation
-                    Rectangle()
-                        .fill(Color.white.opacity(0.3))
-                        .frame(height: 30) // Timeline height
-                        .overlay(
-                            Rectangle()
-                                .fill(Color.red)
-                                .frame(width: 2)
-                        )
-                        .cornerRadius(4)
                 }
                 .padding(.bottom, 80 + Constants.TEMPLATE_STRIP_BLOCK_HEIGHT) // Space for the strip + "Use Template" button
                 .padding(.leading, 10)
@@ -330,13 +326,30 @@ struct TemplatePreviewItemView: View {
             // Bottom: the template's timeline (red playhead, clips by role) above the "Use Template" button
             VStack(spacing: 10) {
                 Spacer()
-                if isActive, let info = timelineInfo, !info.clips.isEmpty {
+                if isActive, let info = timelineInfo ?? legacyInfo, !info.clips.isEmpty {
                     TemplateTimelineStrip(info: info, currentTime: preview.currentTime,
                                           onScrub: { preview.scrub(to: $0) },
                                           onScrubEnd: { preview.endScrub() })
                         .padding(.horizontal, 10)
+                } else if isActive, let error = timelineError {
+                    Button { Task { await loadTimeline() } } label: {
+                        Label("Couldn't load the timeline. Tap to retry.\n\(error)", systemImage: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .semibold))
+                            .multilineTextAlignment(.leading)
+                            .foregroundColor(.white)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.black.opacity(0.55))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .padding(.horizontal, 10)
                 }
                 Button(action: {
+                    // No timeline = made before timeline templates: only FFmpeg could render it, and iOS has none.
+                    guard !template.templateTimelineLink.isEmpty else {
+                        showOldTemplate = true
+                        return
+                    }
                     preview.pause()          // stop the preview video behind the new screen
                     showTemplateExport = true
                 }) {
@@ -368,11 +381,18 @@ struct TemplatePreviewItemView: View {
             // The template's timeline for the strip: from the server's timeline JSON when it has one,
             // otherwise one white stripe per clip slot.
             guard isActive, timelineInfo == nil else { return }
-            if !template.templateTimelineLink.isEmpty, let info = try? await TemplateTimelineLoader.load(for: template) {
-                timelineInfo = info
-            } else {
-                timelineInfo = TemplateTimelineInfo.legacy(template)
+            await loadTimeline()
+        }
+        .onChange(of: preview.duration) { seconds in
+            // The strip of an old template spreads its stripes over the video's length once that is known.
+            if timelineInfo == nil, template.templateTimelineLink.isEmpty, template.templateDuration <= 0 {
+                legacyInfo = TemplateTimelineInfo.legacy(template, duration: seconds)
             }
+        }
+        .alert("This template is old", isPresented: $showOldTemplate) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("It was made with an older version of DoubleClips and can only be rendered with FFmpeg, which isn't available on iOS. Try another template.")
         }
         .fullScreenCover(isPresented: $showTemplateExport) {
             TemplateExportView(template: template)
@@ -385,6 +405,23 @@ struct TemplatePreviewItemView: View {
             }
         } message: {
             Text("Please login to like this template")
+        }
+    }
+    
+    /// The template's timeline for the strip. Only a template WITHOUT a timeline link gets the evenly spaced
+    /// stand-in; a link that fails to load is reported (screen + console), not hidden behind the stand-in.
+    private func loadTimeline() async {
+        timelineError = nil
+        guard !template.templateTimelineLink.isEmpty else {
+            print("[Template] \(template.templateId): the list has no templateTimelineLink (old template, or the list endpoint doesn't send it yet)")
+            legacyInfo = TemplateTimelineInfo.legacy(template, duration: preview.duration)
+            return
+        }
+        do {
+            timelineInfo = try await TemplateTimelineLoader.load(for: template)
+        } catch {
+            timelineError = error.localizedDescription
+            print("[Template] \(template.templateId): timeline load failed (\(template.templateTimelineLink)): \(error.localizedDescription)")
         }
     }
     

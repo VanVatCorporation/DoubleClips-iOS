@@ -16,9 +16,9 @@ struct TemplateData: Identifiable, Codable, Hashable {
     /// URL of the template's timeline JSON (same format as a project's project.timeline). Empty = the old,
     /// ffmpeg-only kind of template. See DoubleClips-Template-Timeline-Contract.md.
     var templateTimelineLink: String = ""
-    /// URL of a ZIP with the template's media (the locked clips' files, fonts, other resources), laid out
-    /// like a project folder (`Clips/…`, `Fonts/…`). Fetched when the user taps "Use template".
-    var templatePackageLink: String = ""
+    /// Folder URL (ends with "/") the template's resource files live in: `additionalResourceName[i]` is
+    /// downloaded from `templateContentLink + name`. Used when the user taps "Use template".
+    var templateContentLink: String = ""
     var viewCount: Int
     var useCount: Int
     var heartCount: Int
@@ -46,7 +46,7 @@ extension TemplateData {
         case templateAuthor, templateId, templateTitle, templateDescription, ffmpegCommand
         case templateSnapshotLink, templateVideoLink, templateTimestamp, templateDuration
         case templateTotalClip, additionalResourceName, viewCount, useCount, heartCount
-        case templateTimelineLink, templatePackageLink
+        case templateTimelineLink, templateContentLink
         case bookmarkCount, isLiked, isBookmarked
     }
 
@@ -71,7 +71,7 @@ extension TemplateData {
                   templateTotalClip: Int(clamping: c.lenientInt64(.templateTotalClip)),
                   additionalResourceName: c.lenientStringArray(.additionalResourceName),
                   templateTimelineLink: c.lenientString(.templateTimelineLink),
-                  templatePackageLink: c.lenientString(.templatePackageLink),
+                  templateContentLink: c.lenientString(.templateContentLink),
                   viewCount: Int(clamping: c.lenientInt64(.viewCount)),
                   useCount: Int(clamping: c.lenientInt64(.useCount)),
                   heartCount: Int(clamping: c.lenientInt64(.heartCount)),
@@ -151,7 +151,14 @@ private extension KeyedDecodingContainer {
             }
             return out
         }
-        if let single = try? decode(String.self, forKey: key) { return [single] }
+        if let single = try? decode(String.self, forKey: key) {
+            // A MySQL JSON column can arrive as text: '["a.mp4","b.ttf"]'. [""] = no resources.
+            if let data = single.data(using: .utf8),
+               let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [Any] {
+                return parsed.compactMap { ($0 as? String)?.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            }
+            return single.isEmpty ? [] : [single]
+        }
         return nil
     }
 }
