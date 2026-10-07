@@ -25,6 +25,7 @@ struct TemplatePreviewView: View {
                                 index: index,
                                 currentIndex: initialScrollIndex
                             )
+                            .background(ScrollEdgeEffectProbe()) // switches the paging scroll view's edge blur off
                             .tag(index)
                             .frame(width: proxy.size.width, height: proxy.size.height)
                             .rotationEffect(.degrees(-90)) // Counter-rotate content
@@ -39,6 +40,7 @@ struct TemplatePreviewView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar) // the bar's scroll-edge blur would be drawn down the rotated page's side
         .toolbar(.hidden, for: .tabBar) // Hide Tab Bar if present
         .edgesIgnoringSafeArea(.all)
         .overlay(

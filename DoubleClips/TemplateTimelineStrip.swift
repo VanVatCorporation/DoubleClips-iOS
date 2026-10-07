@@ -233,3 +233,39 @@ extension View {
         }
     }
 }
+
+/// A zero-size view that, once it is on screen, finds the scroll views it sits in (the paging TabView's) and
+/// turns off their iOS 26 edge effects. SwiftUI's `scrollEdgeEffectHidden` doesn't reach the UIKit scroll view
+/// behind a paging TabView, so this does it directly.
+struct ScrollEdgeEffectProbe: UIViewRepresentable {
+    final class ProbeView: UIView {
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard window != nil else { return }
+            // After SwiftUI has finished putting the pages into the scroll view.
+            DispatchQueue.main.async { [weak self] in self?.hideEdgeEffects() }
+        }
+        
+        private func hideEdgeEffects() {
+            guard #available(iOS 26.0, *) else { return }
+            var view: UIView? = superview
+            while let current = view {
+                if let scroll = current as? UIScrollView {
+                    scroll.topEdgeEffect.isHidden = true
+                    scroll.bottomEdgeEffect.isHidden = true
+                    scroll.leftEdgeEffect.isHidden = true
+                    scroll.rightEdgeEffect.isHidden = true
+                }
+                view = current.superview
+            }
+        }
+    }
+    
+    func makeUIView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+    
+    func updateUIView(_ uiView: ProbeView, context: Context) {}
+}

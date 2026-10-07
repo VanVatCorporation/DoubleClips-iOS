@@ -25,6 +25,12 @@ struct ExportSheetView: View {
     @State private var scrollLock = true
     @State private var photosState: PhotosState = .idle
     @State private var showShare = false
+    // Export as template (Android: exportAsTemplateButton): render the preview video, package the
+    // template, then the four-card post screen (PostTemplateView).
+    @State private var exportingForTemplate = false
+    @State private var preparingTemplate = false
+    @State private var templateDraft: PostTemplateDraft?
+    @State private var templateError: String?
     
     private enum PhotosState: Equatable {
         case idle, saving, saved, failed(String)
@@ -48,6 +54,13 @@ struct ExportSheetView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    if exportingForTemplate || preparingTemplate {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(exportingForTemplate ? "Rendering the template preview…" : "Packaging the template…")
+                                .font(.subheadline.weight(.medium))
+                        }
+                    }
                     outputSection
                     resultSection
                     logSection
@@ -70,6 +83,27 @@ struct ExportSheetView: View {
                 ActivityView(items: [url])
                     .ignoresSafeArea()
             }
+        }
+        .onChange(of: exporter.state) { state in
+            guard exportingForTemplate else { return }
+            switch state {
+            case .finished(let url):
+                exportingForTemplate = false
+                prepareTemplate(from: url)
+            case .failed, .cancelled:
+                exportingForTemplate = false
+            default:
+                break
+            }
+        }
+        .fullScreenCover(item: $templateDraft) { draft in
+            PostTemplateView(draft: draft)
+        }
+        .alert("Couldn't prepare the template", isPresented: Binding(get: { templateError != nil },
+                                                                      set: { if !$0 { templateError = nil } })) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(templateError ?? "")
         }
     }
     
@@ -97,6 +131,18 @@ struct ExportSheetView: View {
                 .font(.system(size: 15, weight: .bold))
             
             Spacer()
+            
+            Button(action: { startTemplateExport() }) {
+                Text("TEMPLATE")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(Color.mdPrimary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.mdPrimary, lineWidth: 1.5))
+            }
+            .disabled(isExporting || preparingTemplate || timeline.duration <= 0)
+            .opacity(isExporting || preparingTemplate || timeline.duration <= 0 ? 0.4 : 1)
+            .padding(.trailing, 8)
             
             Button(action: { isExporting ? exporter.cancel() : startExport() }) {
                 Text(isExporting ? "CANCEL" : "EXPORT")
@@ -319,6 +365,26 @@ struct ExportSheetView: View {
                                                          projectDir: URL(fileURLWithPath: project.projectPath))
         let exportPlan = ExportPlan.make(settings: built.settings, duration: built.composition.duration.seconds)
         exporter.start(built: built, plan: exportPlan, fileName: Self.fileName(for: project.projectTitle))
+    }
+    
+    /// The normal export, then the template packaging when it finishes (see onChange(of: exporter.state)).
+    private func startTemplateExport() {
+        exportingForTemplate = true
+        startExport()
+    }
+    
+    private func prepareTemplate(from video: URL) {
+        preparingTemplate = true
+        Task { @MainActor in
+            do {
+                let settings = EditingView.VideoSettings.load(projectPath: project.projectPath)
+                templateDraft = try await TemplatePackager.makeDraft(project: project, timeline: timeline,
+                                                                      settings: settings, exportedVideo: video)
+            } catch {
+                templateError = error.localizedDescription
+            }
+            preparingTemplate = false
+        }
     }
     
     private func saveToPhotos(_ url: URL) {

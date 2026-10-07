@@ -117,6 +117,14 @@ enum Constants {
     /// ...over this many seconds (a whole-text animation window; each unit gets a share of it).
     static let TEXT_UNIT_DEFAULT_WINDOW_SECONDS: Float = 1.0
     
+    // MARK: - Posting a template (TemplatePosting.swift, PostTemplateView.swift)
+    static let TEMPLATE_POST_URL                        = "https://app.vanvatcorp.com/doubleclips/api/post-template"
+    /// Android sends this placeholder; the server doesn't check the password yet.
+    static let TEMPLATE_POST_PASSWORD_PLACEHOLDER       = "********"
+    /// `format` of the wrapper around a posted timeline (see the template contract).
+    static let TEMPLATE_DOCUMENT_FORMAT: Int            = 1
+    static let TEMPLATE_UPLOAD_CHUNK_BYTES: Int         = 1 << 20
+    
     // MARK: - Template preview strip (TemplateTimelineStrip.swift)
     /// How wide one second of the template timeline is in the preview strip.
     static let TEMPLATE_STRIP_POINTS_PER_SECOND: CGFloat = 36
