@@ -41,8 +41,6 @@ extension EditingView {
         let startTime: Double   // clip start on the timeline
         let startTrim: Double   // Clip.startClipTrim
         let duration: Double
-        /// The clip's volume (EditingView+ClipVolume.swift) `local` seconds into the clip.
-        let gain: (Double) -> Float
     }
     
     /// Scrub audio as a small granular engine.
@@ -230,13 +228,12 @@ extension EditingView {
             var any = false
             for source in active {
                 let clipTime = seconds - source.startTime + source.startTrim
-                let gain = source.gain(seconds - source.startTime)
                 guard let chunk = read(source.url, at: clipTime), let data = chunk.floatChannelData else { continue }
                 let frames = min(Int(chunk.frameLength), grainFrames)
                 let channels = Int(chunk.format.channelCount)
                 for channel in 0..<2 {
                     let from = data[min(channel, channels - 1)]
-                    for i in 0..<frames { mix[channel][i] += from[i] * gain }
+                    for i in 0..<frames { mix[channel][i] += from[i] }
                 }
                 any = true
             }

@@ -282,7 +282,6 @@ extension EditingView {
             if let videoComposition = built.videoComposition {
                 item.videoComposition = videoComposition
             }
-            item.audioMix = built.audioMix        // per-clip volume + fades, same as the export
             
             currentComposition = composition
             scrubAudio.setSources(built.scrubSources)

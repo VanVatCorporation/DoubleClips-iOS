@@ -23,8 +23,6 @@ extension EditingView {
         let videoComposition: AVMutableVideoComposition?
         let settings: VideoSettings
         let scrubSources: [ScrubSource]
-        /// Per-clip volume and fades for the composition's audio tracks (nil = every clip at its own level).
-        let audioMix: AVAudioMix?
         /// Number of visual layers (video, image, text clips) that were composited.
         let layerCount: Int
     }
@@ -49,13 +47,11 @@ extension EditingView {
             var drawOrder = 0
             var contentEnd: Float = 0
             var scrubSources: [ScrubSource] = []
-            var audioMixParams: [AVMutableAudioMixInputParameters] = []
             
             for trackModel in timeline.tracks.sorted(by: { $0.timelineIndex < $1.timelineIndex }) {
                 /// Video lanes of this track (see the header). Reused whenever they are free.
                 var lanes: [AVMutableCompositionTrack] = []
                 var compositionAudioTrack: AVMutableCompositionTrack?
-                var compositionAudioParams: AVMutableAudioMixInputParameters?
                 
                 func lane(freeFrom time: CMTime) -> AVMutableCompositionTrack? {
                     if let free = lanes.first(where: { CMTimeCompare($0.timeRange.end, time) <= 0 }) { return free }
@@ -165,22 +161,13 @@ extension EditingView {
                             if compositionAudioTrack == nil {
                                 compositionAudioTrack = composition.addMutableTrack(withMediaType: .audio,
                                                                                     preferredTrackID: kCMPersistentTrackID_Invalid)
-                                if let audioTrack = compositionAudioTrack {
-                                    let params = AVMutableAudioMixInputParameters(track: audioTrack)
-                                    compositionAudioParams = params
-                                    audioMixParams.append(params)
-                                }
                             }
                             try? compositionAudioTrack?.insertTimeRange(sourceRange, of: audioSource, at: start)
-                            // Volume, keyframed volume and fades (EditingView+ClipVolume.swift).
-                            let volume = ClipVolume(clip: clip)
-                            if let params = compositionAudioParams { volume.apply(to: params) }
                             // Same clips, same condition as the composition's audio: what scrubbing
                             // plays is exactly what playback would.
                             scrubSources.append(ScrubSource(url: clipURL, startTime: Double(clip.startTime),
                                                             startTrim: Double(clip.startClipTrim),
-                                                            duration: Double(clip.duration),
-                                                            gain: { volume.gain(atLocal: Float($0)) }))
+                                                            duration: Double(clip.duration)))
                         }
                         
                     case .image:
@@ -279,18 +266,10 @@ extension EditingView {
                 builtVideoComposition = videoComposition
             }
 
-            var audioMix: AVMutableAudioMix?
-            if !audioMixParams.isEmpty {
-                let mix = AVMutableAudioMix()
-                mix.inputParameters = audioMixParams
-                audioMix = mix
-            }
-            
             return BuiltComposition(composition: composition,
                                     videoComposition: builtVideoComposition,
                                     settings: projectSettings,
                                     scrubSources: scrubSources,
-                                    audioMix: audioMix,
                                     layerCount: layers.count)
         }
     }

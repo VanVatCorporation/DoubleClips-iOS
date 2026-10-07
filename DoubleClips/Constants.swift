@@ -122,15 +122,6 @@ enum Constants {
     /// Hold (.none) makes a value jump at the next keyframe; linear animates between keyframes.
     static let KEYFRAME_DEFAULT_EASING: EditingView.EasingType = .linear
     
-    // MARK: - Clip volume + fades (EditingView+ClipVolume.swift)
-    /// Highest linear gain a clip's volume can reach (1 = the source's own level).
-    static let CLIP_VOLUME_MAX: Float               = 4
-    static let AUDIO_FADE_MAX_SECONDS: Float        = 10
-    /// A keyframed volume is sent to the audio mix as straight ramps: eased segments are cut into this many.
-    static let VOLUME_RAMP_SUBDIVISIONS: Int        = 8
-    /// How short the jump before a keyframe is (a "hold" keyframe changes the level abruptly).
-    static let VOLUME_STEP_SECONDS: Float           = 0.01
-    
     // MARK: - Canvas gizmo: resize handles + snapping (EditingView+PreviewHandles.swift)
     /// Touch radius around a handle (the drawn dot is much smaller); handles win over the move area.
     static let CANVAS_HANDLE_HIT_POINTS: CGFloat        = 22

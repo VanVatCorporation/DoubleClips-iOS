@@ -181,10 +181,9 @@ final class TimelineExporter: ObservableObject {
         }
         
         let composition = built.composition
-        let audioMix = built.audioMix
         workQueue.async { [weak self] in
-            self?.run(composition: composition, videoComposition: videoComposition, audioMix: audioMix,
-                      plan: plan, url: url, control: activeControl)
+            self?.run(composition: composition, videoComposition: videoComposition, plan: plan,
+                      url: url, control: activeControl)
         }
     }
     
@@ -208,8 +207,8 @@ final class TimelineExporter: ObservableObject {
     
     // MARK: Pipeline (work queue)
     
-    private func run(composition: AVAsset, videoComposition: AVVideoComposition, audioMix: AVAudioMix?,
-                     plan: ExportPlan, url: URL, control: ExportControl) {
+    private func run(composition: AVAsset, videoComposition: AVVideoComposition, plan: ExportPlan,
+                     url: URL, control: ExportControl) {
         do {
             // ── Reader: frames come out of ClipCompositor, audio out of the composition's mix.
             let reader = try AVAssetReader(asset: composition)
@@ -239,7 +238,6 @@ final class TimelineExporter: ObservableObject {
                 ]
                 let output = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: pcm)
                 output.alwaysCopiesSampleData = false
-                output.audioMix = audioMix          // per-clip volume + fades
                 if reader.canAdd(output) {
                     reader.add(output)
                     audioOutput = output

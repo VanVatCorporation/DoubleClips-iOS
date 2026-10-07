@@ -230,8 +230,6 @@ extension EditingView.Clip {
         c.isReverse = isReverse
         c.removeBackground = removeBackground
         c.audioVolume = audioVolume
-        c.audioFadeIn = audioFadeIn
-        c.audioFadeOut = audioFadeOut
         c.isLockedForTemplate = isLockedForTemplate
         c.additionalFFmpegCommand = additionalFFmpegCommand
         c.endTransition = endTransition
