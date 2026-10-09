@@ -214,7 +214,7 @@ enum ClipAnimationLoader {
                              curves: curves, reversed: false, referenceFrames: referenceFrames)
     }
     
-    private static func parseCurve(_ m: [String: Any], _ channel: ClipAnimation.Channel,
+    static func parseCurve(_ m: [String: Any], _ channel: ClipAnimation.Channel,
                                    _ referenceFrames: Int, _ path: String) throws -> ClipAnimation.Curve {
         let kind = try reqString(m, "kind", path, 16)
         switch kind {

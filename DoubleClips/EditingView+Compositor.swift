@@ -160,22 +160,37 @@ extension EditingView {
                                 frame = image.composited(over: frame)
                             }
                         case .transition(let transition):
-                            // Both clips as full-canvas pictures at this very time, then the blend
-                            // (Android: two offscreen layers + TransitionBlendShader).
                             // The outgoing clip's out animation runs through the transition's window.
                             var outgoing = transition.from
                             if transition.duration > 0 {
                                 outgoing.outWindow = RenderLayer.OutWindow(start: transition.start, duration: transition.duration)
                             }
-                            let from = render(outgoing, request: request, canvas: canvas,
-                                              time: time, stretchToFull: instruction.stretchToFull)
-                            let to = render(transition.to, request: request, canvas: canvas,
-                                            time: time, stretchToFull: instruction.stretchToFull)
                             let progress = transition.duration > 0
                                 ? CGFloat(min(max((time - transition.start) / transition.duration, 0), 1)) : 1
-                            if let blended = Self.blend(from, to, style: transition.style,
-                                                        progress: progress, canvas: canvasRect) {
-                                frame = blended.composited(over: frame)
+                            
+                            if let style = TransitionStyleLoader.get(transition.style) {
+                                // Data-driven style (animations/transitions/*.json): ONE of the two clips is drawn,
+                                // A before the style's cut and B after it, each with its side's channels merged into
+                                // its own animation frame. No cross dissolve.
+                                let showOutgoing = Double(progress) < style.cut
+                                let extra = (showOutgoing ? style.from : style.to).evaluate(Float(progress))
+                                let picture = showOutgoing
+                                    ? render(outgoing, request: request, canvas: canvas, time: time,
+                                             stretchToFull: instruction.stretchToFull, extraAnim: extra)
+                                    : render(transition.to, request: request, canvas: canvas, time: time,
+                                             stretchToFull: instruction.stretchToFull, extraAnim: extra)
+                                if let picture { frame = picture.composited(over: frame) }
+                            } else {
+                                // Both clips as full-canvas pictures at this very time, then the blend
+                                // (Android: two offscreen layers + TransitionBlendShader).
+                                let from = render(outgoing, request: request, canvas: canvas,
+                                                  time: time, stretchToFull: instruction.stretchToFull)
+                                let to = render(transition.to, request: request, canvas: canvas,
+                                                time: time, stretchToFull: instruction.stretchToFull)
+                                if let blended = Self.blend(from, to, style: transition.style,
+                                                            progress: progress, canvas: canvasRect) {
+                                    frame = blended.composited(over: frame)
+                                }
                             }
                         }
                     }
@@ -188,7 +203,8 @@ extension EditingView {
         // MARK: Per-layer rendering
         
         private func render(_ layer: RenderLayer, request: AVAsynchronousVideoCompositionRequest,
-                            canvas: CGSize, time: Float, stretchToFull: Bool) -> CIImage? {
+                            canvas: CGSize, time: Float, stretchToFull: Bool,
+                            extraAnim: ClipAnimationFrame? = nil) -> CIImage? {
             // A gesture in progress overrides the snapshot without rebuilding the player item.
             let live = LiveOverrides.shared.state(for: layer.clipID)
             let props = (live?.keyframes ?? layer.keyframes).resolved(base: live?.properties ?? layer.baseProperties,
@@ -209,18 +225,18 @@ extension EditingView {
                 let origin = CGPoint(x: (canvas.width - rendered.size.width) / 2,
                                      y: (canvas.height - rendered.size.height) / 2)
                 return place(rendered.image, layer: box, props: props, canvas: canvas, stretchToFull: false,
-                             anim: Self.animationFrame(layer, at: time), origin: origin)
+                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), origin: origin)
                 
             case .video(let trackID, let preferredTransform):
                 guard let buffer = request.sourceFrame(byTrackID: trackID) else { return nil }
                 let upright = Self.upright(CIImage(cvPixelBuffer: buffer), preferredTransform)
                 return place(upright, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull,
-                             anim: Self.animationFrame(layer, at: time))
+                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim))
                 
             case .image(let url):
                 guard let source = Self.cachedImage(url) else { return nil }
                 return place(source, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull,
-                             anim: Self.animationFrame(layer, at: time))
+                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim))
                 
             case .effect:
                 return nil      // handled where the layers are composited
@@ -360,27 +376,8 @@ extension EditingView {
             // Blur sigma is a fraction of the canvas WIDTH, applied to the drawn layer in canvas
             // pixels (Android blurs the layer after drawing it). Transparent surroundings fade in
             // exactly as they do there; the final render crops to the canvas.
-            // Edge slide (iOS only): the picture slides inside its own box, the edge pixels stretch into the gap.
-            let slide = CGFloat(anim.edgeSlideFraction) * canvas.width
-            if abs(slide) > 0.5 {
-                let box = placed.extent
-                placed = placed.clampedToExtent()
-                    .transformed(by: CGAffineTransform(translationX: slide, y: 0))
-                    .cropped(to: box)
-            }
-            // Motion blur (iOS only): horizontal streaks, edges clamped so the picture doesn't fade at its border.
-            let streak = CGFloat(anim.motionBlurWidthFraction) * canvas.width
-            if streak > 0.5 {
-                let box = placed.extent
-                placed = placed.clampedToExtent()
-                    .applyingFilter("CIMotionBlur", parameters: [kCIInputRadiusKey: streak * Constants.MOTION_BLUR_RADIUS_FACTOR,
-                                                                 kCIInputAngleKey: 0])
-                    .cropped(to: box)
-            }
-            let sigma = CGFloat(anim.blurWidthFraction) * canvas.width
-            if sigma > 0.25 {
-                placed = placed.applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: sigma])
-            }
+            // Edge fill, edge slide, squeeze, motion blur, blur (EditingView+TransitionLook.swift).
+            placed = Self.streakStack(placed, anim: anim, canvas: CGRect(origin: .zero, size: canvas))
             return placed
         }
         
@@ -389,7 +386,7 @@ extension EditingView {
         /// Clip properties plus the animation's channels: hue / brightness / temperature add,
         /// saturation / opacity multiply, contrast stands alone (the clip has none). Brightness is in
         /// Android's -10..10 units for both the clip and the animation; the shader scales the sum by 0.1.
-        private static func colorAdjusted(_ image: CIImage, _ p: VideoProperties, anim: ClipAnimationFrame) -> CIImage {
+        static func colorAdjusted(_ image: CIImage, _ p: VideoProperties, anim: ClipAnimationFrame) -> CIImage {
             let saturation = p.valueSaturation * anim.saturation
             let brightness = (p.valueBrightness + anim.brightness) * 0.1
             let contrast = anim.contrast
@@ -412,6 +409,15 @@ extension EditingView {
                 out = out.applyingFilter("CITemperatureAndTint", parameters: [
                     "inputNeutral": CIVector(x: CGFloat(temperature), y: 0),
                     "inputTargetNeutral": CIVector(x: 6500, y: 0)
+                ])
+            }
+            let exposure = CGFloat(anim.exposure)
+            if abs(exposure - 1) > 0.001 {
+                // Brightness multiplier on the colours (alpha untouched).
+                out = out.applyingFilter("CIColorMatrix", parameters: [
+                    "inputRVector": CIVector(x: exposure, y: 0, z: 0, w: 0),
+                    "inputGVector": CIVector(x: 0, y: exposure, z: 0, w: 0),
+                    "inputBVector": CIVector(x: 0, y: 0, z: exposure, w: 0)
                 ])
             }
             if opacity < 1 {
@@ -487,7 +493,7 @@ extension EditingView {
             return CIWarpKernel(source: source)
         }()
         
-        private static func warped(_ image: CIImage, anim: ClipAnimationFrame) -> CIImage {
+        static func warped(_ image: CIImage, anim: ClipAnimationFrame) -> CIImage {
             let box = image.extent
             guard box.width > 1, box.height > 1, box.width.isFinite, box.height.isFinite else { return image }
             let topW = CGFloat(max(anim.warpTopWidth, 0.1))

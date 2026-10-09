@@ -25,6 +25,9 @@ final class ClipAnimation {
         case temperature, blur, warpTopWidth, warpBottomWidth, warpHeight
         /// iOS additions (no Android equivalent): see the notes in DoubleClips-Glitch-Blur-and-Shake-Slide-Notes.md.
         case motionBlur, edgeSlide
+        /// More iOS additions, used by transition styles and Shake Slide: brightness MULTIPLIER, streak direction, horizontal
+        /// squeeze toward an anchor, and "fill the canvas with the picture's edge pixels".
+        case exposure, blurAngle, squeezeX, squeezeAnchor, edgeFill, edgeSlideY
         
         var json: String {
             switch self {
@@ -44,12 +47,19 @@ final class ClipAnimation {
             case .warpHeight:      return "warp.height"
             case .motionBlur:      return "motionBlur"
             case .edgeSlide:       return "edgeSlide"
+            case .exposure:        return "exposure"
+            case .blurAngle:       return "blurAngle"
+            case .squeezeX:        return "squeezeX"
+            case .squeezeAnchor:   return "squeezeAnchor"
+            case .edgeFill:        return "edgeFill"
+            case .edgeSlideY:      return "edgeSlideY"
             }
         }
         
         var neutral: Double {
             switch self {
-            case .opacity, .scale, .saturation, .contrast, .warpTopWidth, .warpBottomWidth, .warpHeight: return 1
+            case .opacity, .scale, .saturation, .contrast, .warpTopWidth, .warpBottomWidth, .warpHeight, .exposure, .squeezeX: return 1
+            case .squeezeAnchor: return 0.5
             default: return 0
             }
         }
@@ -67,7 +77,11 @@ final class ClipAnimation {
             case .temperature: return -6000
             case .blur: return 0
             case .motionBlur: return 0
-            case .edgeSlide: return -2
+            case .edgeSlide, .edgeSlideY: return -2
+            case .exposure: return 0
+            case .blurAngle: return -180
+            case .squeezeX: return 0.02
+            case .squeezeAnchor, .edgeFill: return 0
             case .warpTopWidth, .warpBottomWidth, .warpHeight: return 0.1
             }
         }
@@ -84,8 +98,12 @@ final class ClipAnimation {
             case .contrast: return 10
             case .temperature: return 6000
             case .blur: return 0.05
-            case .motionBlur: return 0.5
-            case .edgeSlide: return 2
+            case .motionBlur: return 1
+            case .edgeSlide, .edgeSlideY: return 2
+            case .exposure: return 4
+            case .blurAngle: return 180
+            case .squeezeX: return 2
+            case .squeezeAnchor, .edgeFill: return 1
             case .warpTopWidth, .warpBottomWidth, .warpHeight: return 2
             }
         }
@@ -252,6 +270,18 @@ struct ClipAnimationFrame {
     /// The picture slides sideways INSIDE its own box (fraction of canvas width, + = right) and the edge
     /// pixels are stretched into the gap it leaves, instead of the gap showing what is behind.
     var edgeSlideFraction: Float { value(.edgeSlide) }
+    /// Like `edgeSlide` but vertical (fraction of canvas HEIGHT, + = down, so a negative value moves the picture's pixels up).
+    var edgeSlideYFraction: Float { value(.edgeSlideY) }
+    /// Brightness MULTIPLIER on the colours (1 = unchanged, 0.32 = the dark hit of Glitch Blur).
+    var exposure: Float { value(.exposure) }
+    /// Direction of the motion-blur streaks, degrees counter-clockwise from the right (0 = horizontal).
+    var blurAngleDegrees: Float { value(.blurAngle) }
+    /// Horizontal squeeze of the picture toward its anchor (1 = unchanged); the edge pixels smear into the gap.
+    var squeezeX: Float { value(.squeezeX) }
+    /// Where the squeeze holds still: 0 = the picture's left edge, 1 = its right edge.
+    var squeezeAnchor: Float { value(.squeezeAnchor) }
+    /// 1 = after placing the picture, extend its edge pixels over the whole canvas (a shrunken picture leaves no black margin).
+    var edgeFill: Float { value(.edgeFill) }
     /// Top-edge width of the top-centre-anchored squish, 1 = unchanged.
     var warpTopWidth: Float { value(.warpTopWidth) }
     /// Bottom-edge width of the squish, 1 = unchanged.
@@ -260,4 +290,37 @@ struct ClipAnimationFrame {
     var warpHeight: Float { value(.warpHeight) }
     
     var hasWarp: Bool { warpTopWidth != 1 || warpBottomWidth != 1 || warpHeight != 1 }
+}
+
+// MARK: - Combining two frames (a transition style's side + the clip's own In / Out animation)
+
+extension ClipAnimationFrame {
+    /// `self` combined with `other` (nil = unchanged), channel by channel with the same rules the compositor uses
+    /// for a clip's own properties: additive channels add, multiplicative ones multiply (all clamped to their
+    /// range); the streak angle follows the longer streak, the squeeze anchor follows the stronger squeeze,
+    /// edge fill takes the larger.
+    func merged(with other: ClipAnimationFrame?) -> ClipAnimationFrame {
+        guard let other, !other.isNeutral else { return self }
+        if isNeutral { return other }
+        var out = values
+        for channel in ClipAnimation.Channel.allCases {
+            let i = channel.rawValue
+            let a = Double(values[i]), b = Double(other.values[i])
+            let combined: Double
+            switch channel {
+            case .offsetX, .offsetY, .rotation, .hue, .brightness, .temperature, .edgeSlide, .edgeSlideY, .motionBlur, .blur:
+                combined = a + b
+            case .opacity, .scale, .saturation, .contrast, .exposure, .warpTopWidth, .warpBottomWidth, .warpHeight, .squeezeX:
+                combined = a * b
+            case .blurAngle:
+                combined = motionBlurWidthFraction >= other.motionBlurWidthFraction ? a : b
+            case .squeezeAnchor:
+                combined = abs(squeezeX - 1) >= abs(other.squeezeX - 1) ? a : b
+            case .edgeFill:
+                combined = Swift.max(a, b)
+            }
+            out[i] = Float(Swift.min(Swift.max(combined, channel.min), channel.max))
+        }
+        return ClipAnimationFrame(values: out, isNeutral: false)
+    }
 }

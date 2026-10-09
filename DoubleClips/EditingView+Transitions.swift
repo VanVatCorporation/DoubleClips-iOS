@@ -21,7 +21,7 @@ enum TransitionCatalog {
         var id: String { key }
         var normalized: String { TransitionPlan.normalizedStyle(key) }
         /// Drawn by this app's blend (and by Android's GPU export for the first eight).
-        var isDrawn: Bool { key == "none" || EditingView.ClipCompositor.drawnTransitionStyles.contains(normalized) }
+        var isDrawn: Bool { key == "none" || EditingView.ClipCompositor.drawnTransitionStyles.contains(normalized) || TransitionStyleLoader.get(normalized) != nil }
     }
     
     /// Android's registry, in a fixed, grouped order (its own spinner order is a HashMap's).

@@ -1,0 +1,16 @@
+import Foundation
+
+// MARK: - Embedded copies of the bundled transition styles
+//
+// The JSON files in `animations/transitions/` are the source of truth and win when the app bundle has them. These
+// copies exist so a style still works when the folder never made it into the app bundle (an Xcode group instead of
+// a folder reference, a file added to the project but not to the target): `TransitionStyleLoader` registers a copy
+// only when no bundle file defined that id. Keep them equal to the files (regenerate by minifying the file).
+
+enum TransitionStyleDefaults {
+    static let json: [String: String] = [
+        "glitchblur": #"""
+{"schema":1,"id":"glitchblur","name":"Glitch Blur","description":"A drops dark in one frame, recovers, shrinks and streaks into a washed-out blur, hard cut at 0.76; B pops in small like Unfold (squished, then unfolding) with the streaks fading. Read off CapCut (60 fps).","defaultDuration":1.1,"cut":0.76,"from":{"channels":{"exposure":{"kind":"knots","interp":"linear","points":[[0.0,0.32],[0.055,0.335],[0.085,0.38],[0.145,0.47],[0.175,0.62],[0.235,0.76],[0.3,0.7],[0.38,0.64],[0.42,0.64],[0.45,0.7],[0.535,1.0],[0.595,1.15],[0.625,1.24],[0.655,1.29],[0.715,1.3],[0.76,1.3]]},"brightness":{"kind":"knots","interp":"linear","points":[[0,0],[0.535,0],[0.655,0.9],[0.76,1.0]]},"scale":{"kind":"knots","interp":"smooth","points":[[0,1],[0.15,1],[0.76,0.92]]},"motionBlur":{"kind":"knots","interp":"linear","points":[[0,0],[0.15,0],[0.3,0.006],[0.455,0.034],[0.6,0.059],[0.76,0.09]]},"blurAngle":{"kind":"constant","value":60},"edgeFill":{"kind":"constant","value":1}}},"to":{"channels":{"exposure":{"kind":"knots","interp":"linear","points":[[0.76,1.13],[0.835,1.11],[0.865,1.08],[0.895,1.04],[0.955,1.01],[1.0,1.0]]},"brightness":{"kind":"knots","interp":"linear","points":[[0.76,0.5],[0.92,0],[1,0]]},"scale":{"kind":"knots","interp":"smooth","points":[[0.76,0.97],[1,1]]},"warp.topWidth":{"kind":"knots","interp":"linear","points":[[0.76,0.976],[0.7741,0.987],[0.7882,0.99],[0.8024,0.992],[0.8165,0.992],[0.8306,0.992],[0.8447,0.998],[0.8588,0.999],[0.8729,0.999],[0.8871,0.999],[0.9012,1],[0.9153,1],[0.9294,1],[0.9435,1],[0.9576,1],[0.9718,1],[0.9859,1],[1.0,1]]},"warp.bottomWidth":{"kind":"knots","interp":"linear","points":[[0.76,0.863],[0.7741,0.885],[0.7882,0.908],[0.8024,0.93],[0.8165,0.961],[0.8306,0.97],[0.8447,0.975],[0.8588,0.981],[0.8729,0.986],[0.8871,0.99],[0.9012,0.994],[0.9153,0.994],[0.9294,0.995],[0.9435,0.995],[0.9576,0.996],[0.9718,0.998],[0.9859,0.999],[1.0,1]]},"warp.height":{"kind":"knots","interp":"linear","points":[[0.76,0.955],[0.7741,0.969],[0.7882,0.98],[0.8024,0.992],[0.8165,1.013],[0.8306,1.022],[0.8447,1.035],[0.8588,1.039],[0.8729,1.041],[0.8871,1.038],[0.9012,1.033],[0.9153,1.033],[0.9294,1.025],[0.9435,1.021],[0.9576,1.013],[0.9718,1.008],[0.9859,1.0036],[1.0,1.001]]},"motionBlur":{"kind":"knots","interp":"linear","points":[[0.76,0.09],[0.8,0.0685],[0.84,0.049],[0.88,0.0318],[0.92,0.0173],[0.96,0.006],[1,0]]},"blurAngle":{"kind":"constant","value":60},"edgeFill":{"kind":"constant","value":1}}}}
+"""#
+    ]
+}
