@@ -17,6 +17,10 @@ import Photos
 struct ExportSheetView: View {
     let project: ProjectData
     let timeline: EditingView.Timeline
+    /// The TEMPLATE button (post this project as a template). Off for a project that is itself a template render.
+    let allowsTemplateExport: Bool
+    /// Called when an export finishes.
+    let onFinished: ((URL) -> Void)?
     
     @Environment(\.dismiss) private var dismiss
     @StateObject private var exporter = TimelineExporter()
@@ -36,9 +40,12 @@ struct ExportSheetView: View {
         case idle, saving, saved, failed(String)
     }
     
-    init(project: ProjectData, timeline: EditingView.Timeline) {
+    init(project: ProjectData, timeline: EditingView.Timeline, allowsTemplateExport: Bool = true,
+         onFinished: ((URL) -> Void)? = nil) {
         self.project = project
         self.timeline = timeline
+        self.allowsTemplateExport = allowsTemplateExport
+        self.onFinished = onFinished
         _settings = State(initialValue: EditingView.VideoSettings.load(projectPath: project.projectPath))
     }
     
@@ -85,6 +92,7 @@ struct ExportSheetView: View {
             }
         }
         .onChange(of: exporter.state) { state in
+            if case .finished(let url) = state { onFinished?(url) }
             guard exportingForTemplate else { return }
             switch state {
             case .finished(let url):
@@ -132,17 +140,19 @@ struct ExportSheetView: View {
             
             Spacer()
             
-            Button(action: { startTemplateExport() }) {
-                Text("TEMPLATE")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(Color.mdPrimary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.mdPrimary, lineWidth: 1.5))
+            if allowsTemplateExport {
+                Button(action: { startTemplateExport() }) {
+                    Text("TEMPLATE")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(Color.mdPrimary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.mdPrimary, lineWidth: 1.5))
+                }
+                .disabled(isExporting || preparingTemplate || timeline.duration <= 0)
+                .opacity(isExporting || preparingTemplate || timeline.duration <= 0 ? 0.4 : 1)
+                .padding(.trailing, 8)
             }
-            .disabled(isExporting || preparingTemplate || timeline.duration <= 0)
-            .opacity(isExporting || preparingTemplate || timeline.duration <= 0 ? 0.4 : 1)
-            .padding(.trailing, 8)
             
             Button(action: { isExporting ? exporter.cancel() : startExport() }) {
                 Text(isExporting ? "CANCEL" : "EXPORT")

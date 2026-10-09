@@ -125,6 +125,41 @@ enum Constants {
     static let TEMPLATE_DOCUMENT_FORMAT: Int            = 1
     static let TEMPLATE_UPLOAD_CHUNK_BYTES: Int         = 1 << 20
     
+    // MARK: - Glitch Blur transition + Shake Slide animation (EditingView+TransitionBlend.swift, +Compositor.swift)
+    // Read off CapCut reference frames; the numbers are meant to be adjusted by eye against CapCut.
+    /// Where in the transition the cut from A to B happens (0...1). CapCut's window is centred on the cut.
+    static let GLITCH_BLUR_CUT: CGFloat                 = 0.5
+    /// Blur / fringe / exposure build-up before the cut grows as u^power, and decays as u^power after it.
+    static let GLITCH_BLUR_IN_POWER: CGFloat            = 1.6
+    static let GLITCH_BLUR_OUT_POWER: CGFloat           = 0.8
+    /// Longest streak, as a fraction of the canvas width, at the cut.
+    static let GLITCH_BLUR_LENGTH_FRACTION: CGFloat     = 0.09
+    /// Direction of the streaks (degrees, counter-clockwise from the right, so 60 = up and to the right).
+    static let GLITCH_BLUR_ANGLE_DEGREES: CGFloat       = 60
+    /// Red / blue are pulled apart by this fraction of the canvas width (along the streak direction) at the cut.
+    static let GLITCH_FRINGE_FRACTION: CGFloat          = 0.012
+    /// Exposure at the cut: colours times (1 + gain), plus lift. (A washes out toward white.)
+    static let GLITCH_EXPOSURE_GAIN: CGFloat            = 0.25
+    static let GLITCH_EXPOSURE_LIFT: CGFloat            = 0.10
+    /// A shrinks to (1 - this) by the cut; B arrives from (1 + this) and settles.
+    static let GLITCH_ZOOM_OUT: CGFloat                 = 0.08
+    static let GLITCH_ZOOM_IN: CGFloat                  = 0.08
+    /// CIMotionBlur's radius is half the streak: `motionBlur` channel fraction x width x this.
+    static let MOTION_BLUR_RADIUS_FACTOR: CGFloat       = 0.5
+    
+    // MARK: - Style grids (effects, transitions)
+    /// Columns of the effect and transition style grids.
+    static let STYLE_GRID_COLUMNS: Int                  = 4
+    static let TRANSITION_TILE_PIXELS: Int              = 160
+    /// The selected transition tile loops its transition over this many seconds.
+    static let TRANSITION_TILE_LOOP_SECONDS: Double     = 1.8
+    static let TRANSITION_PANEL_HEIGHT: CGFloat         = 400
+    
+    // MARK: - Using a template (TemplateRenderer.swift)
+    static let TEMPLATE_RESOURCES_CACHE_FOLDER          = "TemplateResources"
+    static let TEMPLATE_RENDER_FOLDER_PREFIX            = "TemplateRender-"
+    static let TEMPLATE_INCREMENT_USE_URL               = "https://app.vanvatcorp.com/doubleclips/api/increment-use"
+    
     // MARK: - Template preview strip (TemplateTimelineStrip.swift)
     /// How wide one second of the template timeline is in the preview strip.
     static let TEMPLATE_STRIP_POINTS_PER_SECOND: CGFloat = 36

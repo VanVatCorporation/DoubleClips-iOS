@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import UniformTypeIdentifiers
+import Combine
 
 // MARK: - Posting a template: what is posted, packaging it, uploading it
 //

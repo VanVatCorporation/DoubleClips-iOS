@@ -17,8 +17,9 @@ import Combine
 //   • Log:       status, running tasks, Enable log / Truncate log / Scroll lock, log text.
 //
 // Left out on purpose: the render-engine radio and the Advanced (FFmpeg command) section.
-// `ffmpegCommand` is deprecated, so EXPORT is not wired to a renderer yet: the screen collects the
-// clips, trims and settings, and EXPORT explains that rendering isn't available.
+// `ffmpegCommand` is deprecated: the template is a TIMELINE (TemplateTimeline.swift). One tile per white
+// stripe of it, in the same order and numbered the same; EXPORT builds the timeline with the picked media
+// in it (TemplateRenderer.swift) and opens the normal export screen.
 
 // MARK: Model
 
@@ -35,6 +36,8 @@ struct TemplateClipSlot: Identifiable {
     var mediaDuration: Double = 0
     var startTrim: Double = 0
     var endTrim: Double = 0
+    /// How long the template keeps this clip on screen (seconds; 0 = unknown, an old template).
+    var targetDuration: Double = 0
     
     var isFilled: Bool { kind != .empty }
     
@@ -64,6 +67,12 @@ final class TemplateExportModel: ObservableObject {
     @Published var slots: [TemplateClipSlot]
     @Published var settings: EditingView.VideoSettings = .androidDefault
     @Published var isImporting = false
+    /// The template's timeline once it is loaded; the slots come from it.
+    @Published var info: TemplateTimelineInfo?
+    /// Why the timeline couldn't be loaded (EXPORT then explains instead of rendering).
+    @Published var timelineProblem: String?
+    /// Building the timeline / downloading resources for the render.
+    @Published var isPreparing = false
     @Published private(set) var logText = ""
     @Published var logEnabled = true
     @Published var truncateLog = true
@@ -71,6 +80,24 @@ final class TemplateExportModel: ObservableObject {
     init(clipCount: Int) {
         slots = Array(repeating: TemplateClipSlot(), count: max(0, clipCount))
         log("Template ready: \(slots.count) clip slot(s). Tap a tile to choose a photo or video.")
+    }
+    
+    /// The timeline arrived: one slot per white stripe, each knowing how long its clip is, and the export
+    /// settings start as the canvas the template was made for.
+    func configure(with info: TemplateTimelineInfo) {
+        self.info = info
+        timelineProblem = nil
+        if slots.count != info.slots.count || !slots.contains(where: { $0.isFilled }) {
+            slots = info.slots.map { slotInfo in
+                var slot = TemplateClipSlot()
+                slot.targetDuration = slotInfo.duration
+                return slot
+            }
+        } else {
+            for i in slots.indices { slots[i].targetDuration = info.slots[i].duration }
+        }
+        if let canvas = info.canvas { settings = canvas }
+        log("Template timeline loaded: \(info.slots.count) clip slot(s), \(String(format: "%.1f", info.duration))s.")
     }
     
     // MARK: Temp storage (Android: <persistentDataPath>/TemplatesClipTemp)
@@ -129,6 +156,7 @@ final class TemplateExportModel: ObservableObject {
         
         let isVideo = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
         var slot = TemplateClipSlot()
+        slot.targetDuration = slots.indices.contains(index) ? slots[index].targetDuration : 0
         
         if isVideo {
             guard let movie = try await item.loadTransferable(type: PickedMovie.self) else {
@@ -147,7 +175,8 @@ final class TemplateExportModel: ObservableObject {
             slot.typeDescription = UTType(filenameExtension: ext)?.localizedDescription ?? ext.uppercased()
             slot.mediaDuration = duration.isFinite ? max(0, duration) : 0
             slot.startTrim = 0
-            slot.endTrim = slot.mediaDuration
+            // The template keeps this clip on screen for `targetDuration`: start with that much of the video.
+            slot.endTrim = slot.targetDuration > 0 ? min(slot.mediaDuration, slot.targetDuration) : slot.mediaDuration
             slot.thumbnail = await Self.videoThumbnail(asset)
         } else {
             guard let data = try await item.loadTransferable(type: Data.self) else {
@@ -178,7 +207,9 @@ final class TemplateExportModel: ObservableObject {
     func clear(_ index: Int) {
         guard slots.indices.contains(index) else { return }
         removeFiles(forSlot: index)
-        slots[index] = TemplateClipSlot()
+        var empty = TemplateClipSlot()
+        empty.targetDuration = slots[index].targetDuration
+        slots[index] = empty
         log("Clip \(index + 1) cleared.")
     }
     
@@ -234,7 +265,10 @@ struct TemplateExportView: View {
     @State private var showSettings = false
     @State private var propertiesRef: SlotRef?
     @State private var deleteIndex: Int?
-    @State private var showExportNotice = false
+    @State private var alertMessage: String?
+    @State private var rendered: PreparedTemplateRender?
+    @State private var renderDirectory: URL?
+    @State private var countedUse = false
     @State private var scrollLock = true
     
     private struct SlotRef: Identifiable { let id: Int }
@@ -258,6 +292,7 @@ struct TemplateExportView: View {
             }
         }
         .background(Color(uiColor: .systemBackground))
+        .task { await loadTimeline() }
         .onAppear {
             TemplateExportModel.clearTempDirectory()
         }
@@ -298,10 +333,61 @@ struct TemplateExportView: View {
         } message: {
             Text("This clip will be removed from the slot.")
         }
-        .alert("Export isn't available yet", isPresented: $showExportNotice) {
+        .alert("Can't export yet", isPresented: Binding(get: { alertMessage != nil },
+                                                        set: { if !$0 { alertMessage = nil } })) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text("Rendering templates isn't wired up on iOS yet. Your clips, trims and settings are kept while this screen is open.")
+            Text(alertMessage ?? "")
+        }
+        .fullScreenCover(item: $rendered, onDismiss: {
+            if let directory = renderDirectory { TemplateRenderer.cleanup(directory) }
+            renderDirectory = nil
+        }) { render in
+            ExportSheetView(project: render.project, timeline: render.timeline, allowsTemplateExport: false) { _ in
+                // The template was used: tell the server once per visit to this screen.
+                if !countedUse {
+                    countedUse = true
+                    TemplateUseCounter.increment(template.templateId)
+                }
+            }
+        }
+    }
+    
+    // MARK: Timeline + render
+    
+    private func loadTimeline() async {
+        guard !template.templateTimelineLink.isEmpty else {
+            model.timelineProblem = "This template is old: it has no timeline, and only FFmpeg could render it."
+            return
+        }
+        do {
+            let info = try await TemplateTimelineLoader.load(for: template)
+            model.configure(with: info)
+        } catch {
+            model.timelineProblem = "The template's timeline couldn't be loaded: \(error.localizedDescription)"
+            model.log(model.timelineProblem ?? "")
+        }
+    }
+    
+    private func startRender() async {
+        if let problem = model.timelineProblem { alertMessage = problem; return }
+        guard model.info != nil else { alertMessage = "The template's timeline is still loading. Try again in a moment."; return }
+        let missing = model.slots.indices.filter { !model.slots[$0].isFilled }.map { $0 + 1 }
+        guard missing.isEmpty else {
+            alertMessage = "Fill every clip first. Empty: " + missing.map(String.init).joined(separator: ", ") + "."
+            return
+        }
+        model.isPreparing = true
+        defer { model.isPreparing = false }
+        do {
+            let prepared = try await TemplateRenderer.prepare(template: template, slots: model.slots,
+                                                              settings: model.settings) { model.log($0) }
+            renderDirectory = prepared.directory
+            countedUse = false
+            rendered = prepared
+        } catch {
+            model.log("Couldn't prepare the template: \(error.localizedDescription)")
+            alertMessage = error.localizedDescription
         }
     }
     
@@ -326,15 +412,23 @@ struct TemplateExportView: View {
                 .lineLimit(1)
             Spacer()
             
-            Button(action: { showExportNotice = true }) {
-                Text("EXPORT")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color.mdPrimary)
-                    .cornerRadius(8)
+            Button(action: { Task { await startRender() } }) {
+                Group {
+                    if model.isPreparing {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("EXPORT")
+                    }
+                }
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.white)
+                .frame(minWidth: 52)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.mdPrimary)
+                .cornerRadius(8)
             }
+            .disabled(model.isPreparing)
             .padding(.trailing, 12)
         }
         .foregroundColor(.primary)
@@ -395,6 +489,27 @@ struct TemplateExportView: View {
                 .shadow(radius: slot.thumbnail == nil ? 0 : 2)
         }
         .frame(width: 100, height: 100)
+        .overlay(alignment: .bottomLeading) {
+            if slot.targetDuration > 0 {
+                Text(String(format: "%.1fs", slot.targetDuration))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.black.opacity(0.55))
+                    .clipShape(Capsule())
+                    .padding(5)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            // A video that ends before the template clip does: the clip just ends early.
+            if slot.kind == .video, slot.targetDuration > 0, slot.trimmedLength < slot.targetDuration - 0.05 {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.orange)
+                    .padding(6)
+            }
+        }
         .cornerRadius(8)
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .onTapGesture {

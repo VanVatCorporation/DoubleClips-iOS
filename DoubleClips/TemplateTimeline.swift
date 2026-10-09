@@ -83,6 +83,8 @@ struct TemplateTimelineInfo {
     var slots: [TemplateSlotInfo]
     /// The parsed timeline (nil for the legacy strip drawn from the clip count).
     var timeline: EditingView.Timeline?
+    /// The canvas the template was made for (resolution, frame rate, stretch), when the file carries it.
+    var canvas: EditingView.VideoSettings?
     
     var roles: [TemplateClipRole] {
         TemplateClipRole.allCases.filter { role in clips.contains { $0.role == role } }
@@ -169,7 +171,14 @@ enum TemplateTimelineLoader {
     /// The two shapes the server may send: the project's own timeline JSON (`{"tracks": [...]}`), or a
     /// wrapper `{"format": 1, "timeline": {...}}` that leaves room for more keys later.
     private struct Wrapper: Decodable {
+        struct Canvas: Decodable {
+            let videoWidth: Int?
+            let videoHeight: Int?
+            let frameRate: Int?
+            let isStretchToFull: Bool?
+        }
         let timeline: EditingView.Timeline?
+        let settings: Canvas?
     }
     
     /// A timeline stored in a JSON column often comes back wrapped: as a JSON string that holds the JSON
@@ -191,7 +200,16 @@ enum TemplateTimelineLoader {
         let data = unwrap(rawData)
         let decoder = JSONDecoder()
         if let wrapped = try? decoder.decode(Wrapper.self, from: data), let timeline = wrapped.timeline {
-            return TemplateTimelineInfo.make(from: timeline)
+            var info = TemplateTimelineInfo.make(from: timeline)
+            if let c = wrapped.settings {
+                var canvas = EditingView.VideoSettings.androidDefault
+                if let w = c.videoWidth, w > 0 { canvas.videoWidth = w }
+                if let h = c.videoHeight, h > 0 { canvas.videoHeight = h }
+                if let f = c.frameRate, f > 0 { canvas.frameRate = f }
+                if let s = c.isStretchToFull { canvas.isStretchToFull = s }
+                info.canvas = canvas
+            }
+            return info
         }
         if let timeline = try? decoder.decode(EditingView.Timeline.self, from: data) {
             return TemplateTimelineInfo.make(from: timeline)

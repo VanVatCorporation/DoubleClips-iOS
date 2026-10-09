@@ -492,7 +492,8 @@ extension EditingView {
         }
         private var current: EffectCatalog.Style? { EffectCatalog.style(for: effect.style) }
         
-        private let columns = [GridItem(.adaptive(minimum: 92, maximum: 130), spacing: 10, alignment: .top)]
+        private let columns = Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top),
+                                    count: Constants.STYLE_GRID_COLUMNS)
         
         var body: some View {
             VStack(alignment: .leading, spacing: 14) {
@@ -552,11 +553,12 @@ extension EditingView {
                             }
                         }
                     Text(style.title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Text(style.author)
-                        .font(.system(size: 10))
+                        .font(.system(size: 9))
                         .foregroundColor(.white.opacity(0.5))
                         .lineLimit(1)
                 }

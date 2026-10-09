@@ -32,6 +32,7 @@ enum TransitionCatalog {
         Style(key: "fadeblack", title: "Fade Black"),
         Style(key: "fadewhite", title: "Fade White"),
         Style(key: "fadegrays", title: "Fade Gray"),
+        Style(key: "glitchblur", title: "Glitch Blur"),
         Style(key: "wipeleft", title: "Wipe Left"),
         Style(key: "wiperight", title: "Wipe Right"),
         Style(key: "slideleft", title: "Slide Left"),
@@ -191,7 +192,7 @@ extension EditingView {
                 }
                 .background(Color(hex: "#111111"))
             }
-            .frame(height: 300)
+            .frame(height: Constants.TRANSITION_PANEL_HEIGHT)
             .transition(.move(edge: .bottom))
             .onAppear(perform: ensureTransition)
         }
@@ -206,18 +207,12 @@ extension EditingView {
         private var styleGrid: some View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("STYLE").font(.system(size: 11, weight: .bold)).foregroundColor(Color.mdPrimary)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: 8) {
-                        ForEach(TransitionCatalog.styles) { style in
-                            let selected = TransitionPlan.normalizedStyle(transition.effect.style) == style.normalized
-                            Button { setStyle(style.key) } label: {
-                                Text(style.title)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(selected ? .white : .white.opacity(style.isDrawn ? 0.85 : 0.45))
-                                    .padding(.horizontal, 12).padding(.vertical, 7)
-                                    .background(Capsule().fill(selected ? Color.mdPrimary : Color.white.opacity(0.1)))
-                            }
-                        }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top),
+                                         count: Constants.STYLE_GRID_COLUMNS), spacing: 10) {
+                    ForEach(TransitionCatalog.styles) { style in
+                        let selected = TransitionPlan.normalizedStyle(transition.effect.style) == style.normalized
+                        Button { setStyle(style.key) } label: { tile(style, selected: selected) }
+                            .buttonStyle(.plain)
                     }
                 }
                 let current = TransitionPlan.normalizedStyle(transition.effect.style)
@@ -227,6 +222,41 @@ extension EditingView {
                         .font(.system(size: 11))
                         .foregroundColor(.orange.opacity(0.9))
                 }
+            }
+        }
+        
+        /// One style of the grid: A -> B drawn live halfway (the selected one loops), and its name.
+        private func tile(_ style: TransitionCatalog.Style, selected: Bool) -> some View {
+            VStack(spacing: 4) {
+                TransitionPreviewTile(styleKey: style.key, animating: selected)
+                    .aspectRatio(1, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(selected ? Color.mdPrimary : Color.white.opacity(0.12), lineWidth: selected ? 3 : 1)
+                    )
+                    .overlay {
+                        if style.key == "none" {
+                            Image(systemName: "nosign").font(.system(size: 22, weight: .semibold)).foregroundColor(.white)
+                        }
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        // Plays as a cross fade on iOS (the tile shows exactly that).
+                        if !style.isDrawn {
+                            Text("≈")
+                                .font(.system(size: 11, weight: .heavy))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 4)
+                                .background(Capsule().fill(Color.orange.opacity(0.85)))
+                                .padding(3)
+                        }
+                    }
+                Text(style.title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.white.opacity(style.isDrawn ? 1 : 0.6))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .frame(minHeight: 26, alignment: .top)
             }
         }
         

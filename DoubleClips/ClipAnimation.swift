@@ -23,6 +23,8 @@ final class ClipAnimation {
     enum Channel: Int, CaseIterable {
         case opacity, scale, offsetX, offsetY, rotation, hue, saturation, brightness, contrast
         case temperature, blur, warpTopWidth, warpBottomWidth, warpHeight
+        /// iOS additions (no Android equivalent): see the notes in DoubleClips-Glitch-Blur-and-Shake-Slide-Notes.md.
+        case motionBlur, edgeSlide
         
         var json: String {
             switch self {
@@ -40,6 +42,8 @@ final class ClipAnimation {
             case .warpTopWidth:    return "warp.topWidth"
             case .warpBottomWidth: return "warp.bottomWidth"
             case .warpHeight:      return "warp.height"
+            case .motionBlur:      return "motionBlur"
+            case .edgeSlide:       return "edgeSlide"
             }
         }
         
@@ -62,6 +66,8 @@ final class ClipAnimation {
             case .contrast: return 0
             case .temperature: return -6000
             case .blur: return 0
+            case .motionBlur: return 0
+            case .edgeSlide: return -2
             case .warpTopWidth, .warpBottomWidth, .warpHeight: return 0.1
             }
         }
@@ -78,6 +84,8 @@ final class ClipAnimation {
             case .contrast: return 10
             case .temperature: return 6000
             case .blur: return 0.05
+            case .motionBlur: return 0.5
+            case .edgeSlide: return 2
             case .warpTopWidth, .warpBottomWidth, .warpHeight: return 2
             }
         }
@@ -239,6 +247,11 @@ struct ClipAnimationFrame {
     var temperatureKelvin: Float { value(.temperature) }
     /// Gaussian blur sigma as a fraction of the canvas WIDTH (0 = none).
     var blurWidthFraction: Float { value(.blur) }
+    /// Horizontal motion blur, total streak length as a fraction of the canvas WIDTH (0 = none).
+    var motionBlurWidthFraction: Float { value(.motionBlur) }
+    /// The picture slides sideways INSIDE its own box (fraction of canvas width, + = right) and the edge
+    /// pixels are stretched into the gap it leaves, instead of the gap showing what is behind.
+    var edgeSlideFraction: Float { value(.edgeSlide) }
     /// Top-edge width of the top-centre-anchored squish, 1 = unchanged.
     var warpTopWidth: Float { value(.warpTopWidth) }
     /// Bottom-edge width of the squish, 1 = unchanged.

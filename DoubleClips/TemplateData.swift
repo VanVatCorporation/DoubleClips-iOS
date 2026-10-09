@@ -167,3 +167,14 @@ private extension KeyedDecodingContainer {
 private struct DiscardedValue: Decodable {
     init(from decoder: Decoder) throws {}
 }
+
+extension TemplateData {
+    /// Folder URL (ends with "/") of the template's resource files: the server's `templateContentLink`, else
+    /// derived from the preview video's address (`.../{user}/{id}/preview.mp4` -> `.../{user}/{id}/content/`).
+    var resolvedContentLink: String {
+        let given = templateContentLink.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !given.isEmpty { return given.hasSuffix("/") ? given : given + "/" }
+        guard let video = URL(string: templateVideoLink) else { return "" }
+        return video.deletingLastPathComponent().appendingPathComponent("content", isDirectory: true).absoluteString
+    }
+}

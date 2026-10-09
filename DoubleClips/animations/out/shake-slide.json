@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "shake-slide",
+  "name": "Shake Slide",
+  "description": "A streaky horizontal blur builds as the picture washes out, then it slides left with its edge smeared into the gap and darkens. Read off CapCut's Shake Slide (1.5 s, 60 fps frames).",
+  "direction": "out",
+  "defaultDuration": 1.6,
+  "channels": {
+    "motionBlur": {
+      "kind": "knots",
+      "interp": "smooth",
+      "points": [[0, 0], [0.12, 0.02], [0.4, 0.12], [0.7, 0.16], [1, 0.12]]
+    },
+    "edgeSlide": {
+      "kind": "knots",
+      "interp": "smooth",
+      "points": [[0, 0], [0.12, 0.016], [0.25, 0], [0.42, 0], [0.68, -0.26], [0.9, -0.5], [1, -0.62]]
+    },
+    "brightness": {
+      "kind": "knots",
+      "interp": "smooth",
+      "points": [[0, 0], [0.4, 1.5], [0.75, 0.5], [1, -3.5]]
+    },
+    "saturation": {
+      "kind": "knots",
+      "interp": "smooth",
+      "points": [[0, 1], [0.5, 0.65], [1, 0.8]]
+    },
+    "contrast": {
+      "kind": "knots",
+      "interp": "smooth",
+      "points": [[0, 1], [0.4, 0.82], [1, 1]]
+    }
+  }
+}

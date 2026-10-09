@@ -49,6 +49,14 @@ extension EditingView {
         var inAnimation = AnimationClip()
         var outAnimation = AnimationClip()
         var duration: Float = 0
+        /// When set, the out animation plays over this stretch instead of ending with the clip. The outgoing
+        /// side of a transition gets the transition's own window (CapCut's "combine out animation with the
+        /// transition"), so a transition and an out animation play together instead of one after the other.
+        struct OutWindow {
+            var start: Float
+            var duration: Float
+        }
+        var outWindow: OutWindow?
     }
     
     /// A transition between two clips of one track (EditingView+TransitionPlan.swift): both sides are
@@ -154,7 +162,12 @@ extension EditingView {
                         case .transition(let transition):
                             // Both clips as full-canvas pictures at this very time, then the blend
                             // (Android: two offscreen layers + TransitionBlendShader).
-                            let from = render(transition.from, request: request, canvas: canvas,
+                            // The outgoing clip's out animation runs through the transition's window.
+                            var outgoing = transition.from
+                            if transition.duration > 0 {
+                                outgoing.outWindow = RenderLayer.OutWindow(start: transition.start, duration: transition.duration)
+                            }
+                            let from = render(outgoing, request: request, canvas: canvas,
                                               time: time, stretchToFull: instruction.stretchToFull)
                             let to = render(transition.to, request: request, canvas: canvas,
                                             time: time, stretchToFull: instruction.stretchToFull)
@@ -347,6 +360,23 @@ extension EditingView {
             // Blur sigma is a fraction of the canvas WIDTH, applied to the drawn layer in canvas
             // pixels (Android blurs the layer after drawing it). Transparent surroundings fade in
             // exactly as they do there; the final render crops to the canvas.
+            // Edge slide (iOS only): the picture slides inside its own box, the edge pixels stretch into the gap.
+            let slide = CGFloat(anim.edgeSlideFraction) * canvas.width
+            if abs(slide) > 0.5 {
+                let box = placed.extent
+                placed = placed.clampedToExtent()
+                    .transformed(by: CGAffineTransform(translationX: slide, y: 0))
+                    .cropped(to: box)
+            }
+            // Motion blur (iOS only): horizontal streaks, edges clamped so the picture doesn't fade at its border.
+            let streak = CGFloat(anim.motionBlurWidthFraction) * canvas.width
+            if streak > 0.5 {
+                let box = placed.extent
+                placed = placed.clampedToExtent()
+                    .applyingFilter("CIMotionBlur", parameters: [kCIInputRadiusKey: streak * Constants.MOTION_BLUR_RADIUS_FACTOR,
+                                                                 kCIInputAngleKey: 0])
+                    .cropped(to: box)
+            }
             let sigma = CGFloat(anim.blurWidthFraction) * canvas.width
             if sigma > 0.25 {
                 placed = placed.applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: sigma])
@@ -413,8 +443,16 @@ extension EditingView {
                 if p >= 0 { return inDef.evaluate(p) }
             }
             if let outDef {
-                let outDur = ClipAnimation.fitDuration(outRaw, other: inRaw, clip: layer.duration)
-                let p = ClipAnimation.progressOut(clipEnd: layer.startTime + layer.duration, t: t, duration: outDur)
+                let outDur: Float
+                let clipEnd: Float
+                if let window = layer.outWindow {          // combined with a transition
+                    outDur = window.duration
+                    clipEnd = window.start + window.duration
+                } else {
+                    outDur = ClipAnimation.fitDuration(outRaw, other: inRaw, clip: layer.duration)
+                    clipEnd = layer.startTime + layer.duration
+                }
+                let p = ClipAnimation.progressOut(clipEnd: clipEnd, t: t, duration: outDur)
                 if p >= 0 { return outDef.evaluate(p) }
             }
             return .neutral

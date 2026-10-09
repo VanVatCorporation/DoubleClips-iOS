@@ -22,7 +22,8 @@ extension EditingView.ClipCompositor {
     /// Keys `blend` draws itself. Everything else renders as a cross fade.
     static let drawnTransitionStyles: Set<String> = [
         "fade", "dissolve", "wipeleft", "wiperight", "slideleft", "slideright", "slideup", "slidedown",
-        "fadeblack", "fadewhite", "fadegrays", "circleopen", "circleclose"
+        "fadeblack", "fadewhite", "fadegrays", "circleopen", "circleclose",
+        "glitchblur"        // iOS only (see DoubleClips-Glitch-Blur-and-Shake-Slide-Notes.md)
     ]
     
     static func blend(_ a: CIImage?, _ b: CIImage?, style: String, progress: CGFloat, canvas: CGRect) -> CIImage? {
@@ -84,6 +85,9 @@ extension EditingView.ClipCompositor {
             ])?.outputImage else { return crossFade(from, to, progress: p) }
             return masked(to, over: from, mask: gradient.cropped(to: canvas))
             
+        case "glitchblur":
+            return glitchBlur(from, to, progress: p, canvas: canvas)
+            
         case "dissolve":
             // Every pixel flips from A to B at its own moment: a fixed noise picture compared with
             // a rising threshold (Android only approximates dissolve with a fade).
@@ -105,6 +109,81 @@ extension EditingView.ClipCompositor {
         default:    // fade and every style that isn't drawn here
             return crossFade(from, to, progress: p)
         }
+    }
+    
+    // MARK: Glitch Blur
+    //
+    // Read off CapCut's "Glitch Blur" (reference frames at 60 fps, 1.1 s): no cross dissolve at all. A is
+    // swept into a streaked blur (diagonal motion blur, red / blue pulled apart along the streaks, washed
+    // out toward white, shrinking a little), the picture HARD-CUTS to B at the peak, and B arrives in the same
+    // streaked blur and settles. So: intensity rises to 1 at the cut and falls again, and the picture under it
+    // is A before the cut and B after it. All the numbers are in Constants.GLITCH_*.
+    
+    private static func glitchBlur(_ from: CIImage, _ to: CIImage, progress p: CGFloat, canvas: CGRect) -> CIImage {
+        let cut = min(max(Constants.GLITCH_BLUR_CUT, 0.05), 0.95)
+        let outgoing = p < cut
+        let base = outgoing ? from : to
+        let u = outgoing ? p / cut : (1 - p) / (1 - cut)                 // 0 ... 1, 1 at the cut
+        let intensity = pow(min(max(u, 0), 1), outgoing ? Constants.GLITCH_BLUR_IN_POWER : Constants.GLITCH_BLUR_OUT_POWER)
+        guard intensity > 0.002 else { return base }
+        let w = canvas.width
+        
+        // Scale about the centre: A shrinks, B starts a little large.
+        let scale = outgoing ? 1 - Constants.GLITCH_ZOOM_OUT * intensity : 1 + Constants.GLITCH_ZOOM_IN * intensity
+        let about = CGAffineTransform(translationX: -canvas.midX, y: -canvas.midY)
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: canvas.midX, y: canvas.midY))
+        var picture = base.transformed(by: about)
+        
+        // Streaks (edges clamped so the shrunken picture doesn't leave a hole).
+        let angle = Constants.GLITCH_BLUR_ANGLE_DEGREES * .pi / 180
+        let streak = intensity * Constants.GLITCH_BLUR_LENGTH_FRACTION * w
+        if streak > 0.5 {
+            picture = picture.clampedToExtent()
+                .applyingFilter("CIMotionBlur", parameters: [kCIInputRadiusKey: streak * Constants.MOTION_BLUR_RADIUS_FACTOR,
+                                                             kCIInputAngleKey: angle])
+                .cropped(to: canvas)
+        } else {
+            picture = picture.cropped(to: canvas)
+        }
+        
+        // Red and blue pulled apart along the streaks.
+        let pull = intensity * Constants.GLITCH_FRINGE_FRACTION * w
+        if pull > 0.25 {
+            picture = rgbSplit(picture, dx: pull * cos(angle), dy: pull * sin(angle), canvas: canvas)
+        }
+        
+        // Washed out: more light, less depth.
+        let gain = 1 + Constants.GLITCH_EXPOSURE_GAIN * intensity
+        let lift = Constants.GLITCH_EXPOSURE_LIFT * intensity
+        return picture.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: gain, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: gain, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: gain, w: 0),
+            "inputBiasVector": CIVector(x: lift, y: lift, z: lift, w: 0)
+        ]).cropped(to: canvas)
+    }
+    
+    /// Red moves by +(dx, dy), blue by -(dx, dy), green stays (Core Image's y axis points up).
+    private static func rgbSplit(_ image: CIImage, dx: CGFloat, dy: CGFloat, canvas: CGRect) -> CIImage {
+        func channel(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, alpha: CGFloat, shift: CGPoint) -> CIImage {
+            image.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: r, y: 0, z: 0, w: 0),
+                "inputGVector": CIVector(x: 0, y: g, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: b, w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha)
+            ])
+            .clampedToExtent()
+            .transformed(by: CGAffineTransform(translationX: shift.x, y: shift.y))
+            .cropped(to: canvas)
+        }
+        let red = channel(1, 0, 0, alpha: 0, shift: CGPoint(x: dx, y: dy))
+        let green = channel(0, 1, 0, alpha: 1, shift: .zero)
+        let blue = channel(0, 0, 1, alpha: 0, shift: CGPoint(x: -dx, y: -dy))
+        // The three channels simply add back up to one picture; alpha comes from the unshifted green.
+        return red.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: green])
+            .applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: blue])
+            .cropped(to: canvas)
     }
     
     // MARK: Building blocks
