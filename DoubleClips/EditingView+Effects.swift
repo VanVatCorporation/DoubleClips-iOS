@@ -135,8 +135,15 @@ enum EffectRenderer {
             } else {
                 t = Float(p)
             }
-            let look = definition.animation.evaluate(t).scaledDeviation(Float(a))
-            return EditingView.ClipCompositor.looked(frame, anim: look, canvas: canvas)
+            var out = frame
+            if !definition.animation.channels.isEmpty {
+                let look = definition.animation.evaluate(t).scaledDeviation(Float(a))
+                out = EditingView.ClipCompositor.looked(out, anim: look, canvas: canvas)
+            }
+            if !definition.filters.isEmpty {
+                out = applyFilters(definition, to: out, t: t, a: a, time: time, canvas: canvas)
+            }
+            return out
         }
         
         switch TransitionPlan.normalizedStyle(style) {
@@ -212,6 +219,101 @@ enum EffectRenderer {
             
         default: return frame       // a style from a newer version: leave the picture alone
         }
+    }
+    
+    // MARK: Filter ops (the "filters" list of a JSON style; format in EffectFilterOps.swift)
+    
+    private static func applyFilters(_ definition: EffectStyleDefinition, to input: CIImage, t: Float, a: CGFloat,
+                                     time: Float, canvas: CGRect) -> CIImage {
+        let step = Int(floor(Double(time) * 15))                 // random patterns jump 15 times a second
+        let w = canvas.width, h = canvas.height
+        let side = min(w, h)
+        let scales = definition.filterStrength.scales
+        var out = input
+        
+        for filter in definition.filters {
+            guard let spec = EffectFilterOps.specs[filter.op] else { continue }
+            /// The parameter at this moment, moved by the strength slider if the style asks for it.
+            func v(_ name: String) -> CGFloat {
+                guard let param = spec.params.first(where: { $0.name == name }), let curve = filter.curves[name] else { return 0 }
+                var x = curve.at(Double(t))
+                if scales && param.scaled { x = param.neutral + (x - param.neutral) * Double(a) }
+                return CGFloat(min(max(x, param.min), param.max))
+            }
+            
+            switch filter.op {
+            case "blur":
+                out = blurred(out, radius: h * v("radius"), canvas: canvas)
+            case "colorControls":
+                out = out.applyingFilter("CIColorControls", parameters: [
+                    kCIInputBrightnessKey: v("brightness"), kCIInputContrastKey: v("contrast"), kCIInputSaturationKey: v("saturation")
+                ])
+            case "photoEffect":
+                let names = ["noir": "CIPhotoEffectNoir", "chrome": "CIPhotoEffectChrome", "fade": "CIPhotoEffectFade",
+                             "instant": "CIPhotoEffectInstant", "mono": "CIPhotoEffectMono", "process": "CIPhotoEffectProcess",
+                             "tonal": "CIPhotoEffectTonal", "transfer": "CIPhotoEffectTransfer"]
+                out = out.applyingFilter(names[filter.strings["name"] ?? "noir"] ?? "CIPhotoEffectNoir")
+            case "sepia":
+                out = out.applyingFilter("CISepiaTone", parameters: [kCIInputIntensityKey: v("intensity")])
+            case "vignette":
+                out = out.applyingFilter("CIVignette", parameters: [
+                    kCIInputIntensityKey: v("intensity"), kCIInputRadiusKey: v("radius")
+                ]).cropped(to: canvas)
+            case "bloom":
+                out = out.clampedToExtent().applyingFilter("CIBloom", parameters: [
+                    kCIInputRadiusKey: h * v("radius"), kCIInputIntensityKey: v("intensity")
+                ]).cropped(to: canvas)
+            case "pixellate":
+                out = out.clampedToExtent().applyingFilter("CIPixellate", parameters: [
+                    kCIInputCenterKey: CIVector(x: 0, y: 0), kCIInputScaleKey: max(2, h * v("scale"))
+                ]).cropped(to: canvas)
+            case "dotScreen":
+                out = out.applyingFilter("CIDotScreen", parameters: [
+                    kCIInputCenterKey: CIVector(x: canvas.midX, y: canvas.midY), kCIInputAngleKey: v("angle"),
+                    kCIInputWidthKey: max(3, h * v("width")), kCIInputSharpnessKey: v("sharpness")
+                ]).cropped(to: canvas)
+            case "kaleidoscope":
+                out = out.clampedToExtent().applyingFilter("CIKaleidoscope", parameters: [
+                    "inputCount": Int(v("count").rounded()), kCIInputCenterKey: CIVector(x: canvas.midX, y: canvas.midY),
+                    kCIInputAngleKey: v("angle")
+                ]).cropped(to: canvas)
+            case "twirl":
+                out = out.clampedToExtent().applyingFilter("CITwirlDistortion", parameters: [
+                    kCIInputCenterKey: CIVector(x: canvas.midX, y: canvas.midY),
+                    kCIInputRadiusKey: side * v("radius"), kCIInputAngleKey: v("angle")
+                ]).cropped(to: canvas)
+            case "bump":
+                out = out.clampedToExtent().applyingFilter("CIBumpDistortion", parameters: [
+                    kCIInputCenterKey: CIVector(x: canvas.midX, y: canvas.midY),
+                    kCIInputRadiusKey: side * v("radius"), kCIInputScaleKey: v("scale")
+                ]).cropped(to: canvas)
+            case "rgbShift":
+                let direction: CGFloat = filter.flags.contains("randomSign") ? (random(step, 1) > 0.5 ? 1 : -1) : 1
+                out = splitChannels(out, dx: w * v("dx") * direction, canvas: canvas)
+            case "tearSlices":
+                let amount = v("amount")
+                for i in 0..<2 {
+                    out = slice(out, y: random(step, 3 + Double(i)) * h * 0.85,
+                                height: h * (0.02 + 0.08 * random(step, 5 + Double(i))),
+                                shift: (random(step, 7 + Double(i)) - 0.5) * w * 0.14 * amount, canvas: canvas)
+                }
+            case "crossProcess":
+                func poly(_ c0: CGFloat, _ c1: CGFloat, _ c2: CGFloat, _ c3: CGFloat) -> CIVector {
+                    CIVector(values: [c0, c1, c2, c3], count: 4)
+                }
+                // Red and green get an S-curve (more contrast), blue is flattened and lifted.
+                out = out.applyingFilter("CIColorPolynomial", parameters: [
+                    "inputRedCoefficients": poly(0, 0.6, 1.2, -0.8),
+                    "inputGreenCoefficients": poly(0, 0.9, 0.3, -0.2),
+                    "inputBlueCoefficients": poly(0.08, 1.2, -0.9, 0.6)
+                ])
+            case "vhs":
+                out = vhs(out, a: v("amount"), step: step, canvas: canvas)
+            default:
+                break
+            }
+        }
+        return definition.filterStrength.mixes ? mix(input, out, amount: a, canvas: canvas) : out
     }
     
     // MARK: Small building blocks

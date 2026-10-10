@@ -18,6 +18,8 @@ import Foundation
 //     "span": 30,                        // optional, seconds: p = seconds into the effect / span, held at 1 afterwards (a
 //                                        //   speed that does not depend on the clip's length, e.g. "3% a second"); not with "period"
 //     "referenceFrames": 60,             // only needed by "frames" knots
+//     "filters": [ ... ],                // optional whitelisted filter ops after the channels (EffectFilterOps.swift)
+//     "filterStrength": "scale",         // what the strength slider does to the filters: scale | mix | both | none
 //     "channels": { ... }                // same channels / curves as an animation (scale, rotation, offsetX/Y, blur,
 //   }                                    //   motionBlur + blurAngle, edgeSlide(Y), squeezeX, exposure, brightness,
 //                                        //   saturation, contrast, hue, temperature, warp.*, opacity, edgeFill, redTint)
@@ -38,9 +40,13 @@ final class EffectStyleDefinition {
     /// Seconds the curves take to run once, independent of the clip's length (held at the end); 0 = across the clip.
     let span: Double
     let animation: ClipAnimation
+    /// Filter ops applied after the channels, and how the strength slider acts on them.
+    let filters: [EffectFilter]
+    let filterStrength: EffectFilterStrength
     
     init(id: String, name: String, author: String, intensityLabel: String?, intensityRange: ClosedRange<Float>,
-         period: Double, span: Double = 0, animation: ClipAnimation) {
+         period: Double, span: Double = 0, animation: ClipAnimation,
+         filters: [EffectFilter] = [], filterStrength: EffectFilterStrength = .scale) {
         self.id = id
         self.name = name
         self.author = author
@@ -49,6 +55,8 @@ final class EffectStyleDefinition {
         self.period = period
         self.span = span
         self.animation = animation
+        self.filters = filters
+        self.filterStrength = filterStrength
     }
 }
 
@@ -147,7 +155,8 @@ enum EffectStyleLoader {
     // MARK: Parse + validate
     
     private static let topKeys: Set<String> = [
-        "schema", "id", "name", "description", "author", "intensity", "period", "span", "referenceFrames", "channels"
+        "schema", "id", "name", "description", "author", "intensity", "period", "span", "referenceFrames", "channels",
+        "filters", "filterStrength"
     ]
     
     static func parse(_ json: String, source: String) throws -> EffectStyleDefinition {
@@ -221,9 +230,19 @@ enum EffectStyleLoader {
             referenceFrames = Int(rf)
         }
         
-        let channelObjects = try L.asObject(top["channels"], "$.channels")
-        guard !channelObjects.isEmpty else {
-            throw ClipAnimationFormatError("$.channels: at least one channel is required")
+        var filters: [EffectFilter] = []
+        if top["filters"] != nil { filters = try EffectFilterOps.parse(top["filters"], path: "$.filters") }
+        var filterStrength = EffectFilterStrength.scale
+        if top["filterStrength"] != nil {
+            let word = try L.reqString(top, "filterStrength", "$", 16)
+            guard let parsed = EffectFilterStrength(rawValue: word) else {
+                throw ClipAnimationFormatError("$.filterStrength: must be scale, mix, both or none")
+            }
+            filterStrength = parsed
+        }
+        let channelObjects: [String: Any] = try (top["channels"] == nil ? [:] : L.asObject(top["channels"], "$.channels"))
+        guard !channelObjects.isEmpty || !filters.isEmpty else {
+            throw ClipAnimationFormatError("$: needs \"channels\" and/or \"filters\"")
         }
         var curves: [ClipAnimation.Channel: ClipAnimation.Curve] = [:]
         for (channelKey, value) in channelObjects {
@@ -236,6 +255,7 @@ enum EffectStyleLoader {
         let animation = ClipAnimation(id: id, name: name!, direction: .in, defaultDuration: 1,
                                       curves: curves, reversed: false, referenceFrames: referenceFrames)
         return EffectStyleDefinition(id: id, name: name!, author: author!, intensityLabel: label, intensityRange: range,
-                                     period: period, span: span, animation: animation)
+                                     period: period, span: span, animation: animation,
+                                     filters: filters, filterStrength: filterStrength)
     }
 }

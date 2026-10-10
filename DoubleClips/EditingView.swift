@@ -395,6 +395,13 @@ struct EditingView: View {
                                                     onClipTap: { clip in selectingClip(clip) },
                                                     onTap: { selectingTrack(track) },
                                                     onClipMoved: { rebuildPreview() },
+                                                    onClipTrimmed: { clip, old, new in
+                                                        // The handle drag already applied `new`; the command makes it one undo step.
+                                                        commandManager.execute(GenericCommand(
+                                                            description: "Trim: \(clip.clipName)",
+                                                            undo: { clip.apply(trim: old); rebuildPreview() },
+                                                            redo: { clip.apply(trim: new); rebuildPreview() }))
+                                                    },
                                                     onClipDragBegin: { engine.pause() },
                                                     onKeyframeTap: { time in
                                                         engine.pause()
@@ -1463,6 +1470,8 @@ private struct TrackRowView: View {
     var onTap: () -> Void
     /// Fired after a move/resize commits — parent uses this to rebuild the preview.
     var onClipMoved: () -> Void = {}
+    /// Fired once when a trim-handle drag ends with a change (clip, before, after); nil = just `onClipMoved`.
+    var onClipTrimmed: ((EditingView.Clip, EditingView.ClipTrimState, EditingView.ClipTrimState) -> Void)? = nil
     /// Fired the instant a whole-clip move drag begins — parent pauses playback,
     /// matching the timeline-scroll drag's same behavior.
     var onClipDragBegin: () -> Void = {}
@@ -1493,6 +1502,7 @@ private struct TrackRowView: View {
                     currentTime: currentTime,
                     trackRowHeight: trackRowHeight,
                     onMoved: onClipMoved,
+                    onTrimmed: onClipTrimmed,
                     onDragBegin: onClipDragBegin,
                     onKeyframeTap: onKeyframeTap
                 )
@@ -1542,15 +1552,16 @@ private struct ClipBlockView: View {
     var trackRowHeight: CGFloat = Constants.TRACK_HEIGHT
     /// Fired once a move/resize commits, so the parent can rebuild the preview.
     var onMoved: () -> Void = {}
+    /// Fired once when a trim-handle drag ends with a change (clip, before, after); nil = just `onMoved`.
+    var onTrimmed: ((EditingView.Clip, EditingView.ClipTrimState, EditingView.ClipTrimState) -> Void)? = nil
     /// Fired the instant a whole-clip move drag begins (not on trim-handle drags),
     /// matching Android's `stopPlayback` call the moment a clip drag starts.
     var onDragBegin: () -> Void = {}
     var onKeyframeTap: (Float) -> Void = { _ in }
     
-    @State private var dragInitialDuration: Float = 0
-    @State private var dragInitialStartTime: Float = 0
-    @State private var dragInitialStartTrim: Float = 0
-    @State private var dragInitialEndTrim: Float = 0
+    /// The clip as it was when the current handle drag began, and where the finger landed (identifies the drag).
+    @State private var trimBase: EditingView.ClipTrimState? = nil
+    @State private var trimStart: CGPoint = .zero
     
     // Derived values for the clip block
     var blockWidth: CGFloat {
@@ -1577,6 +1588,47 @@ private struct ClipBlockView: View {
         if isMultiSelected { return .orange }
         if isSelected { return .white }
         return .clear
+    }
+    
+    private func trimHandle(_ systemName: String, grab: CGFloat, alignment: Alignment) -> some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.white)
+                .frame(width: 12)
+            Image(systemName: systemName)
+                .font(.system(size: 10))
+                .foregroundColor(.black)
+        }
+        .frame(width: grab, alignment: alignment)
+        .contentShape(Rectangle())
+    }
+    
+    /// Drag a clip edge. The translation is measured in the GLOBAL space: the block (and the handle with it) moves while
+    /// the edge is dragged, and in the handle's own space that feedback fought the finger. Each drag starts from a snapshot
+    /// of the clip and applies `snapshot + finger movement` through `ClipTrimMath` (source limits, time 0, minimum length).
+    private func trimGesture(leftEdge: Bool) -> some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+            .onChanged { value in
+                if trimBase == nil || trimStart != value.startLocation {
+                    trimBase = clip.trimState
+                    trimStart = value.startLocation
+                }
+                guard let base = trimBase else { return }
+                let delta = Float(value.translation.width / pps)
+                let limited = clip.isSourceLimited
+                clip.apply(trim: leftEdge
+                           ? EditingView.ClipTrimMath.leftEdge(base: base, delta: delta, sourceLimited: limited)
+                           : EditingView.ClipTrimMath.rightEdge(base: base, delta: delta, sourceLimited: limited))
+            }
+            .onEnded { _ in
+                let base = trimBase
+                trimBase = nil
+                if let base, let onTrimmed, clip.trimState != base {
+                    onTrimmed(clip, base, clip.trimState)
+                } else {
+                    onMoved()
+                }
+            }
     }
     
     var body: some View {
@@ -1628,71 +1680,16 @@ private struct ClipBlockView: View {
             
             // Trim handles — only for a true single selection, and hidden mid-move
             // (Android: `dragContext.clip.toggleHandlesVisibility(false)` on ACTION_MOVE
-            // of the clip body, restored on ACTION_UP).
+            // of the clip body, restored on ACTION_UP). The grab area is wider than the white bar
+            // (up to 28 pt, half the block on a very short clip).
             if isSelected && !isMultiSelected && !isGhostSource {
-                // Left Handle
-                HStack {
-                    ZStack {
-                        Rectangle()
-                            .fill(Color.white)
-                            .frame(width: 12)
-                        Image(systemName: "chevron.compact.left")
-                            .font(.system(size: 10))
-                            .foregroundColor(.black)
-                    }
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                if dragInitialDuration == 0 {
-                                    dragInitialDuration = clip.duration
-                                    dragInitialStartTime = clip.startTime
-                                    dragInitialStartTrim = clip.startClipTrim
-                                }
-                                let delta = Float(value.translation.width / pps)
-                                let newDuration = max(0.5, dragInitialDuration - delta)
-                                let actualDelta = dragInitialDuration - newDuration
-                                
-                                clip.duration = newDuration
-                                clip.startTime = dragInitialStartTime + actualDelta
-                                clip.startClipTrim = max(0, dragInitialStartTrim + actualDelta)
-                            }
-                            .onEnded { _ in
-                                dragInitialDuration = 0
-                                onMoved()
-                            }
-                    )
-                    
-                    Spacer()
-                    
-                    // Right Handle
-                    ZStack {
-                        Rectangle()
-                            .fill(Color.white)
-                            .frame(width: 12)
-                        Image(systemName: "chevron.compact.right")
-                            .font(.system(size: 10))
-                            .foregroundColor(.black)
-                    }
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                if dragInitialDuration == 0 {
-                                    dragInitialDuration = clip.duration
-                                    dragInitialEndTrim = clip.endClipTrim
-                                }
-                                let delta = Float(value.translation.width / pps)
-                                let newDuration = max(0.5, dragInitialDuration + delta)
-                                
-                                clip.duration = newDuration
-                                clip.endClipTrim = max(0, clip.originalDuration - clip.duration - clip.startClipTrim)
-                            }
-                            .onEnded { _ in
-                                dragInitialDuration = 0
-                                onMoved()
-                            }
-                    )
+                let grab = Swift.min(28, blockWidth / 2)
+                HStack(spacing: 0) {
+                    trimHandle("chevron.compact.left", grab: grab, alignment: .leading)
+                        .gesture(trimGesture(leftEdge: true))
+                    Spacer(minLength: 0)
+                    trimHandle("chevron.compact.right", grab: grab, alignment: .trailing)
+                        .gesture(trimGesture(leftEdge: false))
                 }
             }
         }
