@@ -28,6 +28,8 @@ final class ClipAnimation {
         /// More iOS additions, used by transition styles and Shake Slide: brightness MULTIPLIER, streak direction, horizontal
         /// squeeze toward an anchor, and "fill the canvas with the picture's edge pixels".
         case exposure, blurAngle, squeezeX, squeezeAnchor, edgeFill, edgeSlideY
+        /// 0 = unchanged, 1 = a strong red cast (green and blue cut to 40 %, red lifted 15 %): the "Triggered" look.
+        case redTint
         
         var json: String {
             switch self {
@@ -53,6 +55,7 @@ final class ClipAnimation {
             case .squeezeAnchor:   return "squeezeAnchor"
             case .edgeFill:        return "edgeFill"
             case .edgeSlideY:      return "edgeSlideY"
+            case .redTint:         return "redTint"
             }
         }
         
@@ -81,7 +84,7 @@ final class ClipAnimation {
             case .exposure: return 0
             case .blurAngle: return -180
             case .squeezeX: return 0.02
-            case .squeezeAnchor, .edgeFill: return 0
+            case .squeezeAnchor, .edgeFill, .redTint: return 0
             case .warpTopWidth, .warpBottomWidth, .warpHeight: return 0.1
             }
         }
@@ -103,7 +106,7 @@ final class ClipAnimation {
             case .exposure: return 4
             case .blurAngle: return 180
             case .squeezeX: return 2
-            case .squeezeAnchor, .edgeFill: return 1
+            case .squeezeAnchor, .edgeFill, .redTint: return 1
             case .warpTopWidth, .warpBottomWidth, .warpHeight: return 2
             }
         }
@@ -274,6 +277,8 @@ struct ClipAnimationFrame {
     var edgeSlideYFraction: Float { value(.edgeSlideY) }
     /// Brightness MULTIPLIER on the colours (1 = unchanged, 0.32 = the dark hit of Glitch Blur).
     var exposure: Float { value(.exposure) }
+    /// Red colour cast, 0 = none ... 1 = strong (see `Channel.redTint`).
+    var redTint: Float { value(.redTint) }
     /// Direction of the motion-blur streaks, degrees counter-clockwise from the right (0 = horizontal).
     var blurAngleDegrees: Float { value(.blurAngle) }
     /// Horizontal squeeze of the picture toward its anchor (1 = unchanged); the edge pixels smear into the gap.
@@ -308,7 +313,7 @@ extension ClipAnimationFrame {
             let a = Double(values[i]), b = Double(other.values[i])
             let combined: Double
             switch channel {
-            case .offsetX, .offsetY, .rotation, .hue, .brightness, .temperature, .edgeSlide, .edgeSlideY, .motionBlur, .blur:
+            case .offsetX, .offsetY, .rotation, .hue, .brightness, .temperature, .edgeSlide, .edgeSlideY, .motionBlur, .blur, .redTint:
                 combined = a + b
             case .opacity, .scale, .saturation, .contrast, .exposure, .warpTopWidth, .warpBottomWidth, .warpHeight, .squeezeX:
                 combined = a * b

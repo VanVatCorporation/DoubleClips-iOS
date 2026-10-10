@@ -15,10 +15,12 @@ import Foundation
 //     "intensity": { "label": "Strength", "min": 0.2, "max": 3 },   // optional; absent = no strength slider
 //     "period": 1.0,                     // optional, seconds (0 / absent = the curves run once over the clip, p = 0...1);
 //                                        //   with a period the curves loop: p = (seconds into the effect mod period) / period
+//     "span": 30,                        // optional, seconds: p = seconds into the effect / span, held at 1 afterwards (a
+//                                        //   speed that does not depend on the clip's length, e.g. "3% a second"); not with "period"
 //     "referenceFrames": 60,             // only needed by "frames" knots
 //     "channels": { ... }                // same channels / curves as an animation (scale, rotation, offsetX/Y, blur,
 //   }                                    //   motionBlur + blurAngle, edgeSlide(Y), squeezeX, exposure, brightness,
-//                                        //   saturation, contrast, hue, temperature, warp.*, opacity, edgeFill)
+//                                        //   saturation, contrast, hue, temperature, warp.*, opacity, edgeFill, redTint)
 //
 // The strength slider scales every channel's distance from its neutral value (ClipAnimationFrame.scaledDeviation): a push
 // of 12% becomes 24% at strength 2. A JSON style with the same id as a hard-coded effect replaces its rendering.
@@ -33,16 +35,19 @@ final class EffectStyleDefinition {
     let intensityRange: ClosedRange<Float>
     /// Seconds per loop; 0 = the curves run once across the clip.
     let period: Double
+    /// Seconds the curves take to run once, independent of the clip's length (held at the end); 0 = across the clip.
+    let span: Double
     let animation: ClipAnimation
     
     init(id: String, name: String, author: String, intensityLabel: String?, intensityRange: ClosedRange<Float>,
-         period: Double, animation: ClipAnimation) {
+         period: Double, span: Double = 0, animation: ClipAnimation) {
         self.id = id
         self.name = name
         self.author = author
         self.intensityLabel = intensityLabel
         self.intensityRange = intensityRange
         self.period = period
+        self.span = span
         self.animation = animation
     }
 }
@@ -142,7 +147,7 @@ enum EffectStyleLoader {
     // MARK: Parse + validate
     
     private static let topKeys: Set<String> = [
-        "schema", "id", "name", "description", "author", "intensity", "period", "referenceFrames", "channels"
+        "schema", "id", "name", "description", "author", "intensity", "period", "span", "referenceFrames", "channels"
     ]
     
     static func parse(_ json: String, source: String) throws -> EffectStyleDefinition {
@@ -197,6 +202,16 @@ enum EffectStyleLoader {
                 throw ClipAnimationFormatError("$.period: must be > 0 and <= 60 seconds")
             }
         }
+        var span = 0.0
+        if top["span"] != nil {
+            span = try L.reqNumber(top, "span", "$")
+            guard span > 0 && span <= 3600 else {
+                throw ClipAnimationFormatError("$.span: must be > 0 and <= 3600 seconds")
+            }
+            guard period == 0 else {
+                throw ClipAnimationFormatError("$.span: can't be combined with \"period\"")
+            }
+        }
         var referenceFrames = 0
         if top["referenceFrames"] != nil {
             let rf = try L.reqNumber(top, "referenceFrames", "$")
@@ -221,6 +236,6 @@ enum EffectStyleLoader {
         let animation = ClipAnimation(id: id, name: name!, direction: .in, defaultDuration: 1,
                                       curves: curves, reversed: false, referenceFrames: referenceFrames)
         return EffectStyleDefinition(id: id, name: name!, author: author!, intensityLabel: label, intensityRange: range,
-                                     period: period, animation: animation)
+                                     period: period, span: span, animation: animation)
     }
 }

@@ -12,12 +12,14 @@ import Foundation
 //     "description": "...",            // optional, 256 characters at most
 //     "defaultDuration": 1.1,          // optional, seconds, (0, 30]; default 0.5
 //     "cut": 0.76,                     // where A is replaced by B, 0.05 ... 0.95 of the window (default 0.5)
+//     "mode": "cut",                   // optional: "cut" (default) draws ONE picture, A before the cut and B after it;
+//                                      //   "layers" draws BOTH for the whole window, B over A (slides, cross fades); `cut` is ignored
 //     "referenceFrames": 100,          // only needed by "frames" knots
 //     "from": { "channels": { ... } }, // the look of A, curves over the WHOLE window (p = 0 ... 1); A is drawn for p < cut
 //     "to":   { "channels": { ... } }  // the look of B, same p; B is drawn for p >= cut
 //   }
 //
-// There is no cross dissolve: one of the two pictures is drawn at any moment, each through the normal clip
+// In mode "cut" there is no cross dissolve: one of the two pictures is drawn at any moment, each through the normal clip
 // pipeline with its side's channels applied on top of the clip's own properties AND its In / Out animation
 // (additive channels add, multiplicative ones multiply: ClipAnimationFrame.merged). So a style is just "what
 // happens to A before the cut, what happens to B after it".
@@ -35,14 +37,17 @@ final class TransitionStyle {
     let from: ClipAnimation
     /// The look of B (evaluated over the whole window).
     let to: ClipAnimation
+    /// true = mode "layers": A and B are both drawn for the whole window (B over A) instead of switching at `cut`.
+    let layers: Bool
     
-    init(id: String, name: String, defaultDuration: Float, cut: Double, from: ClipAnimation, to: ClipAnimation) {
+    init(id: String, name: String, defaultDuration: Float, cut: Double, from: ClipAnimation, to: ClipAnimation, layers: Bool = false) {
         self.id = id
         self.name = name
         self.defaultDuration = defaultDuration
         self.cut = cut
         self.from = from
         self.to = to
+        self.layers = layers
     }
 }
 
@@ -137,7 +142,7 @@ enum TransitionStyleLoader {
     // MARK: Parse + validate
     
     private static let topKeys: Set<String> = [
-        "schema", "id", "name", "description", "author", "defaultDuration", "cut", "referenceFrames", "from", "to"
+        "schema", "id", "name", "description", "author", "defaultDuration", "cut", "mode", "referenceFrames", "from", "to"
     ]
     
     static func parse(_ json: String, source: String) throws -> TransitionStyle {
@@ -183,6 +188,14 @@ enum TransitionStyleLoader {
                 throw ClipAnimationFormatError("$.cut: must be between 0.05 and 0.95")
             }
         }
+        var layers = false
+        if top["mode"] != nil {
+            let mode = try L.reqString(top, "mode", "$", 16)
+            guard mode == "cut" || mode == "layers" else {
+                throw ClipAnimationFormatError("$.mode: must be \"cut\" or \"layers\"")
+            }
+            layers = mode == "layers"
+        }
         var referenceFrames = 0
         if top["referenceFrames"] != nil {
             let rf = try L.reqNumber(top, "referenceFrames", "$")
@@ -213,6 +226,6 @@ enum TransitionStyleLoader {
         }
         
         return TransitionStyle(id: id, name: name!, defaultDuration: Float(duration), cut: cut,
-                               from: try side("from", direction: .out), to: try side("to", direction: .in))
+                               from: try side("from", direction: .out), to: try side("to", direction: .in), layers: layers)
     }
 }

@@ -2,15 +2,35 @@ import Foundation
 
 // MARK: - Embedded copies of the bundled transition styles
 //
-// The JSON files in `animations/transitions/` are the source of truth and win when the app bundle has them. These
-// copies exist so a style still works when the folder never made it into the app bundle (an Xcode group instead of
-// a folder reference, a file added to the project but not to the target): `TransitionStyleLoader` registers a copy
-// only when no bundle file defined that id. Keep them equal to the files (regenerate by minifying the file).
+// `animations/transitions/*.json` are the source of truth and win when the app bundle has them; these copies are registered only
+// for ids the bundle did not provide (a folder that never made it into the target). Keep them equal to the files
+// (regenerate by minifying the file).
 
 enum TransitionStyleDefaults {
     static let json: [String: String] = [
+        "fade": #"""
+{"schema":1,"id":"fade","name":"Cross Fade","description":"B fades in over A. Both pictures are drawn (mode layers).","defaultDuration":0.5,"mode":"layers","from":{"channels":{"opacity":{"kind":"constant","value":1}}},"to":{"channels":{"opacity":{"kind":"knots","interp":"linear","points":[[0,0],[1,1]]}}}}
+"""#,
+        "fadeblack": #"""
+{"schema":1,"id":"fadeblack","name":"Fade Black","description":"A darkens to black in the first half, B brightens from black in the second (hard cut at the middle).","defaultDuration":0.5,"cut":0.5,"from":{"channels":{"exposure":{"kind":"knots","interp":"linear","points":[[0,1],[0.5,0]]}}},"to":{"channels":{"exposure":{"kind":"knots","interp":"linear","points":[[0,0],[0.5,0],[1,1]]}}}}
+"""#,
+        "fadegrays": #"""
+{"schema":1,"id":"fadegrays","name":"Fade Gray","description":"Both pictures lose their colour toward the middle while B cross fades in over A.","defaultDuration":0.5,"mode":"layers","from":{"channels":{"saturation":{"kind":"knots","interp":"linear","points":[[0,1],[0.5,0],[1,0]]}}},"to":{"channels":{"saturation":{"kind":"knots","interp":"linear","points":[[0,0],[0.5,0],[1,1]]},"opacity":{"kind":"knots","interp":"linear","points":[[0,0],[1,1]]}}}}
+"""#,
         "glitchblur": #"""
 {"schema":1,"id":"glitchblur","name":"Glitch Blur","description":"A is dark-hit, folds toward the top centre and streaks into a washed-out blur, hard cut at 0.55; B arrives folded, smashes onto the ground (about 5% smaller), bounces up expanding, then settles to 100%. Read off CapCut (60 fps).","defaultDuration":2.3,"cut":0.55,"from":{"channels":{"exposure":{"kind":"knots","interp":"linear","points":[[0.0,0.32],[0.0398,0.335],[0.0615,0.38],[0.1049,0.47],[0.1266,0.62],[0.1701,0.76],[0.2171,0.7],[0.275,0.64],[0.3039,0.64],[0.3257,0.7],[0.3872,1.0],[0.4306,1.15],[0.4523,1.24],[0.474,1.29],[0.5174,1.3],[0.55,1.3]]},"brightness":{"kind":"knots","interp":"linear","points":[[0,0],[0.3872,0],[0.474,0.9],[0.55,1.0]]},"motionBlur":{"kind":"knots","interp":"linear","points":[[0,0],[0.1086,0],[0.2171,0.006],[0.3293,0.034],[0.4342,0.059],[0.55,0.09]]},"blurAngle":{"kind":"constant","value":60},"edgeFill":{"kind":"constant","value":1},"warp.topWidth":{"kind":"knots","interp":"smooth","points":[[0,1],[0.1086,1],[0.55,0.93]]},"warp.bottomWidth":{"kind":"knots","interp":"smooth","points":[[0,1],[0.1086,1],[0.55,0.89]]},"warp.height":{"kind":"knots","interp":"smooth","points":[[0,1],[0.1086,1],[0.55,0.945]]}}},"to":{"channels":{"exposure":{"kind":"knots","interp":"linear","points":[[0.55,1.13],[0.604,1.11],[0.6256,1.08],[0.6472,1.04],[0.6904,1.01],[0.7228,1.0],[1.0,1.0]]},"brightness":{"kind":"knots","interp":"linear","points":[[0.55,0.5],[0.6652,0],[1.0,0]]},"motionBlur":{"kind":"knots","interp":"linear","points":[[0.55,0.09],[0.5788,0.0685],[0.6076,0.049],[0.6364,0.0318],[0.6652,0.0173],[0.694,0.006],[0.7228,0],[1.0,0]]},"blurAngle":{"kind":"constant","value":60},"edgeFill":{"kind":"constant","value":1},"warp.topWidth":{"kind":"knots","interp":"linear","points":[[0.55,0.93],[0.5896,0.935],[0.6148,0.94],[0.64,0.945],[0.6868,0.95],[0.7048,0.952],[0.7336,0.959],[0.7624,0.968],[0.7984,0.983],[0.8092,0.986],[0.8344,0.993],[0.8848,0.998],[0.8956,1.002],[0.9244,1.0],[0.9712,1.0],[1.0,1.0]]},"warp.bottomWidth":{"kind":"knots","interp":"linear","points":[[0.55,0.89],[0.5896,0.915],[0.6148,0.935],[0.64,0.945],[0.6868,0.95],[0.7048,0.952],[0.7336,0.959],[0.7624,0.968],[0.7984,0.983],[0.8092,0.986],[0.8344,0.993],[0.8848,0.998],[0.8956,1.002],[0.9244,1.0],[0.9712,1.0],[1.0,1.0]]},"warp.height":{"kind":"knots","interp":"linear","points":[[0.55,0.945],[0.5896,0.944],[0.6148,0.956],[0.64,0.966],[0.6868,0.969],[0.7048,0.972],[0.7336,0.976],[0.7624,0.978],[0.7984,0.982],[0.8092,0.986],[0.8344,0.988],[0.8848,0.99],[0.8956,0.99],[0.9244,0.992],[0.9712,0.996],[1.0,1.0]]},"offsetY":{"kind":"knots","interp":"linear","points":[[0.55,0.021],[0.5896,0.021],[0.6148,0.022],[0.64,0.0235],[0.6868,0.032],[0.7048,0.032],[0.7336,0.0205],[0.7624,0.0137],[0.7984,0.0076],[0.8092,0.003],[0.8344,0.0008],[0.8848,0],[0.8956,0],[0.9244,0],[0.9712,0],[1.0,0]]}}}}
+"""#,
+        "slidedown": #"""
+{"schema":1,"id":"slidedown","name":"Slide Down","description":"Both pictures move down together; B enters from the top.","defaultDuration":0.5,"mode":"layers","from":{"channels":{"offsetY":{"kind":"knots","interp":"linear","points":[[0,0],[1,1]]}}},"to":{"channels":{"offsetY":{"kind":"knots","interp":"linear","points":[[0,-1],[1,0]]}}}}
+"""#,
+        "slideleft": #"""
+{"schema":1,"id":"slideleft","name":"Slide Left","description":"Both pictures move left together; B enters from the right.","defaultDuration":0.5,"mode":"layers","from":{"channels":{"offsetX":{"kind":"knots","interp":"linear","points":[[0,0],[1,-1]]}}},"to":{"channels":{"offsetX":{"kind":"knots","interp":"linear","points":[[0,1],[1,0]]}}}}
+"""#,
+        "slideright": #"""
+{"schema":1,"id":"slideright","name":"Slide Right","description":"Both pictures move right together; B enters from the left.","defaultDuration":0.5,"mode":"layers","from":{"channels":{"offsetX":{"kind":"knots","interp":"linear","points":[[0,0],[1,1]]}}},"to":{"channels":{"offsetX":{"kind":"knots","interp":"linear","points":[[0,-1],[1,0]]}}}}
+"""#,
+        "slideup": #"""
+{"schema":1,"id":"slideup","name":"Slide Up","description":"Both pictures move up together; B enters from the bottom.","defaultDuration":0.5,"mode":"layers","from":{"channels":{"offsetY":{"kind":"knots","interp":"linear","points":[[0,0],[1,-1]]}}},"to":{"channels":{"offsetY":{"kind":"knots","interp":"linear","points":[[0,1],[1,0]]}}}}
 """#
     ]
 }

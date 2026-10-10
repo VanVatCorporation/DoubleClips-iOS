@@ -76,12 +76,18 @@ enum EffectCatalog {
         Style("fade-out", "Fade Out", intensity: nil)
     ]
     
-    /// The hard-coded styles, then the data-driven ones (animations/effects/*.json) that aren't a hard-coded key.
+    /// The built-in order, then the data-driven styles (animations/effects/*.json) that aren't in it. When a JSON file defines a
+    /// built-in key (warp-zoom, strobe, ...) its name, author and strength slider come from the file: the hard-coded `Style`
+    /// above only keeps the picker order and is the fallback if the file can't be loaded.
     static var styles: [Style] {
+        let ordered = builtInStyles.map { style -> Style in
+            guard let def = EffectStyleLoader.get(style.key) else { return style }
+            return Style(def.id, def.name, author: def.author, intensity: def.intensityLabel, range: def.intensityRange)
+        }
         let extra = EffectStyleLoader.list()
             .filter { def in !builtInStyles.contains { $0.key == def.id } }
             .map { def in Style(def.id, def.name, author: def.author, intensity: def.intensityLabel, range: def.intensityRange) }
-        return builtInStyles + extra
+        return ordered + extra
     }
     
     static func style(for key: String?) -> Style? {
@@ -121,9 +127,14 @@ enum EffectRenderer {
         // A style defined by a JSON file (EffectStyleLoader) wins over the hard-coded one with the same key: its channels
         // are evaluated over the clip's progress (or looped every `period` seconds) and applied to the whole picture.
         if let definition = EffectStyleLoader.get(TransitionPlan.normalizedStyle(style)) {
-            let t: Float = definition.period > 0
-                ? Float(Double(max(elapsed, 0)).truncatingRemainder(dividingBy: definition.period) / definition.period)
-                : Float(p)
+            let t: Float
+            if definition.period > 0 {
+                t = Float(Double(max(elapsed, 0)).truncatingRemainder(dividingBy: definition.period) / definition.period)
+            } else if definition.span > 0 {
+                t = Float(min(Double(max(elapsed, 0)) / definition.span, 1))
+            } else {
+                t = Float(p)
+            }
             let look = definition.animation.evaluate(t).scaledDeviation(Float(a))
             return EditingView.ClipCompositor.looked(frame, anim: look, canvas: canvas)
         }
