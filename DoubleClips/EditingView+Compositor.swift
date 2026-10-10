@@ -152,7 +152,12 @@ extension EditingView {
                                 // Adjustment layer: process the picture built so far, tracks after it stay clean.
                                 let elapsed = time - layer.startTime
                                 let progress = layer.duration > 0 ? min(max(elapsed / layer.duration, 0), 1) : 0
-                                frame = EffectRenderer.apply(style: style, intensity: CGFloat(intensity), to: frame,
+                                // Strength keyframes (an effect clip's Strength diamond) replace the static strength.
+                                let strength = layer.keyframes.isAnimated(.strength)
+                                    ? layer.keyframes.value(for: .strength, base: layer.baseProperties,
+                                                            clipStartTime: layer.startTime, at: time)
+                                    : intensity
+                                frame = EffectRenderer.apply(style: style, intensity: CGFloat(strength), to: frame,
                                                              progress: CGFloat(progress), time: time,
                                                              elapsed: elapsed, canvas: canvasRect)
                             } else if let image = render(layer, request: request, canvas: canvas,
@@ -168,7 +173,21 @@ extension EditingView {
                             let progress = transition.duration > 0
                                 ? CGFloat(min(max((time - transition.start) / transition.duration, 0), 1)) : 1
                             
-                            if let style = TransitionStyleLoader.get(transition.style), style.layers {
+                            if let style = TransitionStyleLoader.get(transition.style), let mask = style.mask {
+                                // Data-driven style in mode "mask": both clips for the whole window, B revealed through the mask.
+                                let a = render(outgoing, request: request, canvas: canvas, time: time,
+                                               stretchToFull: instruction.stretchToFull,
+                                               extraAnim: style.from.channels.isEmpty ? nil : style.from.evaluate(Float(progress)))
+                                let b = render(transition.to, request: request, canvas: canvas, time: time,
+                                               stretchToFull: instruction.stretchToFull,
+                                               extraAnim: style.to.channels.isEmpty ? nil : style.to.evaluate(Float(progress)))
+                                if a != nil || b != nil {
+                                    let clear = CIImage(color: .clear).cropped(to: canvasRect)
+                                    let picture = EditingView.ClipCompositor.masked(b ?? clear, over: a ?? clear,
+                                                                                    mask: EditingView.ClipCompositor.transitionMask(mask, progress: CGFloat(progress), canvas: canvasRect))
+                                    frame = picture.composited(over: frame)
+                                }
+                            } else if let style = TransitionStyleLoader.get(transition.style), style.layers {
                                 // Data-driven style in mode "layers" (slides, cross fades): BOTH clips are drawn for the whole
                                 // window, B over A, each with its side's channels merged into its own animation frame.
                                 let a = render(outgoing, request: request, canvas: canvas, time: time,
@@ -424,14 +443,17 @@ extension EditingView {
             }
             let exposure = CGFloat(anim.exposure)
             let tint = CGFloat(anim.redTint)
-            if abs(exposure - 1) > 0.001 || tint > 0.001 {
-                // Brightness multiplier on the colours (alpha untouched); a red tint also lifts red and cuts green / blue.
-                let red = exposure * (1 + 0.15 * tint)
-                let other = exposure * (1 - 0.6 * tint)
+            let white = CGFloat(anim.whiteMix)
+            if abs(exposure - 1) > 0.001 || tint > 0.001 || white > 0.001 {
+                // Brightness multiplier on the colours (alpha untouched); a red tint also lifts red and cuts green / blue;
+                // a white mix lerps the colours toward white (the alpha column keeps transparent areas transparent).
+                let keep = 1 - white
+                let red = exposure * (1 + 0.15 * tint) * keep
+                let other = exposure * (1 - 0.6 * tint) * keep
                 out = out.applyingFilter("CIColorMatrix", parameters: [
-                    "inputRVector": CIVector(x: red, y: 0, z: 0, w: 0),
-                    "inputGVector": CIVector(x: 0, y: other, z: 0, w: 0),
-                    "inputBVector": CIVector(x: 0, y: 0, z: other, w: 0)
+                    "inputRVector": CIVector(x: red, y: 0, z: 0, w: white),
+                    "inputGVector": CIVector(x: 0, y: other, z: 0, w: white),
+                    "inputBVector": CIVector(x: 0, y: 0, z: other, w: white)
                 ])
             }
             if opacity < 1 {

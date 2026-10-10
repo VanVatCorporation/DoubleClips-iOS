@@ -50,49 +50,34 @@ enum EffectCatalog {
     }
     
     /// Android's four first, then the iOS starter set, grouped loosely: motion, colour, optics, retro, fades.
-    private static let builtInStyles: [Style] = [
-        Style("glitch-pulse", "Glitch Pulse"),
-        Style("warp-zoom", "Warp Zoom", intensity: "Zoom speed", range: 0.2...5),
-        Style("lens-flare-surge", "Lens Flare Surge", range: 0.2...2),
-        Style("spin-burst", "Spinning Burst", intensity: "Turns", range: 0.25...4),
-        
-        Style("shake", "Camera Shake"),
-        Style("beat-pulse", "Beat Pulse"),
-        Style("strobe", "Strobe"),
-        Style("flash", "Flash"),
-        Style("rgb-shift", "RGB Shift"),
-        Style("vhs", "VHS Tape"),
-        Style("blur", "Soft Blur"),
-        Style("glow", "Dream Glow"),
-        Style("vignette", "Vignette", range: 0.2...2),
-        Style("noir", "Noir", range: 0.2...1),
-        Style("vintage", "Vintage", range: 0.2...1),
-        Style("pixelate", "Pixelate"),
-        Style("halftone", "Halftone"),
-        Style("kaleidoscope", "Kaleidoscope", intensity: "Speed", range: 0.2...4),
-        Style("twirl", "Twirl"),
-        Style("bulge", "Lens Bulge"),
-        Style("fade-in", "Fade In", intensity: nil),
-        Style("fade-out", "Fade Out", intensity: nil)
+    /// The order of the picker (Android's four first, then motion, colour, optics, fades). Names, authors and strength sliders come from the
+    /// JSON files (animations/effects/*.json); a file that isn't listed here follows the listed ones, sorted by name.
+    private static let pickerOrder: [String] = [
+        "glitch-pulse", "warp-zoom", "lens-flare-surge", "spin-burst",
+        "camera-shake", "simple-shake", "triggered-shake", "beat-pulse", "strobe", "flash",
+        "rgb-shift", "vhs", "blur", "glow", "vignette", "noir", "vintage",
+        "pixelate", "halftone", "kaleidoscope", "twirl", "bulge",
+        "slow-push", "drift-blur", "heartbeat", "fade-in", "fade-out"
     ]
     
-    /// The built-in order, then the data-driven styles (animations/effects/*.json) that aren't in it. When a JSON file defines a
-    /// built-in key (warp-zoom, strobe, ...) its name, author and strength slider come from the file: the hard-coded `Style`
-    /// above only keeps the picker order and is the fallback if the file can't be loaded.
+    /// Older projects store "shake" (the noise shake this app used to hard-code); it plays as Camera Shake now.
+    static func canonicalKey(_ key: String?) -> String {
+        let normalized = TransitionPlan.normalizedStyle(key)
+        return normalized == "shake" ? "camera-shake" : normalized
+    }
+    
     static var styles: [Style] {
-        let ordered = builtInStyles.map { style -> Style in
-            guard let def = EffectStyleLoader.get(style.key) else { return style }
-            return Style(def.id, def.name, author: def.author, intensity: def.intensityLabel, range: def.intensityRange)
+        let definitions = EffectStyleLoader.list()
+        let ordered = pickerOrder.compactMap { key in definitions.first { $0.id == key } }
+        let rest = definitions.filter { def in !pickerOrder.contains(def.id) }
+        return (ordered + rest).map { def in
+            Style(def.id, def.name, author: def.author, intensity: def.intensityLabel, range: def.intensityRange)
         }
-        let extra = EffectStyleLoader.list()
-            .filter { def in !builtInStyles.contains { $0.key == def.id } }
-            .map { def in Style(def.id, def.name, author: def.author, intensity: def.intensityLabel, range: def.intensityRange) }
-        return ordered + extra
     }
     
     static func style(for key: String?) -> Style? {
-        let normalized = TransitionPlan.normalizedStyle(key)
-        return styles.first { $0.key == normalized }
+        let canonical = canonicalKey(key)
+        return styles.first { $0.key == canonical }
     }
 }
 
@@ -120,13 +105,11 @@ enum EffectRenderer {
     static func apply(style: String, intensity: CGFloat, to frame: CIImage,
                       progress: CGFloat, time: Float, elapsed: Float, canvas: CGRect) -> CIImage {
         let a = max(intensity, 0)
-        let e = CGFloat(max(elapsed, 0))
         let p = min(max(progress, 0), 1)
-        let step = Int(floor(Double(time) * 15))
         
         // A style defined by a JSON file (EffectStyleLoader) wins over the hard-coded one with the same key: its channels
         // are evaluated over the clip's progress (or looped every `period` seconds) and applied to the whole picture.
-        if let definition = EffectStyleLoader.get(TransitionPlan.normalizedStyle(style)) {
+        if let definition = EffectStyleLoader.get(EffectCatalog.canonicalKey(style)) {
             let t: Float
             if definition.period > 0 {
                 t = Float(Double(max(elapsed, 0)).truncatingRemainder(dividingBy: definition.period) / definition.period)
@@ -146,79 +129,7 @@ enum EffectRenderer {
             return out
         }
         
-        switch TransitionPlan.normalizedStyle(style) {
-        // Android's four
-        case "glitch-pulse": return glitch(frame, a: a, time: time, elapsed: elapsed, canvas: canvas)
-        case "warp-zoom": return zoom(frame, scale: 1 + 0.03 * a * e, canvas: canvas)
-        case "lens-flare-surge": return grade(frame, a: a, canvas: canvas)
-        case "spin-burst": return spin(frame, turns: a, progress: p, canvas: canvas)
-        
-        // Motion
-        case "shake": return shake(frame, a: a, time: time, canvas: canvas)
-        case "beat-pulse":
-            let phase = (e * 2).truncatingRemainder(dividingBy: 1)            // 2 beats a second
-            return zoom(frame, scale: 1 + 0.08 * a * exp(-6 * phase), canvas: canvas)
-        case "strobe":
-            let on = Int(floor(Double(e) * 10)) % 2 == 0                      // 5 flashes a second
-            return on ? adjust(frame, brightness: 0.35 * min(a, 2), contrast: 1.2)
-                      : adjust(frame, brightness: -0.12 * min(a, 2), contrast: 1)
-        case "flash":
-            let decay = pow(1 - p, 3)
-            let lit = frame.applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: 2.5 * a * decay])
-            return adjust(lit, brightness: 0.3 * min(a, 2) * decay, contrast: 1).cropped(to: canvas)
-            
-        // Colour
-        case "rgb-shift":
-            return splitChannels(frame, dx: canvas.width * 0.01 * a * (1 + 0.5 * sin(2 * .pi * 1.5 * e)), canvas: canvas)
-        case "noir":
-            return mix(frame, frame.applyingFilter("CIPhotoEffectNoir"), amount: a, canvas: canvas)
-        case "vintage": return vintage(frame, a: a, canvas: canvas)
-        case "vhs": return vhs(frame, a: a, step: step, canvas: canvas)
-            
-        // Optics
-        case "blur":
-            return blurred(frame, radius: canvas.height * 0.014 * a, canvas: canvas)
-        case "glow":
-            return frame.clampedToExtent().applyingFilter("CIBloom", parameters: [
-                kCIInputRadiusKey: canvas.height * 0.025 * a, kCIInputIntensityKey: min(1.2, 0.6 + 0.4 * a)
-            ]).cropped(to: canvas)
-        case "vignette":
-            return frame.applyingFilter("CIVignette", parameters: [
-                kCIInputIntensityKey: 1.2 * min(a, 2), kCIInputRadiusKey: 1.4
-            ]).cropped(to: canvas)
-        case "pixelate":
-            return frame.clampedToExtent().applyingFilter("CIPixellate", parameters: [
-                kCIInputCenterKey: CIVector(x: 0, y: 0), kCIInputScaleKey: max(2, canvas.height * 0.012 * a)
-            ]).cropped(to: canvas)
-        case "halftone":
-            return frame.applyingFilter("CIDotScreen", parameters: [
-                kCIInputCenterKey: CIVector(x: canvas.midX, y: canvas.midY), kCIInputAngleKey: 0.5,
-                kCIInputWidthKey: max(3, canvas.height * 0.006 * a), kCIInputSharpnessKey: 0.7
-            ]).cropped(to: canvas)
-        case "kaleidoscope":
-            return frame.clampedToExtent().applyingFilter("CIKaleidoscope", parameters: [
-                "inputCount": 6, kCIInputCenterKey: CIVector(x: canvas.midX, y: canvas.midY),
-                kCIInputAngleKey: e * 0.5 * a
-            ]).cropped(to: canvas)
-        case "twirl":
-            let angle = 2 * a * sin(2 * .pi * 0.5 * e)
-            return frame.clampedToExtent().applyingFilter("CITwirlDistortion", parameters: [
-                kCIInputCenterKey: CIVector(x: canvas.midX, y: canvas.midY),
-                kCIInputRadiusKey: min(canvas.width, canvas.height) * 0.45, kCIInputAngleKey: angle
-            ]).cropped(to: canvas)
-        case "bulge":
-            let swell = 0.5 - 0.5 * cos(2 * .pi * 0.7 * e)
-            return frame.clampedToExtent().applyingFilter("CIBumpDistortion", parameters: [
-                kCIInputCenterKey: CIVector(x: canvas.midX, y: canvas.midY),
-                kCIInputRadiusKey: min(canvas.width, canvas.height) * 0.45, kCIInputScaleKey: 0.7 * a * swell
-            ]).cropped(to: canvas)
-            
-        // Fades
-        case "fade-in": return fade(frame, visible: p, canvas: canvas)
-        case "fade-out": return fade(frame, visible: 1 - p, canvas: canvas)
-            
-        default: return frame       // a style from a newer version: leave the picture alone
-        }
+        return frame       // a style from a newer version, or one whose file failed to load: leave the picture alone
     }
     
     // MARK: Filter ops (the "filters" list of a JSON style; format in EffectFilterOps.swift)
@@ -318,10 +229,6 @@ enum EffectRenderer {
     
     // MARK: Small building blocks
     
-    private static func adjust(_ image: CIImage, brightness: CGFloat, contrast: CGFloat) -> CIImage {
-        image.applyingFilter("CIColorControls", parameters: [kCIInputBrightnessKey: brightness, kCIInputContrastKey: contrast])
-    }
-    
     private static func blurred(_ image: CIImage, radius: CGFloat, canvas: CGRect) -> CIImage {
         guard radius > 0.1 else { return image }
         return image.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: radius]).cropped(to: canvas)
@@ -334,21 +241,6 @@ enum EffectRenderer {
             "inputAVector": CIVector(x: 0, y: 0, z: 0, w: max(0, amount))
         ])
         return faded.composited(over: frame).cropped(to: canvas)
-    }
-    
-    private static func fade(_ frame: CIImage, visible: CGFloat, canvas: CGRect) -> CIImage {
-        let black = CIImage(color: .black).cropped(to: canvas)
-        return frame.applyingFilter("CIColorMatrix", parameters: [
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: min(max(visible, 0), 1))
-        ]).composited(over: black).cropped(to: canvas)
-    }
-    
-    private static func zoom(_ frame: CIImage, scale z: CGFloat, canvas: CGRect) -> CIImage {
-        let cx = canvas.midX, cy = canvas.midY
-        let transform = CGAffineTransform(translationX: cx, y: cy)
-            .scaledBy(x: z, y: z)
-            .translatedBy(x: -cx, y: -cy)
-        return frame.transformed(by: transform).cropped(to: canvas)
     }
     
     /// Deterministic pseudo-random in 0...1, so the same frame always looks the same
@@ -390,71 +282,7 @@ enum EffectRenderer {
     
     // MARK: Android's effects
     
-    private static func spin(_ frame: CIImage, turns: CGFloat, progress: CGFloat, canvas: CGRect) -> CIImage {
-        // FFmpeg's rotate turns clockwise; Core Image's y axis points up, so clockwise is negative.
-        let angle = -2 * CGFloat.pi * turns * progress
-        let cx = canvas.midX, cy = canvas.midY
-        let transform = CGAffineTransform(translationX: cx, y: cy)
-            .rotated(by: angle)
-            .translatedBy(x: -cx, y: -cy)
-        let black = CIImage(color: .black).cropped(to: canvas)
-        return frame.transformed(by: transform).composited(over: black).cropped(to: canvas)
-    }
-    
-    private static func grade(_ frame: CIImage, a: CGFloat, canvas: CGRect) -> CIImage {
-        func poly(_ c0: CGFloat, _ c1: CGFloat, _ c2: CGFloat, _ c3: CGFloat) -> CIVector {
-            CIVector(values: [c0, c1, c2, c3], count: 4)
-        }
-        // Cross process: red and green get an S-curve (more contrast), blue is flattened and lifted.
-        let crossed = frame.applyingFilter("CIColorPolynomial", parameters: [
-            "inputRedCoefficients": poly(0, 0.6, 1.2, -0.8),
-            "inputGreenCoefficients": poly(0, 0.9, 0.3, -0.2),
-            "inputBlueCoefficients": poly(0.08, 1.2, -0.9, 0.6)
-        ])
-        let graded = crossed.applyingFilter("CIColorControls", parameters: [
-            kCIInputContrastKey: 1 + 0.5 * min(a, 2), kCIInputSaturationKey: 1 + 0.2 * min(a, 2)
-        ])
-        return mix(frame, graded, amount: a, canvas: canvas)
-    }
-    
-    private static func glitch(_ frame: CIImage, a: CGFloat, time: Float, elapsed: Float, canvas: CGRect) -> CIImage {
-        let w = canvas.width, h = canvas.height
-        let step = Int(floor(Double(time) * 15))                 // the pattern jumps 15 times a second
-        let pulse = 0.5 + 0.5 * sin(2 * Double.pi * 3 * Double(max(elapsed, 0)))
-        let amount = CGFloat(0.4 + 0.6 * pulse) * min(a, 3)
-        
-        let lit = adjust(frame, brightness: 0.2 * min(a, 1.5), contrast: 1)
-        let direction: CGFloat = random(step, 1) > 0.5 ? 1 : -1
-        var out = splitChannels(lit, dx: w * 0.012 * amount * direction, canvas: canvas)
-        for i in 0..<2 {
-            out = slice(out, y: random(step, 3 + Double(i)) * h * 0.85,
-                        height: h * (0.02 + 0.08 * random(step, 5 + Double(i))),
-                        shift: (random(step, 7 + Double(i)) - 0.5) * w * 0.14 * amount, canvas: canvas)
-        }
-        return out
-    }
-    
     // MARK: Starter set
-    
-    private static func shake(_ frame: CIImage, a: CGFloat, time: Float, canvas: CGRect) -> CIImage {
-        let step = Int(floor(Double(time) * 30))                 // a new jolt every frame at 30 fps
-        let dx = (random(step, 11) - 0.5) * 2 * canvas.width * 0.012 * a
-        let dy = (random(step, 13) - 0.5) * 2 * canvas.height * 0.012 * a
-        let rot = (random(step, 17) - 0.5) * 2 * 0.012 * a
-        let z = 1 + 0.03 * min(a, 3)                             // a little push-in hides the moving edges
-        let cx = canvas.midX, cy = canvas.midY
-        let transform = CGAffineTransform(translationX: cx + dx, y: cy + dy)
-            .rotated(by: rot).scaledBy(x: z, y: z).translatedBy(x: -cx, y: -cy)
-        return frame.clampedToExtent().transformed(by: transform).cropped(to: canvas)
-    }
-    
-    private static func vintage(_ frame: CIImage, a: CGFloat, canvas: CGRect) -> CIImage {
-        let aged = frame
-            .applyingFilter("CISepiaTone", parameters: [kCIInputIntensityKey: 0.85])
-            .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0.9, kCIInputContrastKey: 1.06])
-            .applyingFilter("CIVignette", parameters: [kCIInputIntensityKey: 0.9, kCIInputRadiusKey: 1.5])
-        return mix(frame, aged, amount: a, canvas: canvas)
-    }
     
     private static func vhs(_ frame: CIImage, a: CGFloat, step: Int, canvas: CGRect) -> CIImage {
         let w = canvas.width, h = canvas.height
@@ -615,9 +443,12 @@ extension EditingView {
     struct EffectClipEditor: View {
         @ObservedObject var clip: EditingView.Clip
         let commandManager: CommandManager
+        let playhead: Float
+        let frameRate: Int
         let onChanged: () -> Void
         
         @State private var intensityBefore: Float?
+        @State private var keysBeforeEdit: EditingView.AnimatedProperty?
         
         private var effect: EffectTemplate {
             clip.effect ?? EffectTemplate(style: EffectCatalog.styles[0].key, duration: Double(clip.duration), offset: Double(clip.startTime))
@@ -635,13 +466,20 @@ extension EditingView {
                 }
                 
                 if let label = current?.intensityLabel {
-                    PropertySlider(
-                        label: label,
-                        value: Binding(get: { effect.intensity }, set: { liveIntensity($0) }),
-                        range: current?.intensityRange ?? 0.2...3,
-                        resetTo: 1,
-                        onEditingBegan: { if intensityBefore == nil { intensityBefore = effect.intensity } },
-                        onEditingEnded: commitIntensity)
+                    // The diamond keys the strength at the playhead: once it is animated the slider edits the value at the
+                    // playhead (adding or changing a keyframe there), like every other property.
+                    HStack(spacing: 4) {
+                        PropertySlider(
+                            label: label,
+                            value: Binding(get: { strengthNow }, set: { liveStrength($0) }),
+                            range: current?.intensityRange ?? 0.2...3,
+                            resetTo: 1,
+                            onEditingBegan: {
+                                if intensityBefore == nil { intensityBefore = effect.intensity; keysBeforeEdit = clip.keyframes }
+                            },
+                            onEditingEnded: commitIntensity)
+                        KeyDiamond(mode: strengthKeyMode, enabled: playheadInsideClip) { toggleStrengthKey() }
+                    }
                 }
                 
                 Text(String(format: "Active from %.2fs to %.2fs", clip.startTime, clip.startTime + clip.duration))
@@ -717,20 +555,93 @@ extension EditingView {
             apply(before: before, after: next, name: "Effect style")
         }
         
+        // MARK: Strength and its keyframes
+        
+        private var localTime: Float { min(max(playhead - clip.startTime, 0), clip.duration) }
+        private var playheadInsideClip: Bool {
+            playhead >= clip.startTime - 0.001 && playhead <= clip.startTime + clip.duration + 0.001
+        }
+        private var strengthAnimated: Bool { clip.keyframes.isAnimated(.strength) }
+        
+        /// The clip's properties with the effect's static strength in the strength slot (what keyframe maths falls back to).
+        private var strengthBase: EditingView.VideoProperties {
+            var properties = clip.videoProperties
+            properties.valueStrength = effect.intensity
+            return properties
+        }
+        
+        /// The strength at the playhead: the keyframed value, or the static one.
+        private var strengthNow: Float {
+            strengthAnimated
+                ? clip.keyframes.value(for: .strength, base: strengthBase, clipStartTime: clip.startTime,
+                                       at: clip.startTime + localTime)
+                : effect.intensity
+        }
+        
+        private var strengthKeyMode: KeyDiamond.Mode {
+            guard strengthAnimated else { return .off }
+            return clip.keyframes.keyframeIndex(atLocal: localTime, animating: .strength) != nil ? .onKey : .animated
+        }
+        
+        private func liveStrength(_ value: Float) {
+            if strengthAnimated {
+                clip.keyframes.setKey(.strength, atLocal: localTime, value: value, base: strengthBase,
+                                      clipStartTime: clip.startTime, frameRate: frameRate)
+            } else {
+                liveIntensity(value)
+            }
+        }
+        
         private func liveIntensity(_ value: Float) {
             var next = effect
             next.intensity = value
             clip.effect = next
         }
         
+        /// One undo step for a whole slider gesture (static strength and keyframes together).
         private func commitIntensity() {
             guard let before = intensityBefore else { return }
+            let keysBefore = keysBeforeEdit ?? clip.keyframes
             intensityBefore = nil
+            keysBeforeEdit = nil
             var old = effect
             old.intensity = before
             let after = effect
-            guard abs(before - after.intensity) > 0.0005 else { return }
-            apply(before: old, after: after, name: "Effect strength", alreadyApplied: true)
+            let keysAfter = clip.keyframes
+            guard abs(before - after.intensity) > 0.0005 || keysBefore != keysAfter else { return }
+            let target = clip
+            let changed = onChanged
+            commandManager.execute(GenericCommand(description: "Effect strength",
+                undo: { target.effect = old; target.keyframes = keysBefore; changed() },
+                redo: { target.effect = after; target.keyframes = keysAfter; changed() }))
+            changed()
+        }
+        
+        private func toggleStrengthKey() {
+            guard playheadInsideClip else { return }
+            let keysBefore = clip.keyframes
+            let effectBefore = clip.effect
+            var keys = keysBefore
+            var next = effect
+            if keys.keyframeIndex(atLocal: localTime, animating: .strength) != nil {
+                // Off at this key; if it was the last one the strength stays where it was.
+                if let removed = keys.removeKey(.strength, atLocal: localTime), !keys.isAnimated(.strength) {
+                    next.intensity = removed
+                }
+            } else {
+                keys.setKey(.strength, atLocal: localTime, value: strengthNow, base: strengthBase,
+                            clipStartTime: clip.startTime, frameRate: frameRate)
+            }
+            guard keys != keysBefore || abs(next.intensity - effect.intensity) > 0.0005 else { return }
+            clip.keyframes = keys
+            clip.effect = next
+            let target = clip
+            let changed = onChanged
+            let effectAfter = next
+            commandManager.execute(GenericCommand(description: "Keyframe Strength: \(clip.clipName)",
+                undo: { target.keyframes = keysBefore; target.effect = effectBefore; changed() },
+                redo: { target.keyframes = keys; target.effect = effectAfter; changed() }))
+            changed()
         }
         
         private func apply(before: EffectTemplate?, after: EffectTemplate, name: String, alreadyApplied: Bool = false) {

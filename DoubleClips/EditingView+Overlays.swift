@@ -49,7 +49,8 @@ extension EditingView {
                             case .textEdit:
                                 TextClipEditor(clip: clip, commandManager: commandManager, projectPath: projectPath, onChanged: onChanged)
                             case .effectEdit:
-                                EffectClipEditor(clip: clip, commandManager: commandManager, onChanged: onChanged)
+                                EffectClipEditor(clip: clip, commandManager: commandManager,
+                                                 playhead: playhead, frameRate: frameRate, onChanged: onChanged)
                             case .projectFiles, .transition:
                                 EmptyView()     // have their own panels (ProjectFilesPanel / TransitionPanel)
                             }

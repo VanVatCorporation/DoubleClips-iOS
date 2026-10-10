@@ -277,10 +277,13 @@ extension EditingView {
         var valueSaturation: Float = 1
         var valueBrightness: Float = 0
         var valueTemperature: Float = 6500
+        /// iOS addition: the strength of an effect clip, so it can be keyframed like any other property. An effect clip's STATIC strength
+        /// stays in `effect.params["intensity"]`; this field only carries the value inside keyframes.
+        var valueStrength: Float = 1
         
         /// Same order/cases as Android's VideoProperties.ValueType.
         enum ValueType: String, Codable, CaseIterable {
-            case posX, posY, rot, rotInRadians, scaleX, scaleY, pivotX, pivotY, opacity, speed, volume, hue, saturation, brightness, temperature
+            case posX, posY, rot, rotInRadians, scaleX, scaleY, pivotX, pivotY, opacity, speed, volume, hue, saturation, brightness, temperature, strength
         }
         
         init() {}
@@ -303,6 +306,7 @@ extension EditingView {
             valueSaturation = try c.decodeIfPresent(Float.self, forKey: .valueSaturation) ?? 1
             valueBrightness = try c.decodeIfPresent(Float.self, forKey: .valueBrightness) ?? 0
             valueTemperature = try c.decodeIfPresent(Float.self, forKey: .valueTemperature) ?? 6500
+            valueStrength = try c.decodeIfPresent(Float.self, forKey: .valueStrength) ?? 1
         }
     }
     

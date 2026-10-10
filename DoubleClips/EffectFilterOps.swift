@@ -93,52 +93,67 @@ enum EffectFilterOps {
         var out: [EffectFilter] = []
         for (i, item) in array.enumerated() {
             let p = "\(path)[\(i)]"
-            let object = try L.asObject(item, p)
-            let op = try L.reqString(object, "op", p, 24)
-            guard let spec = specs[op] else {
-                throw ClipAnimationFormatError("\(p).op: unknown filter '\(op)'")
-            }
-            var allowed: Set<String> = ["op"]
-            spec.params.forEach { allowed.insert($0.name) }
-            spec.flags.forEach { allowed.insert($0) }
-            spec.strings.keys.forEach { allowed.insert($0) }
-            try L.allowKeys(object, p, allowed)
-            
-            var curves: [String: EffectFilterCurve] = [:]
-            for param in spec.params {
-                let path = "\(p).\(param.name)"
-                guard let raw = object[param.name] else {
-                    curves[param.name] = .constant(param.def)
-                    continue
-                }
-                if let m = raw as? [String: Any] {
-                    curves[param.name] = try parseCurve(m, param, path)
-                } else {
-                    let v = try L.reqNumber(object, param.name, p)
-                    try check(v, param, path)
-                    curves[param.name] = .constant(v)
-                }
-            }
-            var flags = Set<String>()
-            for flag in spec.flags {
-                guard let raw = object[flag] else { continue }
-                guard let on = raw as? Bool else {
-                    throw ClipAnimationFormatError("\(p).\(flag): must be true or false")
-                }
-                if on { flags.insert(flag) }
-            }
-            var strings: [String: String] = [:]
-            for (key, option) in spec.strings {
-                if object[key] == nil { strings[key] = option.def; continue }
-                let v = try L.reqString(object, key, p, 24)
-                guard option.allowed.contains(v) else {
-                    throw ClipAnimationFormatError("\(p).\(key): must be one of \(option.allowed.joined(separator: ", "))")
-                }
-                strings[key] = v
-            }
-            out.append(EffectFilter(op: op, curves: curves, flags: flags, strings: strings))
+            out.append(try parseSpec(try L.asObject(item, p), path: p, key: "op", table: specs))
         }
         return out
+    }
+    
+    /// A transition style's `mask` object: { "shape": "wipe", params... } (shapes in `maskSpecs`, `reveal` is required).
+    static func parseMask(_ value: Any?, path: String) throws -> EffectFilter {
+        let mask = try parseSpec(try ClipAnimationLoader.asObject(value, path), path: path, key: "shape", table: maskSpecs)
+        guard mask.curves["reveal"] != nil else {
+            throw ClipAnimationFormatError("\(path).reveal: required")
+        }
+        return mask
+    }
+    
+    /// One `{ "<key>": name, params... }` object checked against `table` (filters use "op", masks use "shape").
+    static func parseSpec(_ object: [String: Any], path p: String, key opKey: String,
+                          table: [String: EffectFilterSpec]) throws -> EffectFilter {
+        typealias L = ClipAnimationLoader
+        let op = try L.reqString(object, opKey, p, 24)
+        guard let spec = table[op] else {
+            throw ClipAnimationFormatError("\(p).\(opKey): unknown '\(op)'")
+        }
+        var allowed: Set<String> = [opKey]
+        spec.params.forEach { allowed.insert($0.name) }
+        spec.flags.forEach { allowed.insert($0) }
+        spec.strings.keys.forEach { allowed.insert($0) }
+        try L.allowKeys(object, p, allowed)
+        
+        var curves: [String: EffectFilterCurve] = [:]
+        for param in spec.params {
+            let path = "\(p).\(param.name)"
+            guard let raw = object[param.name] else {
+                curves[param.name] = .constant(param.def)
+                continue
+            }
+            if let m = raw as? [String: Any] {
+                curves[param.name] = try parseCurve(m, param, path)
+            } else {
+                let v = try L.reqNumber(object, param.name, p)
+                try check(v, param, path)
+                curves[param.name] = .constant(v)
+            }
+        }
+        var flags = Set<String>()
+        for flag in spec.flags {
+            guard let raw = object[flag] else { continue }
+            guard let on = raw as? Bool else {
+                throw ClipAnimationFormatError("\(p).\(flag): must be true or false")
+            }
+            if on { flags.insert(flag) }
+        }
+        var strings: [String: String] = [:]
+        for (key, option) in spec.strings {
+            if object[key] == nil { strings[key] = option.def; continue }
+            let v = try L.reqString(object, key, p, 24)
+            guard option.allowed.contains(v) else {
+                throw ClipAnimationFormatError("\(p).\(key): must be one of \(option.allowed.joined(separator: ", "))")
+            }
+            strings[key] = v
+        }
+        return EffectFilter(op: op, curves: curves, flags: flags, strings: strings)
     }
     
     private static func check(_ v: Double, _ param: EffectFilterParam, _ path: String) throws {

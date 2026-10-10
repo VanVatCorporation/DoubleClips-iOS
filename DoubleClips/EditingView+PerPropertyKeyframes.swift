@@ -20,8 +20,10 @@ extension EditingView.VideoProperties {
     
     typealias Channel = ValueType
     
-    /// The properties a keyframe can hold (`rotInRadians` is only Rot in radians).
-    static let channels: [ValueType] = ValueType.allCases.filter { $0 != .rotInRadians }
+    /// The properties an "all properties" keyframe (`channels == nil`: what Android / desktop write) holds. `rotInRadians` is only Rot in
+    /// radians; `strength` (an effect clip's strength, iOS only) is held only by a keyframe that lists it explicitly, so an old-style
+    /// keyframe never pins a strength to its default.
+    static let channels: [ValueType] = ValueType.allCases.filter { $0 != .rotInRadians && $0 != .strength }
     
     private static let channelKeyPaths: [(ValueType, WritableKeyPath<EditingView.VideoProperties, Float>)] = [
         (.posX, \.valuePosX), (.posY, \.valuePosY), (.rot, \.valueRot),
@@ -29,7 +31,8 @@ extension EditingView.VideoProperties {
         (.pivotX, \.valuePivotX), (.pivotY, \.valuePivotY),
         (.opacity, \.valueOpacity), (.speed, \.valueSpeed), (.volume, \.valueVolume),
         (.hue, \.valueHue), (.saturation, \.valueSaturation),
-        (.brightness, \.valueBrightness), (.temperature, \.valueTemperature)
+        (.brightness, \.valueBrightness), (.temperature, \.valueTemperature),
+        (.strength, \.valueStrength)
     ]
     
     static func channel(for keyPath: WritableKeyPath<EditingView.VideoProperties, Float>) -> ValueType? {
@@ -52,6 +55,7 @@ extension EditingView.VideoProperties {
         case .saturation: return "Saturation"
         case .brightness: return "Brightness"
         case .temperature: return "Temperature"
+        case .strength: return "Strength"
         }
     }
 }
@@ -60,7 +64,7 @@ extension EditingView.Keyframe {
     
     /// Does this keyframe hold `type`? (Old keyframes, `channels == nil`, hold everything.)
     func animates(_ type: EditingView.VideoProperties.ValueType) -> Bool {
-        channels?.contains(type) ?? true
+        channels?.contains(type) ?? (type != .strength)
     }
     
     var channelList: [EditingView.VideoProperties.ValueType] {

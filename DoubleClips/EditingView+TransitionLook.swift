@@ -93,6 +93,11 @@ extension EditingView.ClipCompositor {
     /// The data-driven blend: one picture, A before the style's cut and B after it, each with its side's look.
     static func dataDrivenBlend(_ from: CIImage, _ to: CIImage, style: TransitionStyle,
                                 progress p: CGFloat, canvas: CGRect) -> CIImage {
+        if let mask = style.mask {
+            let a = style.from.channels.isEmpty ? from : looked(from, anim: style.from.evaluate(Float(p)), canvas: canvas)
+            let b = style.to.channels.isEmpty ? to : looked(to, anim: style.to.evaluate(Float(p)), canvas: canvas)
+            return masked(b, over: a, mask: transitionMask(mask, progress: p, canvas: canvas)).cropped(to: canvas)
+        }
         if style.layers {
             // Both pictures for the whole window, B over A.
             let a = looked(from, anim: style.from.evaluate(Float(p)), canvas: canvas)

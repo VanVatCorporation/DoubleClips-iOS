@@ -38,6 +38,7 @@ extension EditingView.VideoProperties {
         case .saturation: return valueSaturation
         case .brightness: return valueBrightness
         case .temperature: return valueTemperature
+        case .strength: return valueStrength
         }
     }
     
@@ -58,6 +59,7 @@ extension EditingView.VideoProperties {
         case .saturation: valueSaturation = v
         case .brightness: valueBrightness = v
         case .temperature: valueTemperature = v
+        case .strength: valueStrength = v
         }
     }
 }

@@ -13,7 +13,9 @@ import Foundation
 //     "defaultDuration": 1.1,          // optional, seconds, (0, 30]; default 0.5
 //     "cut": 0.76,                     // where A is replaced by B, 0.05 ... 0.95 of the window (default 0.5)
 //     "mode": "cut",                   // optional: "cut" (default) draws ONE picture, A before the cut and B after it;
-//                                      //   "layers" draws BOTH for the whole window, B over A (slides, cross fades); `cut` is ignored
+//                                      //   "layers" draws BOTH for the whole window, B over A (slides, cross fades); `cut` is ignored;
+//                                      //   "mask" draws both and reveals B through a mask: "mask": { "shape": "wipe", "reveal": curve, ... }
+//                                      //   (shapes and parameters in EditingView+TransitionMask.swift); `from` / `to` are then optional
 //     "referenceFrames": 100,          // only needed by "frames" knots
 //     "from": { "channels": { ... } }, // the look of A, curves over the WHOLE window (p = 0 ... 1); A is drawn for p < cut
 //     "to":   { "channels": { ... } }  // the look of B, same p; B is drawn for p >= cut
@@ -39,8 +41,11 @@ final class TransitionStyle {
     let to: ClipAnimation
     /// true = mode "layers": A and B are both drawn for the whole window (B over A) instead of switching at `cut`.
     let layers: Bool
+    /// mode "mask": the shape that reveals B over A.
+    let mask: EffectFilter?
     
-    init(id: String, name: String, defaultDuration: Float, cut: Double, from: ClipAnimation, to: ClipAnimation, layers: Bool = false) {
+    init(id: String, name: String, defaultDuration: Float, cut: Double, from: ClipAnimation, to: ClipAnimation,
+         layers: Bool = false, mask: EffectFilter? = nil) {
         self.id = id
         self.name = name
         self.defaultDuration = defaultDuration
@@ -48,6 +53,7 @@ final class TransitionStyle {
         self.from = from
         self.to = to
         self.layers = layers
+        self.mask = mask
     }
 }
 
@@ -142,7 +148,7 @@ enum TransitionStyleLoader {
     // MARK: Parse + validate
     
     private static let topKeys: Set<String> = [
-        "schema", "id", "name", "description", "author", "defaultDuration", "cut", "mode", "referenceFrames", "from", "to"
+        "schema", "id", "name", "description", "author", "defaultDuration", "cut", "mode", "referenceFrames", "from", "to", "mask"
     ]
     
     static func parse(_ json: String, source: String) throws -> TransitionStyle {
@@ -189,12 +195,14 @@ enum TransitionStyleLoader {
             }
         }
         var layers = false
+        var maskMode = false
         if top["mode"] != nil {
             let mode = try L.reqString(top, "mode", "$", 16)
-            guard mode == "cut" || mode == "layers" else {
-                throw ClipAnimationFormatError("$.mode: must be \"cut\" or \"layers\"")
+            guard mode == "cut" || mode == "layers" || mode == "mask" else {
+                throw ClipAnimationFormatError("$.mode: must be \"cut\", \"layers\" or \"mask\"")
             }
             layers = mode == "layers"
+            maskMode = mode == "mask"
         }
         var referenceFrames = 0
         if top["referenceFrames"] != nil {
@@ -207,6 +215,11 @@ enum TransitionStyleLoader {
         
         func side(_ key: String, direction: ClipAnimation.Direction) throws -> ClipAnimation {
             let path = "$.\(key)"
+            if top[key] == nil && maskMode {
+                // Mask styles may leave a side out: that clip is drawn as it is.
+                return ClipAnimation(id: "\(id).\(key)", name: name!, direction: direction, defaultDuration: Float(duration),
+                                     curves: [:], reversed: false, referenceFrames: referenceFrames)
+            }
             let object = try L.asObject(top[key], path)
             try L.allowKeys(object, path, ["channels"])
             let channelObjects = try L.asObject(object["channels"], "\(path).channels")
@@ -225,7 +238,15 @@ enum TransitionStyleLoader {
                                  curves: curves, reversed: false, referenceFrames: referenceFrames)
         }
         
+        var mask: EffectFilter? = nil
+        if top["mask"] != nil {
+            guard maskMode else { throw ClipAnimationFormatError("$.mask: only allowed with \"mode\": \"mask\"") }
+            mask = try EffectFilterOps.parseMask(top["mask"], path: "$.mask")
+        } else if maskMode {
+            throw ClipAnimationFormatError("$.mask: required when \"mode\" is \"mask\"")
+        }
         return TransitionStyle(id: id, name: name!, defaultDuration: Float(duration), cut: cut,
-                               from: try side("from", direction: .out), to: try side("to", direction: .in), layers: layers)
+                               from: try side("from", direction: .out), to: try side("to", direction: .in),
+                               layers: layers, mask: mask)
     }
 }
