@@ -19,10 +19,14 @@ extension EditingView {
         
         var body: some View {
             HStack {
-                Text(label)
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.8))
-                    .frame(width: 80, alignment: .leading)
+                // An empty label takes no space (the In / Out animation rows use the field on its own beside a menu);
+                // before, it still reserved the 80 pt label column and pushed the box off the panel's right edge.
+                if !label.isEmpty {
+                    Text(label)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.8))
+                        .frame(width: 80, alignment: .leading)
+                }
                 TextField("", text: $text)
                     .keyboardType(.numbersAndPunctuation)
                     .focused($focused)
@@ -420,7 +424,7 @@ extension EditingView {
                     get: { clip[keyPath: kp].duration },
                     set: { clip[keyPath: kp].duration = max(0, $0) }
                 )) { onChanged() }
-                .frame(width: 70)
+                .frame(width: 64)
             }
         }
         

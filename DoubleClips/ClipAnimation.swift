@@ -324,3 +324,25 @@ extension ClipAnimationFrame {
         return ClipAnimationFrame(values: out, isNeutral: false)
     }
 }
+
+// MARK: - Scaling a frame (effect strength)
+
+extension ClipAnimationFrame {
+    /// Every channel's distance from its neutral value times `amount` (1 = as authored, 0 = nothing), clamped to the
+    /// channel's range. Used for an effect's strength slider: a push of 12% becomes 24% at 2. The streak direction, the
+    /// squeeze anchor and edge fill describe HOW, not how much, so they are left alone.
+    func scaledDeviation(_ amount: Float) -> ClipAnimationFrame {
+        if isNeutral || abs(amount - 1) < 0.0001 { return self }
+        var out = values
+        for channel in ClipAnimation.Channel.allCases {
+            switch channel {
+            case .blurAngle, .squeezeAnchor, .edgeFill: continue
+            default:
+                let i = channel.rawValue
+                let n = Float(channel.neutral)
+                out[i] = Swift.min(Swift.max(n + (values[i] - n) * amount, Float(channel.min)), Float(channel.max))
+            }
+        }
+        return ClipAnimationFrame(values: out, isNeutral: false)
+    }
+}

@@ -50,7 +50,7 @@ enum EffectCatalog {
     }
     
     /// Android's four first, then the iOS starter set, grouped loosely: motion, colour, optics, retro, fades.
-    static let styles: [Style] = [
+    private static let builtInStyles: [Style] = [
         Style("glitch-pulse", "Glitch Pulse"),
         Style("warp-zoom", "Warp Zoom", intensity: "Zoom speed", range: 0.2...5),
         Style("lens-flare-surge", "Lens Flare Surge", range: 0.2...2),
@@ -75,6 +75,14 @@ enum EffectCatalog {
         Style("fade-in", "Fade In", intensity: nil),
         Style("fade-out", "Fade Out", intensity: nil)
     ]
+    
+    /// The hard-coded styles, then the data-driven ones (animations/effects/*.json) that aren't a hard-coded key.
+    static var styles: [Style] {
+        let extra = EffectStyleLoader.list()
+            .filter { def in !builtInStyles.contains { $0.key == def.id } }
+            .map { def in Style(def.id, def.name, author: def.author, intensity: def.intensityLabel, range: def.intensityRange) }
+        return builtInStyles + extra
+    }
     
     static func style(for key: String?) -> Style? {
         let normalized = TransitionPlan.normalizedStyle(key)
@@ -109,6 +117,17 @@ enum EffectRenderer {
         let e = CGFloat(max(elapsed, 0))
         let p = min(max(progress, 0), 1)
         let step = Int(floor(Double(time) * 15))
+        
+        // A style defined by a JSON file (EffectStyleLoader) wins over the hard-coded one with the same key: its channels
+        // are evaluated over the clip's progress (or looped every `period` seconds) and applied to the whole picture.
+        if let definition = EffectStyleLoader.get(TransitionPlan.normalizedStyle(style)) {
+            let t: Float = definition.period > 0
+                ? Float(Double(max(elapsed, 0)).truncatingRemainder(dividingBy: definition.period) / definition.period)
+                : Float(p)
+            let look = definition.animation.evaluate(t).scaledDeviation(Float(a))
+            return EditingView.ClipCompositor.looked(frame, anim: look, canvas: canvas)
+        }
+        
         switch TransitionPlan.normalizedStyle(style) {
         // Android's four
         case "glitch-pulse": return glitch(frame, a: a, time: time, elapsed: elapsed, canvas: canvas)

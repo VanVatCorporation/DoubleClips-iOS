@@ -89,6 +89,7 @@ enum ClipAnimationStore {
         lock.lock(); defer { lock.unlock() }
         var problems = loadBuiltIns()
         problems.append(contentsOf: TransitionStyleLoader.loadBuiltIns())     // data-driven transition styles
+        problems.append(contentsOf: EffectStyleLoader.loadBuiltIns())         // data-driven effect styles
         problems.append(contentsOf: loadInstalledPacks())
         return problems
     }

@@ -579,6 +579,8 @@ struct EditingView: View {
             }
             .frame(height: 300)
             .background(Color(hex: "#111111"))
+            // The root ignores every safe area, so the keyboard never moves the panel by itself: lift it while an overlay is open.
+            .keyboardLift(enabled: activeOverlay != nil)
             }
         }
         

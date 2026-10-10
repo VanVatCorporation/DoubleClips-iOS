@@ -60,6 +60,7 @@ extension EditingView {
                     .padding()
                 }
                 .background(Color(hex: "#111111"))
+                .scrollDismissesKeyboard(.interactively)
             }
             .frame(height: 300) // matches editingZone height
             .transition(.move(edge: .bottom))
