@@ -28,6 +28,7 @@ extension EditingView {
         private let speedFunction: (Double) -> Double
         /// cumulative[i] = source offset after i * step timeline seconds (curves only; grows on demand).
         private var cumulative: [Double] = [0]
+        private let lock = NSLock()      // the table grows on demand and is read from drawing code too
         
         init(constant speed: Double) {
             let s = min(max(speed, Self.minSpeed), Self.maxSpeed)
@@ -60,6 +61,7 @@ extension EditingView {
         func sourceOffset(atLocal t: Double) -> Double {
             let t = max(t, 0)
             if let c = constantSpeed { return t * c }
+            lock.lock(); defer { lock.unlock() }
             let position = t / Self.step
             let index = Int(position.rounded(.down))
             extend(toIndex: index + 1)
@@ -71,6 +73,7 @@ extension EditingView {
         func localTime(forSourceOffset offset: Double) -> Double {
             if offset <= 0 { return 0 }
             if let c = constantSpeed { return offset / c }
+            lock.lock(); defer { lock.unlock() }
             var guardCount = 0
             while cumulative[cumulative.count - 1] < offset && guardCount < 4_000_000 {
                 extend(toIndex: cumulative.count)
@@ -122,6 +125,24 @@ extension EditingView.Clip {
         })
     }
     
+    /// Timeline -> source time for DRAWING (timeline thumbnails and waveform): nil at speed 1, a cached map otherwise (a speed curve is
+    /// rebuilt only when the clip's speed or its speed keyframes change, not on every redraw).
+    var visualTimeMap: EditingView.ClipTimeMap? {
+        guard keyframes.isAnimated(.speed) else {
+            let v = videoProperties.valueSpeed
+            return abs(v - 1) < 0.001 ? nil : EditingView.ClipTimeMap(constant: Double(v))
+        }
+        let signature = "\(startTime)|\(videoProperties.valueSpeed)|" + keyframes.keyframes
+            .filter { $0.animates(.speed) }
+            .map { "\($0.time),\($0.value.valueSpeed),\($0.easing)" }
+            .joined(separator: ";")
+        let key = id.uuidString as NSString
+        if let entry = SpeedMapCache.store.object(forKey: key), entry.signature == signature { return entry.map }
+        let map = timeMap
+        SpeedMapCache.store.setObject(SpeedMapCache.Entry(signature: signature, map: map), forKey: key)
+        return map
+    }
+    
     /// Source seconds per timeline second, averaged over the clip (what the timeline thumbnails / waveform stretch by). Cheap.
     var averageSpeed: Float {
         guard keyframes.isAnimated(.speed), duration > 0 else { return max(videoProperties.valueSpeed, 0.01) }
@@ -153,4 +174,17 @@ extension EditingView.Clip {
         guard hasSource, originalDuration > 0 else { return originalDuration - endClipTrim - startClipTrim }
         return max(fittedDuration(), 0)
     }
+}
+
+private enum SpeedMapCache {
+    final class Entry {
+        let signature: String
+        let map: EditingView.ClipTimeMap
+        init(signature: String, map: EditingView.ClipTimeMap) { self.signature = signature; self.map = map }
+    }
+    static let store: NSCache<NSString, Entry> = {
+        let cache = NSCache<NSString, Entry>()
+        cache.countLimit = 64
+        return cache
+    }()
 }

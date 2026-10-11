@@ -49,21 +49,21 @@ struct ClipVisualContent: View {
                 ZStack(alignment: .bottomLeading) {
                     ClipThumbnailStrip(url: url, isVideo: clip.type == .video, startTrim: clip.startClipTrim,
                                        pps: pps, blockWidth: blockWidth, height: height, visible: visible,
-                                       rate: clip.averageSpeed)
+                                       timeMap: clip.visualTimeMap)
                     // The video's own audio, as a thin band over the bottom of the tiles. A silent
                     // video has no audio track: the envelope is nil and only the scrim shows.
                     if clip.type == .video && Constants.VIDEO_WAVEFORM_ENABLED {
                         ClipWaveformView(url: url, startTrim: clip.startClipTrim,
                                          pps: pps, blockWidth: blockWidth,
                                          height: Constants.VIDEO_WAVEFORM_BAND_HEIGHT,
-                                         visible: visible, rate: clip.averageSpeed, isBand: true)
+                                         visible: visible, timeMap: clip.visualTimeMap, isBand: true)
                     }
                 }
                 .frame(width: blockWidth, height: height, alignment: .bottomLeading)
             case .audio:
                 ClipWaveformView(url: url, startTrim: clip.startClipTrim,
                                  pps: pps, blockWidth: blockWidth, height: height, visible: visible,
-                                 rate: clip.averageSpeed)
+                                 timeMap: clip.visualTimeMap)
             default:
                 EmptyView()
             }
@@ -81,8 +81,14 @@ struct ClipThumbnailStrip: View {
     let blockWidth: CGFloat
     let height: CGFloat
     let visible: ClosedRange<CGFloat>
-    /// Source seconds per timeline second (the clip's average speed): the tiles show the source, stretched by it.
-    var rate: Float = 1
+    /// The clip's speed (timeline -> source seconds, a curve when speed is keyframed); nil = speed 1.
+    var timeMap: EditingView.ClipTimeMap? = nil
+    
+    /// Source time shown by the tile that starts `x` points into the block.
+    private func sourceTime(atX x: CGFloat) -> Double {
+        let local = Double(x / max(pps, 1))
+        return Double(startTrim) + (timeMap?.sourceOffset(atLocal: local) ?? local)
+    }
     
     var body: some View {
         let tileWidth = height * 16.0 / 9.0
@@ -94,7 +100,7 @@ struct ClipThumbnailStrip: View {
             if first <= last {
                 ForEach(first...last, id: \.self) { index in
                     ThumbnailTile(url: url, isVideo: isVideo,
-                                  time: Double(startTrim) + Double(CGFloat(index) * tileWidth / max(pps, 1)) * Double(rate),
+                                  time: sourceTime(atX: CGFloat(index) * tileWidth),
                                   width: tileWidth, height: height)
                         .offset(x: CGFloat(index) * tileWidth)
                 }
@@ -143,8 +149,8 @@ struct ClipWaveformView: View {
     let blockWidth: CGFloat
     let height: CGFloat
     let visible: ClosedRange<CGFloat>
-    /// Source seconds per timeline second (the clip's average speed).
-    var rate: Float = 1
+    /// The clip's speed (timeline -> source seconds, a curve when speed is keyframed); nil = speed 1.
+    var timeMap: EditingView.ClipTimeMap? = nil
     /// Video blocks: a short, white-on-scrim strip instead of the full-height navy audio block.
     var isBand: Bool = false
     @State private var envelope: WaveformEnvelope?
@@ -183,8 +189,9 @@ struct ClipWaveformView: View {
                 let blockX = CGFloat(bar) * stride            // x inside the whole block
                 if blockX >= blockWidth { break }
                 // The bar's slice of the file: the clip's trimmed window, in source seconds.
-                let t0 = Double(startTrim) + Double(blockX / max(pps, 1)) * Double(rate)
-                let t1 = Double(startTrim) + Double((blockX + stride) / max(pps, 1)) * Double(rate)
+                let local0 = Double(blockX / max(pps, 1)), local1 = Double((blockX + stride) / max(pps, 1))
+                let t0 = Double(startTrim) + (timeMap?.sourceOffset(atLocal: local0) ?? local0)
+                let t1 = Double(startTrim) + (timeMap?.sourceOffset(atLocal: local1) ?? local1)
                 let amp = CGFloat(envelope.rms(from: t0, to: t1))
                 let half = max(2, amp * maxHalf)
                 let rect = CGRect(x: blockX - sliceStart, y: midY - half, width: barWidth, height: half * 2)

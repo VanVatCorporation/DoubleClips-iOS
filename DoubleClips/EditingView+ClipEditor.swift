@@ -132,6 +132,9 @@ extension EditingView {
         @State private var showAnimationPacks = false
         @State private var registryVersion = 0
         
+        /// Keyframe whose easing grid is open.
+        @State private var easingSheet: EditingView.EasingSheetTarget?
+        
         private var isVisual: Bool { clip.type == .video || clip.type == .image || clip.type == .text }
         private var hasAudio: Bool { clip.type == .video || clip.type == .audio }
         
@@ -205,6 +208,13 @@ extension EditingView {
                     onChanged()              // the preview re-renders with what is installed now
                 }
             }
+            .background(Color.clear.sheet(item: $easingSheet) { target in
+                EditingView.EasingPickerSheet(
+                    current: clip.keyframes.keyframes[safe: target.index]?.easing ?? .none,
+                    onPick: { setEasing(target.index, $0) }
+                )
+                .presentationDetents([.medium, .large])
+            })
         }
         
         // MARK: Property helpers
@@ -472,14 +482,9 @@ extension EditingView {
                             .font(.system(size: 10)).foregroundColor(.white.opacity(0.55))
                             .lineLimit(2)
                             .frame(maxWidth: 84, alignment: .leading)
-                        Picker("Easing", selection: Binding(
-                            get: { clip.keyframes.keyframes[safe: index]?.easing ?? .none },
-                            set: { newEasing in setEasing(index, newEasing) }
-                        )) {
-                            ForEach(EditingView.EasingType.allCases, id: \.self) { e in Text(e.displayName).tag(e) }
+                        EditingView.EasingChip(easing: key.easing) {
+                            easingSheet = EditingView.EasingSheetTarget(index: index)
                         }
-                        .pickerStyle(.menu)
-                        .tint(Color.mdPrimary)
                         Spacer()
                         Button(role: .destructive) { deleteKeyframe(index) } label: {
                             Image(systemName: "trash").font(.system(size: 13))
