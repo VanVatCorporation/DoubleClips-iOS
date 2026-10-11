@@ -352,11 +352,11 @@ extension EditingView {
                             if maskEdit.isEditing,
                                let selectedID = selectedClipID,
                                let clip = visualClips().first(where: { $0.id == selectedID && $0.isActive(at: playhead) }),
-                               let mask = LiveOverrides.shared.state(for: clip.id)?.mask ?? clip.mask,
+                               clip.mask != nil,
                                let quad = clip.previewQuad(at: playhead, canvas: canvas, stretchToFull: settings.isStretchToFull,
                                                            live: LiveOverrides.shared.state(for: clip.id)),
                                let frame = MaskFrame(quad: quad) {
-                                maskSession.begin(clip: clip, mask: mask, frame: frame,
+                                maskSession.begin(clip: clip, playhead: playhead, frameRate: settings.frameRate, frame: frame,
                                                   canvasPoint: CGPoint(x: (point.x - origin.x) / fit, y: (point.y - origin.y) / fit),
                                                   fit: fit)
                                 return
@@ -445,7 +445,7 @@ extension EditingView {
             if let id = selectedClipID,
                let clip = visualClips().first(where: { $0.id == id }),
                clip.isActive(at: playhead),
-               let mask = LiveOverrides.shared.state(for: id)?.mask ?? clip.mask,
+               let mask = clip.resolvedMask(at: playhead, live: LiveOverrides.shared.state(for: id)),
                let quad = clip.previewQuad(at: playhead, canvas: canvas, stretchToFull: settings.isStretchToFull,
                                            live: LiveOverrides.shared.state(for: id)),
                let frame = MaskFrame(quad: quad) {

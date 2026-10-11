@@ -240,6 +240,7 @@ extension EditingView.Clip {
         c.outAnimation = outAnimation
         c.comboAnimation = comboAnimation
         c.mask = mask
+        c.maskKeys = maskKeys
         c.textContent = textContent
         c.fontSize = fontSize
         c.textStyle = textStyle

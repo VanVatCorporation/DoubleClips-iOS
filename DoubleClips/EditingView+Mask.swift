@@ -91,6 +91,18 @@ extension EditingView {
         }
     }
     
+    // MARK: Keyframes
+    
+    /// One keyframe of the mask, at `time` seconds into the clip. `values` holds only the parameters this keyframe
+    /// animates (MaskParam raw name -> value in the panel's units), so a keyframe on Position X leaves the rest alone.
+    /// A parameter with no keyframe keeps the static value on `ClipMask`; between two keyframes the value follows the
+    /// earlier one's easing, before the first / after the last it holds, exactly like the clip's own keyframes.
+    struct MaskKeyframe: Codable, Equatable {
+        var time: Float
+        var easing: EasingType = Constants.KEYFRAME_DEFAULT_EASING
+        var values: [String: Float] = [:]
+    }
+    
     // MARK: Geometry (shared by the renderer, the canvas overlay and the editor icons)
     
     /// The clip's box on the canvas: its top-left corner and its two edge directions, from the clip's quad.
@@ -255,11 +267,18 @@ extension EditingView {
     
     /// One gesture on the mask: a handle drag, a move, or a pinch / twist. Live values go through
     /// `LiveOverrides` (so dragging re-renders without rebuilding the player item); the end is ONE undo step.
+    /// A parameter the mask animates gets a keyframe at the playhead (or the one there changes); one it doesn't
+    /// is just its static value, so a move never adds a keyframe for the size.
     final class MaskEditSession: ObservableObject {
         @Published var tick = 0
         private(set) var target: Clip?
         
+        private var startStatic = ClipMask()
+        private var startKeys: [MaskKeyframe] = []
+        /// What is on screen at the playhead when the gesture starts (static values + animated ones).
         private var start = ClipMask()
+        private var localTime: Float = 0
+        private var frameRate = 30
         private var frame: MaskFrame?
         private var fit: CGFloat = 1
         private var handle: Int?
@@ -271,9 +290,14 @@ extension EditingView {
         var isActive: Bool { target != nil }
         
         /// `canvasPoint`: where the finger first touched, in canvas pixels.
-        func begin(clip: Clip, mask: ClipMask, frame: MaskFrame, canvasPoint: CGPoint, fit: CGFloat) {
+        func begin(clip: Clip, playhead: Float, frameRate: Int, frame: MaskFrame, canvasPoint: CGPoint, fit: CGFloat) {
+            guard let staticMask = clip.mask else { return }
             target = clip
-            start = mask
+            startStatic = staticMask
+            startKeys = clip.maskKeys
+            localTime = max(0, min(playhead - clip.startTime, clip.duration))
+            self.frameRate = frameRate
+            start = startKeys.applied(to: staticMask, atLocal: localTime)
             self.frame = frame
             self.fit = max(fit, 0.0001)
             translation = .zero; scale = 1; rotation = 0
@@ -282,7 +306,7 @@ extension EditingView {
             let touch = frame.local(fromCanvas: canvasPoint)
             let radius = Constants.CANVAS_HANDLE_HIT_POINTS / self.fit
             var best: CGFloat = radius
-            for h in MaskGeometry.handles(mask, size: size, fit: self.fit) {
+            for h in MaskGeometry.handles(start, size: size, fit: self.fit) {
                 let d = hypot(h.local.x - touch.x, h.local.y - touch.y)
                 if d <= best { best = d; handle = h.id; handleStartLocal = h.local }
             }
@@ -342,27 +366,41 @@ extension EditingView {
                 }
             }
             
-            LiveOverrides.shared.set(LiveClipState(properties: clip.videoProperties, keyframes: clip.keyframes, mask: m),
-                                     for: clip.id)
+            // Per parameter: animated ones get a keyframe at the playhead, the others change their static value.
+            var staticMask = startStatic
+            var keys = startKeys
+            for param in MaskParam.allCases {
+                let newValue = param.get(m)
+                guard newValue != param.get(start) else { continue }
+                if keys.isAnimated(param) {
+                    keys.setKey(param, atLocal: localTime, value: newValue, frameRate: frameRate)
+                } else {
+                    param.set(&staticMask, newValue)
+                }
+            }
+            
+            LiveOverrides.shared.set(LiveClipState(properties: clip.videoProperties, keyframes: clip.keyframes,
+                                                   mask: staticMask, maskKeys: keys), for: clip.id)
             tick += 1
             MaskEditState.shared.tick += 1
         }
         
         func finish(commandManager: CommandManager, onChanged: @escaping () -> Void) {
             guard let clip = target else { return }
-            let before = start
-            let after = LiveOverrides.shared.state(for: clip.id)?.mask
+            let beforeMask = startStatic, beforeKeys = startKeys
+            let live = LiveOverrides.shared.state(for: clip.id)
             defer {
                 target = nil
                 handle = nil
                 LiveOverrides.shared.clear(clip.id)
                 tick += 1
             }
-            guard let after, after != before else { return }
+            guard let afterMask = live?.mask, let afterKeys = live?.maskKeys,
+                  afterMask != beforeMask || afterKeys != beforeKeys else { return }
             commandManager.execute(GenericCommand(
                 description: "Mask: \(clip.clipName)",
-                undo: { clip.mask = before; onChanged() },
-                redo: { clip.mask = after; onChanged() }
+                undo: { clip.mask = beforeMask; clip.maskKeys = beforeKeys; onChanged() },
+                redo: { clip.mask = afterMask; clip.maskKeys = afterKeys; onChanged() }
             ))
             MaskEditState.shared.tick += 1
         }
@@ -440,7 +478,7 @@ extension EditingView {
     
     /// A number the panel edits, in the units the user sees. The same values change when the shape is dragged on
     /// the canvas, so the numbers always show what the gesture does.
-    enum MaskParam {
+    enum MaskParam: String, CaseIterable {
         case x, y, width, height, rotation, feather, roundness
         
         func title(for shape: ClipMask.Shape) -> String {
@@ -569,19 +607,41 @@ extension EditingView {
     struct MaskPanel: View {
         @ObservedObject var clip: Clip
         let commandManager: CommandManager
+        let playhead: Float
+        let frameRate: Int
         let onChanged: () -> Void
         @ObservedObject private var state = MaskEditState.shared
         
         enum Tab: String { case position = "Position", size = "Size", rotate = "Rotate", feather = "Feather", corner = "Corner" }
         
+        /// The static mask and its keyframes together: what one undo step swaps.
+        private struct Snapshot: Equatable {
+            var mask: ClipMask?
+            var keys: [MaskKeyframe]
+        }
+        
         @State private var tab: Tab = .position
-        @State private var before: ClipMask?
+        @State private var before: Snapshot?
         @State private var dragging = false
         
-        /// The mask as it is right now: the live value while a canvas drag / ruler drag runs, else the clip's.
+        private var snapshot: Snapshot { Snapshot(mask: clip.mask, keys: clip.maskKeys) }
+        
+        /// Seconds into the clip the playhead is at, kept inside the clip.
+        private var localTime: Float { min(max(playhead - clip.startTime, 0), clip.duration) }
+        private var playheadInsideClip: Bool {
+            playhead >= clip.startTime - 0.001 && playhead <= clip.startTime + clip.duration + 0.001
+        }
+        
+        /// The mask as it is right now at the playhead: its animated values, and the live ones while a canvas drag /
+        /// ruler drag runs.
         private var current: ClipMask? {
             _ = state.tick
-            return LiveOverrides.shared.state(for: clip.id)?.mask ?? clip.mask
+            return clip.resolvedMask(at: clip.startTime + localTime, live: LiveOverrides.shared.state(for: clip.id))
+        }
+        
+        private var currentKeys: [MaskKeyframe] {
+            _ = state.tick
+            return LiveOverrides.shared.state(for: clip.id)?.maskKeys ?? clip.maskKeys
         }
         
         var body: some View {
@@ -593,7 +653,7 @@ extension EditingView {
                     ForEach(rows(mask), id: \.self) { param in row(param, mask) }
                     HStack {
                         Button {
-                            setMask(ClipMask(shape: mask.shape))
+                            setSnapshot(mask: ClipMask(shape: mask.shape), keys: [])
                         } label: {
                             Label("Reset", systemImage: "arrow.counterclockwise")
                                 .font(.system(size: 13)).foregroundColor(.white.opacity(0.85))
@@ -601,8 +661,12 @@ extension EditingView {
                         .buttonStyle(.plain)
                         Spacer()
                         Toggle("Invert", isOn: Binding(
-                            get: { mask.invert },
-                            set: { newValue in var m = mask; m.invert = newValue; setMask(m) }
+                            get: { clip.mask?.invert ?? false },
+                            set: { newValue in
+                                guard var m = clip.mask else { return }
+                                m.invert = newValue
+                                setSnapshot(mask: m, keys: clip.maskKeys)
+                            }
                         ))
                         .toggleStyle(.switch)
                         .tint(Color.mdPrimary)
@@ -610,7 +674,7 @@ extension EditingView {
                         .fixedSize()
                     }
                 } else {
-                    Text("Pick a shape to show only part of the clip. Drag it on the preview, or type the numbers.")
+                    Text("Pick a shape to show only part of the clip. Drag it on the preview, or type the numbers. The diamond beside a value animates it.")
                         .font(.system(size: 11)).foregroundColor(.white.opacity(0.5))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -624,7 +688,7 @@ extension EditingView {
         private func shapeRow(_ mask: ClipMask?) -> some View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    Button { setMask(nil) } label: {
+                    Button { setSnapshot(mask: nil, keys: []) } label: {
                         tile(title: "None", selected: mask == nil) {
                             Image(systemName: "circle.slash").font(.system(size: 18)).foregroundColor(.white.opacity(0.8))
                         }
@@ -632,7 +696,7 @@ extension EditingView {
                     .buttonStyle(.plain)
                     ForEach(ClipMask.Shape.allCases, id: \.self) { shape in
                         Button {
-                            setMask(mask?.withShape(shape) ?? ClipMask(shape: shape))
+                            setSnapshot(mask: clip.mask?.withShape(shape) ?? ClipMask(shape: shape), keys: clip.maskKeys)
                         } label: {
                             tile(title: shape.title, selected: mask?.shape == shape) {
                                 MaskIconShape(shape: shape).fill(Color.white.opacity(0.9)).padding(9).clipped()
@@ -707,10 +771,10 @@ extension EditingView {
         }
         
         private func row(_ param: MaskParam, _ mask: ClipMask) -> some View {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Text(param.title(for: mask.shape))
                     .font(.system(size: 12)).foregroundColor(.white.opacity(0.8))
-                    .frame(width: 70, alignment: .leading)
+                    .frame(width: 64, alignment: .leading)
                 RulerSlider(
                     value: Binding(get: { param.get(mask) }, set: { setLive(param, $0) }),
                     range: param.range, unitsPerTick: param.unitsPerTick,
@@ -719,25 +783,58 @@ extension EditingView {
                     get: { param.get(mask) },
                     set: { newValue in beginDrag(); setLive(param, newValue); endDrag() }
                 )) {}
-                .frame(width: 64)
+                .frame(width: 60)
+                KeyDiamond(mode: keyMode(param), enabled: playheadInsideClip) { toggleKey(param) }
             }
+        }
+        
+        // MARK: Keyframes
+        
+        private func keyMode(_ param: MaskParam) -> KeyDiamond.Mode {
+            let keys = currentKeys
+            guard keys.isAnimated(param) else { return .off }
+            return keys.keyIndex(atLocal: localTime, animating: param) != nil ? .onKey : .animated
+        }
+        
+        /// The diamond: animates the value from the playhead (a keyframe with its current value), or takes the keyframe
+        /// there away (the last one leaves the value where it was).
+        private func toggleKey(_ param: MaskParam) {
+            guard playheadInsideClip, var m = clip.mask else { return }
+            var keys = clip.maskKeys
+            if keys.keyIndex(atLocal: localTime, animating: param) != nil {
+                if let removed = keys.removeKey(param, atLocal: localTime), !keys.isAnimated(param) {
+                    param.set(&m, removed)
+                }
+            } else {
+                let value = current.map { param.get($0) } ?? param.get(m)
+                keys.setKey(param, atLocal: localTime, value: value, frameRate: frameRate)
+            }
+            setSnapshot(mask: m, keys: keys)
         }
         
         // MARK: Editing
         
         /// A ruler drag or a typed value: the preview follows live (through LiveOverrides, no player rebuild),
-        /// and the whole edit becomes ONE undo step when it ends.
+        /// and the whole edit becomes ONE undo step when it ends. A value the mask animates gets a keyframe at the
+        /// playhead (or the one there changes); any other is its static value.
         private func beginDrag() {
             guard !dragging else { return }
             dragging = true
-            before = clip.mask
+            before = snapshot
         }
         
         private func setLive(_ param: MaskParam, _ value: Float) {
-            guard var m = current else { return }
-            param.set(&m, value)
-            LiveOverrides.shared.set(LiveClipState(properties: clip.videoProperties, keyframes: clip.keyframes, mask: m),
-                                     for: clip.id)
+            guard let staticMask = clip.mask else { return }
+            let live = LiveOverrides.shared.state(for: clip.id)
+            var m = live?.mask ?? staticMask
+            var keys = live?.maskKeys ?? clip.maskKeys
+            if keys.isAnimated(param) {
+                keys.setKey(param, atLocal: localTime, value: value, frameRate: frameRate)
+            } else {
+                param.set(&m, value)
+            }
+            LiveOverrides.shared.set(LiveClipState(properties: clip.videoProperties, keyframes: clip.keyframes,
+                                                   mask: m, maskKeys: keys), for: clip.id)
             state.tick += 1
             state.refresh?()
         }
@@ -745,27 +842,30 @@ extension EditingView {
         private func endDrag() {
             guard dragging else { return }
             dragging = false
-            let after = LiveOverrides.shared.state(for: clip.id)?.mask
+            let live = LiveOverrides.shared.state(for: clip.id)
             LiveOverrides.shared.clear(clip.id)
             let start = before
             before = nil
             state.tick += 1
-            guard let after, after != start else { return }
+            guard let start, let m = live?.mask, let keys = live?.maskKeys else { return }
+            let after = Snapshot(mask: m, keys: keys)
+            guard after != start else { return }
             commit(before: start, after: after)
         }
         
-        private func setMask(_ new: ClipMask?) {
-            let old = clip.mask
+        private func setSnapshot(mask: ClipMask?, keys: [MaskKeyframe]) {
+            let old = snapshot
+            let new = Snapshot(mask: mask, keys: mask == nil ? [] : keys)
             guard old != new else { return }
             commit(before: old, after: new)
         }
         
-        private func commit(before old: ClipMask?, after new: ClipMask?) {
+        private func commit(before old: Snapshot, after new: Snapshot) {
             let target = clip
             commandManager.execute(GenericCommand(
                 description: "Mask: \(clip.clipName)",
-                undo: { target.mask = old; onChanged() },
-                redo: { target.mask = new; onChanged() }
+                undo: { target.mask = old.mask; target.maskKeys = old.keys; onChanged() },
+                redo: { target.mask = new.mask; target.maskKeys = new.keys; onChanged() }
             ))
             state.tick += 1
         }
@@ -827,5 +927,90 @@ extension EditingView.ClipCompositor {
         picture = picture.transformed(by: CGAffineTransform(scaleX: size.width / CGFloat(w), y: size.height / CGFloat(h)))
         clipMaskCache.setObject(picture, forKey: key)
         return picture
+    }
+}
+
+// MARK: - Mask keyframe maths
+
+extension Array where Element == EditingView.MaskKeyframe {
+    
+    func isAnimated(_ param: EditingView.MaskParam) -> Bool {
+        contains { $0.values[param.rawValue] != nil }
+    }
+    
+    /// The animated value of `param` at `local` seconds into the clip; nil when it has no keyframe.
+    func value(_ param: EditingView.MaskParam, atLocal local: Float) -> Float? {
+        let k = param.rawValue
+        var prev: EditingView.MaskKeyframe?
+        for next in self {
+            guard let nextValue = next.values[k] else { continue }
+            guard let before = prev, let a = before.values[k] else {
+                if local < next.time { return nextValue }       // before the first keyframe: holds its value
+                prev = next
+                continue
+            }
+            if local < next.time {
+                let span = next.time - before.time
+                let raw: Float = span > 0 ? (local - before.time) / span : 0
+                let t = Swift.max(0, Swift.min(1, raw))
+                return a + (nextValue - a) * before.easing.apply(t)
+            }
+            prev = next
+        }
+        return prev?.values[k]
+    }
+    
+    /// `mask` with every animated parameter replaced by its value at `local` seconds into the clip.
+    func applied(to mask: EditingView.ClipMask, atLocal local: Float) -> EditingView.ClipMask {
+        guard !isEmpty else { return mask }
+        var m = mask
+        for param in EditingView.MaskParam.allCases {
+            if let v = value(param, atLocal: local) { param.set(&m, v) }
+        }
+        return m
+    }
+    
+    /// Index of the keyframe that holds `param` at `local` (within the keyframe spacing), if any.
+    func keyIndex(atLocal local: Float, animating param: EditingView.MaskParam) -> Int? {
+        indices.first { abs(self[$0].time - local) <= EditingView.minimumKeyframeSpacing
+            && self[$0].values[param.rawValue] != nil }
+    }
+    
+    /// Gives `param` the value at `local`: changes its keyframe there, or adds the value to another keyframe at the
+    /// same time, or creates a keyframe (snapped to the project's frame grid).
+    mutating func setKey(_ param: EditingView.MaskParam, atLocal local: Float, value: Float, frameRate: Int) {
+        let k = param.rawValue
+        if let i = keyIndex(atLocal: local, animating: param) { self[i].values[k] = value; return }
+        var t = local
+        if frameRate > 0 {
+            let fps = Float(frameRate)
+            t = (local * fps).rounded() / fps
+        }
+        if let i = firstIndex(where: { abs($0.time - t) <= EditingView.minimumKeyframeSpacing }) {
+            self[i].values[k] = value
+            return
+        }
+        append(EditingView.MaskKeyframe(time: t, values: [k: value]))
+        sort { $0.time < $1.time }
+    }
+    
+    /// Takes `param`'s keyframe at `local` away (the keyframe goes too when it held nothing else).
+    /// Returns the value it held, so the parameter can stay there as a static value.
+    @discardableResult
+    mutating func removeKey(_ param: EditingView.MaskParam, atLocal local: Float) -> Float? {
+        guard let i = keyIndex(atLocal: local, animating: param) else { return nil }
+        let v = self[i].values[param.rawValue]
+        self[i].values[param.rawValue] = nil
+        if self[i].values.isEmpty { remove(at: i) }
+        return v
+    }
+}
+
+extension EditingView.Clip {
+    /// The mask as drawn at `playhead` (global seconds): its static values, the animated ones taken from the keyframes.
+    /// A gesture's live state wins over the clip's own.
+    func resolvedMask(at playhead: Float, live: EditingView.LiveClipState? = nil) -> EditingView.ClipMask? {
+        guard let base = live?.mask ?? mask else { return nil }
+        return (live?.maskKeys ?? maskKeys).applied(to: base, atLocal: playhead - startTime)
     }
 }

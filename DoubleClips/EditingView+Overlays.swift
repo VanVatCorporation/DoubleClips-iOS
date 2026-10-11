@@ -50,7 +50,7 @@ extension EditingView {
                             case .textEdit:
                                 TextClipEditor(clip: clip, commandManager: commandManager, projectPath: projectPath, onChanged: onChanged)
                             case .mask:
-                                MaskPanel(clip: clip, commandManager: commandManager, onChanged: onChanged)
+                                MaskPanel(clip: clip, commandManager: commandManager, playhead: playhead, frameRate: frameRate, onChanged: onChanged)
                             case .effectEdit:
                                 EffectClipEditor(clip: clip, commandManager: commandManager,
                                                  playhead: playhead, frameRate: frameRate, onChanged: onChanged)

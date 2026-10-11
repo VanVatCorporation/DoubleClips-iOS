@@ -136,6 +136,8 @@ extension EditingView {
         @Published var comboAnimation: AnimationClip = AnimationClip()
         /// iOS addition (EditingView+Mask.swift): limits where the clip is visible. nil = no mask.
         @Published var mask: ClipMask?
+        /// Keyframes of the mask's parameters (EditingView+Mask.swift); empty = the mask is static.
+        @Published var maskKeys: [MaskKeyframe] = []
         
         enum CodingKeys: String, CodingKey {
             case type
@@ -169,6 +171,7 @@ extension EditingView {
             case outAnimation
             case comboAnimation
             case mask
+            case maskKeys
         }
         
         init(clipName: String, startTime: Float, duration: Float, trackIndex: Int, type: ClipType, isClipHasAudio: Bool, width: Int, height: Int) {
@@ -229,6 +232,7 @@ extension EditingView {
             self.comboAnimation = try container.decodeIfPresent(AnimationClip.self, forKey: .comboAnimation) ?? AnimationClip()
             // A mask that can't be read must never cost the clip.
             self.mask = try? container.decodeIfPresent(ClipMask.self, forKey: .mask)
+            self.maskKeys = (try? container.decodeIfPresent([MaskKeyframe].self, forKey: .maskKeys)) ?? []
         }
         
         func encode(to encoder: Encoder) throws {
@@ -264,6 +268,7 @@ extension EditingView {
             try container.encode(outAnimation, forKey: .outAnimation)
             try container.encode(comboAnimation, forKey: .comboAnimation)
             try container.encodeIfPresent(mask, forKey: .mask)
+            if !maskKeys.isEmpty { try container.encode(maskKeys, forKey: .maskKeys) }
         }
     }
     

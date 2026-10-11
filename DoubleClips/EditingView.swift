@@ -1691,6 +1691,24 @@ private struct ClipBlockView: View {
                 }
             }
             
+            // Mask keyframes: a teal diamond along the bottom edge, tap = jump to it.
+            if isSelected && !isMultiSelected && !isGhostSource {
+                ForEach(Array(clip.maskKeys.enumerated()), id: \.offset) { _, key in
+                    let exact = CGFloat(key.time) * pps
+                    let x = min(max(exact, 8), max(8, blockWidth - 8))
+                    let active = abs(key.time + clip.startTime - currentTime) <= Constants.KEYFRAME_KNOT_ACTIVE_SECONDS
+                    Rectangle()
+                        .fill(active ? Color.white : Color.mdSecondary)
+                        .overlay(Rectangle().stroke(Color.black.opacity(0.55), lineWidth: 1))
+                        .frame(width: Constants.KEYFRAME_KNOT_SIZE, height: Constants.KEYFRAME_KNOT_SIZE)
+                        .rotationEffect(.degrees(45))
+                        .frame(width: Constants.KEYFRAME_KNOT_HIT, height: Constants.KEYFRAME_KNOT_HIT)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onKeyframeTap(clip.startTime + key.time) }
+                        .position(x: x, y: Constants.TRACK_CLIP_HEIGHT - 10)
+                }
+            }
+            
             // Trim handles — only for a true single selection, and hidden mid-move
             // (Android: `dragContext.clip.toggleHandlesVisibility(false)` on ACTION_MOVE
             // of the clip body, restored on ACTION_UP). The grab area is wider than the white bar

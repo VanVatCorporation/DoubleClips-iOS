@@ -59,6 +59,7 @@ extension EditingView {
         var outWindow: OutWindow?
         /// iOS addition: clip mask (EditingView+Mask.swift), applied in the clip's own box.
         var mask: ClipMask?
+        var maskKeys: [MaskKeyframe] = []
     }
     
     /// A transition between two clips of one track (EditingView+TransitionPlan.swift): both sides are
@@ -242,7 +243,8 @@ extension EditingView {
             let props = (live?.keyframes ?? layer.keyframes).resolved(base: live?.properties ?? layer.baseProperties,
                                                                      clipStartTime: layer.startTime, at: time)
             // A mask gesture in progress overrides the snapshot's mask the same way.
-            let mask = live?.mask ?? layer.mask
+            let maskBase = live?.mask ?? layer.mask
+            let mask = maskBase.map { (live?.maskKeys ?? layer.maskKeys).applied(to: $0, atLocal: time - layer.startTime) }
             
             switch layer.kind {
             case .text(let spec):
