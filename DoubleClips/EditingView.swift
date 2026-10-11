@@ -495,6 +495,7 @@ struct EditingView: View {
                                         onSplit: { splitSelectedClip() },
                                         onClone: { cloneSelectedClip() },
                                         onEdit: { openClipEditor() },
+                                        onMask: { openMaskEditor() },
                                         onMultiToggle: { toggleMultiSelect() },
                                         onKeyframe: { addKeyframeToSelectedClip() },
                                         onAllKeyframe: { applyKeyframesToAllClips(selectedOnly: false) },
@@ -988,6 +989,15 @@ struct EditingView: View {
     private func openProjectFiles() {
         engine.pause()
         withAnimation { activeOverlay = .projectFiles }
+    }
+    
+    /// Toolbar "Mask": the mask panel (EditingView+Mask.swift) for the selected picture clip. The panel turns on
+    /// canvas editing of the mask while it is open.
+    private func openMaskEditor() {
+        guard let clip = selectedClip, clip.isVisualClip else { return }
+        engine.pause()
+        MaskEditState.shared.refresh = { [weak engine] in engine?.refreshFrame() }
+        withAnimation { activeOverlay = .mask }
     }
     
     private func openClipEditor() {
@@ -1778,6 +1788,7 @@ private struct ClipToolbarView: View {
     var onSplit: () -> Void = {}
     var onClone: () -> Void = {}
     var onEdit: () -> Void = {}
+    var onMask: () -> Void = {}
     var onMultiToggle: () -> Void = {}
     var onKeyframe: () -> Void = {}
     var onAllKeyframe: () -> Void = {}
@@ -1789,6 +1800,7 @@ private struct ClipToolbarView: View {
                 ToolbarButton(icon: "scissors", label: "Split") { onSplit() }
                 ToolbarButton(icon: "doc.on.doc", label: "Clone") { onClone() }
                 ToolbarButton(icon: "pencil.and.outline", label: "Edit") { onEdit() }
+                ToolbarButton(icon: "theatermasks", label: "Mask") { onMask() }
                 ToolbarButton(icon: "diamond", label: "Keyframe") { onKeyframe() }
                 ToolbarButton(icon: "list.bullet", label: "Multi") { onMultiToggle() }
                 ToolbarButton(icon: "arrow.triangle.merge", label: "AllKey") { onAllKeyframe() }

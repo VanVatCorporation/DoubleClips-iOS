@@ -7,6 +7,7 @@ extension EditingView {
         case videoProperties
         case textEdit
         case effectEdit
+        case mask
         case projectFiles
         case transition
     }
@@ -48,6 +49,8 @@ extension EditingView {
                                                      playhead: playhead, frameRate: frameRate, onChanged: onChanged)
                             case .textEdit:
                                 TextClipEditor(clip: clip, commandManager: commandManager, projectPath: projectPath, onChanged: onChanged)
+                            case .mask:
+                                MaskPanel(clip: clip, commandManager: commandManager, onChanged: onChanged)
                             case .effectEdit:
                                 EffectClipEditor(clip: clip, commandManager: commandManager,
                                                  playhead: playhead, frameRate: frameRate, onChanged: onChanged)
@@ -73,6 +76,7 @@ extension EditingView {
             case .videoProperties: return "Clip Properties"
             case .textEdit: return "Edit Text"
             case .effectEdit: return "Effect"
+            case .mask: return "Mask"
             case .projectFiles: return "Project Files"
             case .transition: return "Transition"
             }

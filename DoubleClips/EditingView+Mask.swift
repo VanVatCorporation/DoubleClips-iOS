@@ -247,6 +247,10 @@ extension EditingView {
     final class MaskEditState: ObservableObject {
         static let shared = MaskEditState()
         @Published var isEditing = false
+        /// Bumped on every live change (canvas drag, ruler, typed value) so the panel's numbers follow.
+        @Published var tick = 0
+        /// Re-renders the paused preview; set by the editor when the panel opens.
+        var refresh: (() -> Void)?
     }
     
     /// One gesture on the mask: a handle drag, a move, or a pinch / twist. Live values go through
@@ -341,6 +345,7 @@ extension EditingView {
             LiveOverrides.shared.set(LiveClipState(properties: clip.videoProperties, keyframes: clip.keyframes, mask: m),
                                      for: clip.id)
             tick += 1
+            MaskEditState.shared.tick += 1
         }
         
         func finish(commandManager: CommandManager, onChanged: @escaping () -> Void) {
@@ -359,6 +364,7 @@ extension EditingView {
                 undo: { clip.mask = before; onChanged() },
                 redo: { clip.mask = after; onChanged() }
             ))
+            MaskEditState.shared.tick += 1
         }
     }
     
@@ -414,7 +420,7 @@ extension EditingView {
         }
     }
     
-    // MARK: Editor section (clip properties panel)
+    // MARK: Mask panel (toolbar "Mask")
     
     /// Icon of a shape for the tiles.
     struct MaskIconShape: Shape {
@@ -432,84 +438,217 @@ extension EditingView {
         }
     }
     
-    struct MaskEditor: View {
+    /// A number the panel edits, in the units the user sees. The same values change when the shape is dragged on
+    /// the canvas, so the numbers always show what the gesture does.
+    enum MaskParam {
+        case x, y, width, height, rotation, feather, roundness
+        
+        func title(for shape: ClipMask.Shape) -> String {
+            switch self {
+            case .x: return "Position X"
+            case .y: return "Position Y"
+            case .width: return "Width"
+            case .height: return shape == .mirror ? "Thickness" : "Height"
+            case .rotation: return "Rotation"
+            case .feather: return "Feather"
+            case .roundness: return "Corner"
+            }
+        }
+        
+        /// Percent of the clip's box (position) / of its shorter side (size), degrees, 0...100 (feather, corner).
+        var range: ClosedRange<Float> {
+            switch self {
+            case .x, .y: return -50...150
+            case .width, .height: return 1...200
+            case .rotation: return -180...180
+            case .feather, .roundness: return 0...100
+            }
+        }
+        
+        /// How much one tick of the ruler is worth.
+        var unitsPerTick: Float {
+            switch self {
+            case .x, .y: return 1
+            case .width, .height: return 1
+            case .rotation: return 1
+            case .feather, .roundness: return 1
+            }
+        }
+        
+        func get(_ m: ClipMask) -> Float {
+            switch self {
+            case .x: return m.centerX * 100
+            case .y: return m.centerY * 100
+            case .width: return m.width * 100
+            case .height: return m.height * 100
+            case .rotation: return m.rotation
+            case .feather: return m.feather * 200
+            case .roundness: return m.roundness * 100
+            }
+        }
+        
+        func set(_ m: inout ClipMask, _ value: Float) {
+            let v = min(max(value, range.lowerBound), range.upperBound)
+            switch self {
+            case .x: m.centerX = v / 100
+            case .y: m.centerY = v / 100
+            case .width: m.width = v / 100
+            case .height: m.height = v / 100
+            case .rotation: m.rotation = v
+            case .feather: m.feather = v / 200
+            case .roundness: m.roundness = v / 100
+            }
+        }
+    }
+    
+    // MARK: Ruler slider (CapCut style)
+    
+    /// A ruler of ticks that slides under a fixed cursor: drag it sideways and the value under the cursor changes,
+    /// with a light tick of feedback for every step. Dragging right lowers the value, like CapCut (the ruler follows the finger).
+    struct RulerSlider: View {
+        @Binding var value: Float
+        let range: ClosedRange<Float>
+        var unitsPerTick: Float = 1
+        var onEditingBegan: () -> Void = {}
+        var onEditingEnded: () -> Void = {}
+        
+        @State private var dragStart: Float?
+        @State private var lastTick = 0
+        private let tickSpacing: CGFloat = 10
+        private static let feedback = UISelectionFeedbackGenerator()
+        
+        var body: some View {
+            Canvas { context, size in
+                let mid = size.width / 2
+                let center = value / unitsPerTick
+                let span = Int(ceil(mid / tickSpacing)) + 2
+                let base = Int(center.rounded())
+                for i in (base - span)...(base + span) {
+                    let x = mid + CGFloat(Float(i) - center) * tickSpacing
+                    guard x >= 0, x <= size.width else { continue }
+                    let major = i % 5 == 0
+                    let h: CGFloat = major ? 18 : 11
+                    let edge = min(abs(x - mid) / max(mid, 1), 1)
+                    let fade = 1 - pow(edge, 2.5)
+                    let tickValue = Float(i) * unitsPerTick
+                    let inside = tickValue >= range.lowerBound - 0.001 && tickValue <= range.upperBound + 0.001
+                    let opacity = (inside ? (major ? 0.85 : 0.4) : 0.1) * fade
+                    context.fill(Path(CGRect(x: x - 0.75, y: (size.height - h) / 2, width: 1.5, height: h)),
+                                 with: .color(.white.opacity(opacity)))
+                }
+                context.fill(Path(roundedRect: CGRect(x: mid - 1.25, y: (size.height - 28) / 2, width: 2.5, height: 28),
+                                  cornerRadius: 1.2),
+                             with: .color(Color.mdSecondary))
+            }
+            .frame(height: 40)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged { g in
+                        if dragStart == nil {
+                            dragStart = value
+                            lastTick = Int((value / unitsPerTick).rounded())
+                            Self.feedback.prepare()
+                            onEditingBegan()
+                        }
+                        let raw = (dragStart ?? value) - Float(g.translation.width) * unitsPerTick / Float(tickSpacing)
+                        let clamped = min(max(raw, range.lowerBound), range.upperBound)
+                        value = (clamped * 10).rounded() / 10
+                        let tick = Int((value / unitsPerTick).rounded())
+                        if tick != lastTick { lastTick = tick; Self.feedback.selectionChanged() }
+                    }
+                    .onEnded { _ in
+                        if dragStart != nil { dragStart = nil; onEditingEnded() }
+                    }
+            )
+        }
+    }
+    
+    // MARK: Panel
+    
+    struct MaskPanel: View {
         @ObservedObject var clip: Clip
         let commandManager: CommandManager
         let onChanged: () -> Void
-        @ObservedObject private var maskEdit = MaskEditState.shared
+        @ObservedObject private var state = MaskEditState.shared
         
-        @State private var sliderBefore: ClipMask?
-        @State private var sliderActive = false
+        enum Tab: String { case position = "Position", size = "Size", rotate = "Rotate", feather = "Feather", corner = "Corner" }
         
-        private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+        @State private var tab: Tab = .position
+        @State private var before: ClipMask?
+        @State private var dragging = false
+        
+        /// The mask as it is right now: the live value while a canvas drag / ruler drag runs, else the clip's.
+        private var current: ClipMask? {
+            _ = state.tick
+            return LiveOverrides.shared.state(for: clip.id)?.mask ?? clip.mask
+        }
         
         var body: some View {
-            VStack(spacing: 10) {
-                LazyVGrid(columns: columns, spacing: 8) {
-                    noneTile
-                    ForEach(ClipMask.Shape.allCases, id: \.self) { shape in tile(shape) }
-                }
-                
-                if let mask = clip.mask {
-                    PropertySlider(label: "Feather", value: value(\.feather), range: 0...0.5, resetTo: 0,
-                                   onEditingBegan: beginSlider, onEditingEnded: endSlider)
-                    if mask.shape == .rectangle {
-                        PropertySlider(label: "Roundness", value: value(\.roundness), range: 0...1, resetTo: 0,
-                                       onEditingBegan: beginSlider, onEditingEnded: endSlider)
-                    }
-                    Toggle("Invert", isOn: Binding(
-                        get: { clip.mask?.invert ?? false },
-                        set: { newValue in
-                            let before = clip.mask
-                            clip.mask?.invert = newValue
-                            commit(before: before, after: clip.mask)
+            let mask = current
+            VStack(spacing: 12) {
+                shapeRow(mask)
+                if let mask {
+                    tabBar(mask)
+                    ForEach(rows(mask), id: \.self) { param in row(param, mask) }
+                    HStack {
+                        Button {
+                            setMask(ClipMask(shape: mask.shape))
+                        } label: {
+                            Label("Reset", systemImage: "arrow.counterclockwise")
+                                .font(.system(size: 13)).foregroundColor(.white.opacity(0.85))
                         }
-                    ))
-                    .font(.system(size: 13)).foregroundColor(.white)
-                    .tint(Color.mdPrimary)
-                    
-                    Toggle("Edit on canvas", isOn: $maskEdit.isEditing)
-                        .font(.system(size: 13)).foregroundColor(.white)
+                        .buttonStyle(.plain)
+                        Spacer()
+                        Toggle("Invert", isOn: Binding(
+                            get: { mask.invert },
+                            set: { newValue in var m = mask; m.invert = newValue; setMask(m) }
+                        ))
+                        .toggleStyle(.switch)
                         .tint(Color.mdPrimary)
-                    
-                    Text("Drag the shape to move it, its handles to resize, the arrow to rotate and the drop to soften the edge. Pinch and twist work too.")
+                        .font(.system(size: 13)).foregroundColor(.white)
+                        .fixedSize()
+                    }
+                } else {
+                    Text("Pick a shape to show only part of the clip. Drag it on the preview, or type the numbers.")
                         .font(.system(size: 11)).foregroundColor(.white.opacity(0.5))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .onDisappear { maskEdit.isEditing = false }
+            .onAppear { state.isEditing = true }
+            .onDisappear { state.isEditing = false }
         }
         
-        private var noneTile: some View {
-            Button { setMask(nil) } label: {
-                tileFrame(selected: clip.mask == nil, title: "None") {
-                    Image(systemName: "circle.slash").font(.system(size: 18)).foregroundColor(.white.opacity(0.8))
+        // MARK: Shapes
+        
+        private func shapeRow(_ mask: ClipMask?) -> some View {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    Button { setMask(nil) } label: {
+                        tile(title: "None", selected: mask == nil) {
+                            Image(systemName: "circle.slash").font(.system(size: 18)).foregroundColor(.white.opacity(0.8))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    ForEach(ClipMask.Shape.allCases, id: \.self) { shape in
+                        Button {
+                            setMask(mask?.withShape(shape) ?? ClipMask(shape: shape))
+                        } label: {
+                            tile(title: shape.title, selected: mask?.shape == shape) {
+                                MaskIconShape(shape: shape).fill(Color.white.opacity(0.9)).padding(9).clipped()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+                .padding(.horizontal, 2)
             }
-            .buttonStyle(.plain)
         }
         
-        private func tile(_ shape: ClipMask.Shape) -> some View {
-            Button {
-                let new = clip.mask?.withShape(shape) ?? ClipMask(shape: shape)
-                setMask(new)
-                maskEdit.isEditing = true
-            } label: {
-                tileFrame(selected: clip.mask?.shape == shape, title: shape.title) {
-                    MaskIconShape(shape: shape)
-                        .fill(Color.white.opacity(0.9))
-                        .padding(8)
-                        .clipped()
-                }
-            }
-            .buttonStyle(.plain)
-        }
-        
-        private func tileFrame<Icon: View>(selected: Bool, title: String, @ViewBuilder _ icon: () -> Icon) -> some View {
+        private func tile<Icon: View>(title: String, selected: Bool, @ViewBuilder _ icon: () -> Icon) -> some View {
             VStack(spacing: 4) {
                 icon()
-                    .frame(maxWidth: .infinity)
-                    .aspectRatio(1, contentMode: .fit)
+                    .frame(width: 52, height: 52)
                     .background(selected ? Color.mdPrimary.opacity(0.22) : Color.white.opacity(0.07))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(RoundedRectangle(cornerRadius: 10)
@@ -521,44 +660,114 @@ extension EditingView {
             }
         }
         
-        // MARK: Editing helpers
+        // MARK: Tabs + rows
         
-        private func value(_ kp: WritableKeyPath<ClipMask, Float>) -> Binding<Float> {
-            Binding(get: { clip.mask?[keyPath: kp] ?? 0 },
-                    set: { clip.mask?[keyPath: kp] = $0 })
+        private func tabs(_ mask: ClipMask) -> [Tab] {
+            var list: [Tab] = [.position]
+            if mask.shape.hasHeight { list.append(.size) }
+            list.append(.rotate)
+            list.append(.feather)
+            if mask.shape == .rectangle { list.append(.corner) }
+            return list
         }
         
-        private func beginSlider() {
-            guard !sliderActive else { return }
-            sliderActive = true
-            sliderBefore = clip.mask
+        private func activeTab(_ mask: ClipMask) -> Tab {
+            tabs(mask).contains(tab) ? tab : .position
         }
         
-        private func endSlider() {
-            guard sliderActive else { return }
-            sliderActive = false
-            commit(before: sliderBefore, after: clip.mask)
-            sliderBefore = nil
+        private func tabBar(_ mask: ClipMask) -> some View {
+            let active = activeTab(mask)
+            return HStack(spacing: 22) {
+                ForEach(tabs(mask), id: \.rawValue) { t in
+                    Button { tab = t } label: {
+                        VStack(spacing: 5) {
+                            Text(t.rawValue)
+                                .font(.system(size: 14, weight: t == active ? .semibold : .regular))
+                                .foregroundColor(t == active ? .white : .white.opacity(0.5))
+                            Rectangle()
+                                .fill(t == active ? Color.mdSecondary : Color.clear)
+                                .frame(height: 2)
+                        }
+                        .fixedSize()
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+        }
+        
+        private func rows(_ mask: ClipMask) -> [MaskParam] {
+            switch activeTab(mask) {
+            case .position: return [.x, .y]
+            case .size: return mask.shape.hasWidth ? [.width, .height] : [.height]
+            case .rotate: return [.rotation]
+            case .feather: return [.feather]
+            case .corner: return [.roundness]
+            }
+        }
+        
+        private func row(_ param: MaskParam, _ mask: ClipMask) -> some View {
+            HStack(spacing: 8) {
+                Text(param.title(for: mask.shape))
+                    .font(.system(size: 12)).foregroundColor(.white.opacity(0.8))
+                    .frame(width: 70, alignment: .leading)
+                RulerSlider(
+                    value: Binding(get: { param.get(mask) }, set: { setLive(param, $0) }),
+                    range: param.range, unitsPerTick: param.unitsPerTick,
+                    onEditingBegan: beginDrag, onEditingEnded: endDrag)
+                NumberField(label: "", value: Binding(
+                    get: { param.get(mask) },
+                    set: { newValue in beginDrag(); setLive(param, newValue); endDrag() }
+                )) {}
+                .frame(width: 64)
+            }
+        }
+        
+        // MARK: Editing
+        
+        /// A ruler drag or a typed value: the preview follows live (through LiveOverrides, no player rebuild),
+        /// and the whole edit becomes ONE undo step when it ends.
+        private func beginDrag() {
+            guard !dragging else { return }
+            dragging = true
+            before = clip.mask
+        }
+        
+        private func setLive(_ param: MaskParam, _ value: Float) {
+            guard var m = current else { return }
+            param.set(&m, value)
+            LiveOverrides.shared.set(LiveClipState(properties: clip.videoProperties, keyframes: clip.keyframes, mask: m),
+                                     for: clip.id)
+            state.tick += 1
+            state.refresh?()
+        }
+        
+        private func endDrag() {
+            guard dragging else { return }
+            dragging = false
+            let after = LiveOverrides.shared.state(for: clip.id)?.mask
+            LiveOverrides.shared.clear(clip.id)
+            let start = before
+            before = nil
+            state.tick += 1
+            guard let after, after != start else { return }
+            commit(before: start, after: after)
         }
         
         private func setMask(_ new: ClipMask?) {
-            let before = clip.mask
-            guard before != new else { return }
-            clip.mask = new
-            if new == nil { maskEdit.isEditing = false }
-            commit(before: before, after: new)
+            let old = clip.mask
+            guard old != new else { return }
+            commit(before: old, after: new)
         }
         
-        /// The value is already on the clip; this records the undo step and refreshes the preview.
-        private func commit(before: ClipMask?, after: ClipMask?) {
-            guard before != after else { return }
+        private func commit(before old: ClipMask?, after new: ClipMask?) {
             let target = clip
             commandManager.execute(GenericCommand(
                 description: "Mask: \(clip.clipName)",
-                undo: { target.mask = before; onChanged() },
-                redo: { target.mask = after; onChanged() }
+                undo: { target.mask = old; onChanged() },
+                redo: { target.mask = new; onChanged() }
             ))
-            onChanged()
+            state.tick += 1
         }
     }
 }

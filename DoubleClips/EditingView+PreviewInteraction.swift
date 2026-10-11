@@ -421,23 +421,6 @@ extension EditingView {
                     guides(canvas: canvas, fit: fit, origin: origin)
                         .allowsHitTesting(false)
                     
-                    if maskEdit.isEditing {
-                        VStack {
-                            HStack {
-                                Spacer()
-                                Button { maskEdit.isEditing = false } label: {
-                                    Text("Done")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 14).padding(.vertical, 7)
-                                        .background(Capsule().fill(Color.mdPrimary))
-                                }
-                            }
-                            .padding(10)
-                            Spacer()
-                        }
-                    }
-                    
                     if let info = session.infoText {
                         Text(info)
                             .font(.system(size: 11, design: .monospaced))
