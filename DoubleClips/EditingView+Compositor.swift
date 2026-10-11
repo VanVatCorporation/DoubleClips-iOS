@@ -57,6 +57,8 @@ extension EditingView {
             var duration: Float
         }
         var outWindow: OutWindow?
+        /// iOS addition: clip mask (EditingView+Mask.swift), applied in the clip's own box.
+        var mask: ClipMask?
     }
     
     /// A transition between two clips of one track (EditingView+TransitionPlan.swift): both sides are
@@ -239,6 +241,8 @@ extension EditingView {
             let live = LiveOverrides.shared.state(for: layer.clipID)
             let props = (live?.keyframes ?? layer.keyframes).resolved(base: live?.properties ?? layer.baseProperties,
                                                                      clipStartTime: layer.startTime, at: time)
+            // A mask gesture in progress overrides the snapshot's mask the same way.
+            let mask = live?.mask ?? layer.mask
             
             switch layer.kind {
             case .text(let spec):
@@ -255,18 +259,18 @@ extension EditingView {
                 let origin = CGPoint(x: (canvas.width - rendered.size.width) / 2,
                                      y: (canvas.height - rendered.size.height) / 2)
                 return place(rendered.image, layer: box, props: props, canvas: canvas, stretchToFull: false,
-                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), origin: origin)
+                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), origin: origin, mask: mask)
                 
             case .video(let trackID, let preferredTransform):
                 guard let buffer = request.sourceFrame(byTrackID: trackID) else { return nil }
                 let upright = Self.upright(CIImage(cvPixelBuffer: buffer), preferredTransform)
                 return place(upright, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull,
-                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim))
+                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), mask: mask)
                 
             case .image(let url):
                 guard let source = Self.cachedImage(url) else { return nil }
                 return place(source, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull,
-                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim))
+                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), mask: mask)
                 
             case .effect:
                 return nil      // handled where the layers are composited
@@ -367,7 +371,7 @@ extension EditingView {
         /// then the pivot-based scale/rotate/translate from OpenGLEdit.buildClipMvp.
         private func place(_ source: CIImage, layer: RenderLayer, props: VideoProperties,
                            canvas: CGSize, stretchToFull: Bool, anim: ClipAnimationFrame,
-                           origin: CGPoint = .zero) -> CIImage? {
+                           origin: CGPoint = .zero, mask: EditingView.ClipMask? = nil) -> CIImage? {
             let srcW = source.extent.width, srcH = source.extent.height
             guard srcW > 0, srcH > 0 else { return nil }
             
@@ -397,11 +401,16 @@ extension EditingView {
             
             // scale → move pivot to origin → rotate → move pivot to its canvas position.
             // Android's positive angle is clockwise on a y-down canvas = -theta in y-up space.
-            let transform = CGAffineTransform(scaleX: scaledW / srcW, y: scaledH / srcH)
-                .concatenating(CGAffineTransform(translationX: -pivotLocal.x, y: -pivotLocal.y))
+            // The clip mask works in the scaled, still unrotated box (EditingView+Mask.swift), so it turns and moves
+            // with the clip and keeps its proportions however the clip is stretched.
+            var scaledPicture = colored.transformed(by: CGAffineTransform(scaleX: scaledW / srcW, y: scaledH / srcH))
+            if let mask {
+                scaledPicture = Self.applyClipMask(mask, to: scaledPicture, size: CGSize(width: scaledW, height: scaledH))
+            }
+            let transform = CGAffineTransform(translationX: -pivotLocal.x, y: -pivotLocal.y)
                 .concatenating(CGAffineTransform(rotationAngle: -theta))
                 .concatenating(CGAffineTransform(translationX: pivotCanvas.x, y: pivotCanvas.y))
-            var placed = colored.transformed(by: transform)
+            var placed = scaledPicture.transformed(by: transform)
             
             // Blur sigma is a fraction of the canvas WIDTH, applied to the drawn layer in canvas
             // pixels (Android blurs the layer after drawing it). Transparent surroundings fade in

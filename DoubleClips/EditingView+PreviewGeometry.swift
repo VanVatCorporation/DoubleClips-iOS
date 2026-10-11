@@ -13,6 +13,8 @@ extension EditingView {
     struct LiveClipState {
         var properties: VideoProperties
         var keyframes: AnimatedProperty
+        /// Set while a mask gesture is in flight (EditingView+Mask.swift); nil = use the clip's own mask.
+        var mask: ClipMask? = nil
     }
     
     /// Thread-safe side channel: the main thread writes while a gesture is in flight, the

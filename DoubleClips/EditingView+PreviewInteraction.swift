@@ -329,6 +329,10 @@ extension EditingView {
         let onLiveChange: () -> Void
         let onChanged: () -> Void
         
+        /// Mask editing (EditingView+Mask.swift): while on, every gesture drives the selected clip's mask.
+        @ObservedObject private var maskEdit = MaskEditState.shared
+        @StateObject private var maskSession = MaskEditSession()
+        
         var body: some View {
             GeometryReader { geo in
                 let canvas = CGSize(width: CGFloat(max(settings.videoWidth, 1)), height: CGFloat(max(settings.videoHeight, 1)))
@@ -340,9 +344,23 @@ extension EditingView {
                 ZStack(alignment: .bottom) {
                     PreviewGestureSurface(
                         onTap: { point in
+                            if maskEdit.isEditing { return }
                             if let hit = hits(at: point, canvas: canvas, fit: fit, origin: origin).first { onSelect(hit) }
                         },
                         onBegin: { point, twoFinger in
+                            // Mask editing: the gesture belongs to the mask of the selected clip.
+                            if maskEdit.isEditing,
+                               let selectedID = selectedClipID,
+                               let clip = visualClips().first(where: { $0.id == selectedID && $0.isActive(at: playhead) }),
+                               let mask = LiveOverrides.shared.state(for: clip.id)?.mask ?? clip.mask,
+                               let quad = clip.previewQuad(at: playhead, canvas: canvas, stretchToFull: settings.isStretchToFull,
+                                                           live: LiveOverrides.shared.state(for: clip.id)),
+                               let frame = MaskFrame(quad: quad) {
+                                maskSession.begin(clip: clip, mask: mask, frame: frame,
+                                                  canvasPoint: CGPoint(x: (point.x - origin.x) / fit, y: (point.y - origin.y) / fit),
+                                                  fit: fit)
+                                return
+                            }
                             let candidates = hits(at: point, canvas: canvas, fit: fit, origin: origin)
                             let selected = visualClips().first { $0.id == selectedClipID && $0.isActive(at: playhead) }
                             
@@ -374,17 +392,51 @@ extension EditingView {
                                               otherQuads: otherQuads(excluding: chosen.id, canvas: canvas))
                             }
                         },
-                        onPan: { if session.isActive { session.pan($0); onLiveChange() } },
-                        onPinch: { if session.isActive { session.pinch($0); onLiveChange() } },
-                        onRotate: { if session.isActive { session.rotate($0); onLiveChange() } },
-                        onEnd: { session.finish(commandManager: commandManager, onChanged: onChanged) }
+                        onPan: {
+                            if maskSession.isActive { maskSession.pan($0); onLiveChange() }
+                            else if session.isActive { session.pan($0); onLiveChange() }
+                        },
+                        onPinch: {
+                            if maskSession.isActive { maskSession.pinch($0); onLiveChange() }
+                            else if session.isActive { session.pinch($0); onLiveChange() }
+                        },
+                        onRotate: {
+                            if maskSession.isActive { maskSession.rotate($0); onLiveChange() }
+                            else if session.isActive { session.rotate($0); onLiveChange() }
+                        },
+                        onEnd: {
+                            if maskSession.isActive { maskSession.finish(commandManager: commandManager, onChanged: onChanged) }
+                            else { session.finish(commandManager: commandManager, onChanged: onChanged) }
+                        }
                     )
                     
-                    selectionBox(canvas: canvas, fit: fit, origin: origin)
-                        .allowsHitTesting(false)
+                    if maskEdit.isEditing {
+                        maskOverlay(canvas: canvas, fit: fit, origin: origin)
+                            .allowsHitTesting(false)
+                    } else {
+                        selectionBox(canvas: canvas, fit: fit, origin: origin)
+                            .allowsHitTesting(false)
+                    }
                     
                     guides(canvas: canvas, fit: fit, origin: origin)
                         .allowsHitTesting(false)
+                    
+                    if maskEdit.isEditing {
+                        VStack {
+                            HStack {
+                                Spacer()
+                                Button { maskEdit.isEditing = false } label: {
+                                    Text("Done")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 14).padding(.vertical, 7)
+                                        .background(Capsule().fill(Color.mdPrimary))
+                                }
+                            }
+                            .padding(10)
+                            Spacer()
+                        }
+                    }
                     
                     if let info = session.infoText {
                         Text(info)
@@ -402,6 +454,31 @@ extension EditingView {
         }
         
         // MARK: Helpers
+        
+        /// The selected clip's mask outline + handles (live while a mask gesture is running), with a Done pill.
+        @ViewBuilder
+        private func maskOverlay(canvas: CGSize, fit: CGFloat, origin: CGPoint) -> some View {
+            let _ = maskSession.tick       // redraw while a mask gesture is running
+            if let id = selectedClipID,
+               let clip = visualClips().first(where: { $0.id == id }),
+               clip.isActive(at: playhead),
+               let mask = LiveOverrides.shared.state(for: id)?.mask ?? clip.mask,
+               let quad = clip.previewQuad(at: playhead, canvas: canvas, stretchToFull: settings.isStretchToFull,
+                                           live: LiveOverrides.shared.state(for: id)),
+               let frame = MaskFrame(quad: quad) {
+                let pts = quad.map { CGPoint(x: origin.x + $0.x * fit, y: origin.y + $0.y * fit) }
+                ZStack {
+                    Path { path in
+                        path.move(to: pts[0])
+                        for p in pts.dropFirst() { path.addLine(to: p) }
+                        path.closeSubpath()
+                    }
+                    .stroke(Color.white.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
+                    
+                    MaskOverlay(mask: mask, frame: frame, fit: fit, origin: origin)
+                }
+            }
+        }
         
         /// Draw order (bottom → top) — identical to the compositor's layer order.
         private func visualClips() -> [Clip] {

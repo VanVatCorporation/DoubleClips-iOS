@@ -134,6 +134,8 @@ extension EditingView {
         @Published var inAnimation: AnimationClip = AnimationClip()
         @Published var outAnimation: AnimationClip = AnimationClip()
         @Published var comboAnimation: AnimationClip = AnimationClip()
+        /// iOS addition (EditingView+Mask.swift): limits where the clip is visible. nil = no mask.
+        @Published var mask: ClipMask?
         
         enum CodingKeys: String, CodingKey {
             case type
@@ -166,6 +168,7 @@ extension EditingView {
             case inAnimation
             case outAnimation
             case comboAnimation
+            case mask
         }
         
         init(clipName: String, startTime: Float, duration: Float, trackIndex: Int, type: ClipType, isClipHasAudio: Bool, width: Int, height: Int) {
@@ -224,6 +227,8 @@ extension EditingView {
             self.inAnimation = try container.decodeIfPresent(AnimationClip.self, forKey: .inAnimation) ?? AnimationClip()
             self.outAnimation = try container.decodeIfPresent(AnimationClip.self, forKey: .outAnimation) ?? AnimationClip()
             self.comboAnimation = try container.decodeIfPresent(AnimationClip.self, forKey: .comboAnimation) ?? AnimationClip()
+            // A mask that can't be read must never cost the clip.
+            self.mask = try? container.decodeIfPresent(ClipMask.self, forKey: .mask)
         }
         
         func encode(to encoder: Encoder) throws {
@@ -258,6 +263,7 @@ extension EditingView {
             try container.encode(inAnimation, forKey: .inAnimation)
             try container.encode(outAnimation, forKey: .outAnimation)
             try container.encode(comboAnimation, forKey: .comboAnimation)
+            try container.encodeIfPresent(mask, forKey: .mask)
         }
     }
     
