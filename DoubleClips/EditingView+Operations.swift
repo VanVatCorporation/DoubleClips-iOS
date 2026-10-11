@@ -171,6 +171,9 @@ extension EditingView.Clip {
         let local = localClipTime(currentGlobalTime)
         let oldStartTrim = startClipTrim
         let oldEndTrim = endClipTrim
+        let oldDuration = duration
+        // Where in the source the cut falls: the trim plus what the speed has consumed by then (= `local` at speed 1).
+        let sourceAtCut = oldStartTrim + Float(timeMap.sourceOffset(atLocal: Double(local)))
         // Clips decoded from partial JSON can have originalDuration == 0; derive it instead.
         let base = originalDuration > 0 ? originalDuration : (oldStartTrim + duration + oldEndTrim)
         
@@ -180,13 +183,13 @@ extension EditingView.Clip {
         
         // Primary (left) half
         originalDuration = base
-        endClipTrim = base - (local + oldStartTrim)
-        duration = base - endClipTrim - startClipTrim
+        endClipTrim = base - sourceAtCut
+        duration = local
         
         // Secondary (right) half
-        secondary.startClipTrim = local + oldStartTrim
+        secondary.startClipTrim = sourceAtCut
         secondary.endClipTrim = oldEndTrim
-        secondary.duration = base - secondary.endClipTrim - secondary.startClipTrim
+        secondary.duration = oldDuration - local
         
         // A transition belongs to the END of a clip, so it stays with the right half only.
         endTransition = nil

@@ -1562,6 +1562,7 @@ private struct ClipBlockView: View {
     /// The clip as it was when the current handle drag began, and where the finger landed (identifies the drag).
     @State private var trimBase: EditingView.ClipTrimState? = nil
     @State private var trimStart: CGPoint = .zero
+    @State private var trimMap: EditingView.ClipTimeMap? = nil
     
     // Derived values for the clip block
     var blockWidth: CGFloat {
@@ -1611,18 +1612,20 @@ private struct ClipBlockView: View {
             .onChanged { value in
                 if trimBase == nil || trimStart != value.startLocation {
                     trimBase = clip.trimState
+                    trimMap = clip.timeMap
                     trimStart = value.startLocation
                 }
-                guard let base = trimBase else { return }
+                guard let base = trimBase, let map = trimMap else { return }
                 let delta = Float(value.translation.width / pps)
                 let limited = clip.isSourceLimited
                 clip.apply(trim: leftEdge
-                           ? EditingView.ClipTrimMath.leftEdge(base: base, delta: delta, sourceLimited: limited)
-                           : EditingView.ClipTrimMath.rightEdge(base: base, delta: delta, sourceLimited: limited))
+                           ? EditingView.ClipTrimMath.leftEdge(base: base, delta: delta, sourceLimited: limited, map: map)
+                           : EditingView.ClipTrimMath.rightEdge(base: base, delta: delta, sourceLimited: limited, map: map))
             }
             .onEnded { _ in
                 let base = trimBase
                 trimBase = nil
+                trimMap = nil
                 if let base, let onTrimmed, clip.trimState != base {
                     onTrimmed(clip, base, clip.trimState)
                 } else {

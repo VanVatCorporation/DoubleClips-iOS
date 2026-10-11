@@ -257,12 +257,12 @@ extension EditingView.Clip {
     /// setStartClipTrim(): changing a trim also re-derives duration.
     func setStartClipTrim(_ value: Float) {
         startClipTrim = value
-        duration = originalDuration - endClipTrim - startClipTrim
+        duration = durationForTrims()
     }
     
     func setEndClipTrim(_ value: Float) {
         endClipTrim = value
-        duration = originalDuration - endClipTrim - startClipTrim
+        duration = durationForTrims()
     }
     
     // MARK: Properties

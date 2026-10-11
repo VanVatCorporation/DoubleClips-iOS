@@ -125,6 +125,7 @@ extension EditingView {
         /// Snapshot taken when a slider drag / field edit begins, so the whole gesture is one undo step.
         @State private var propertiesBefore: EditingView.VideoProperties?
         @State private var keysBefore: EditingView.AnimatedProperty?
+        @State private var durationBefore: Float?
         
         /// Animation packs sheet; `registryVersion` bumps when a pack is imported / removed so the
         /// pickers below re-read the animation registry.
@@ -212,21 +213,35 @@ extension EditingView {
             if propertiesBefore == nil {
                 propertiesBefore = clip.videoProperties
                 keysBefore = clip.keyframes
+                durationBefore = clip.duration
             }
+        }
+        
+        // Speed decides how long the footage is on the timeline: after any edit of the speed (the static value or its keyframes)
+        // the clip's length is re-derived (Clip.refitDuration), and undo restores the old length with the old speed.
+        private func speedSignature(_ keys: EditingView.AnimatedProperty) -> [String] {
+            keys.keyframes.filter { $0.animates(.speed) }.map { "\($0.time)|\($0.value.valueSpeed)|\($0.easing)" }
+        }
+        
+        private func speedChanged(from props: EditingView.VideoProperties, _ keys: EditingView.AnimatedProperty) -> Bool {
+            props.valueSpeed != clip.videoProperties.valueSpeed || speedSignature(keys) != speedSignature(clip.keyframes)
         }
         
         /// One undo step for a whole slider drag / field edit: the static values and the keyframes together.
         private func endEdit() {
             guard let beforeProps = propertiesBefore, let beforeKeys = keysBefore else { return }
+            let beforeDuration = durationBefore ?? clip.duration
             propertiesBefore = nil
             keysBefore = nil
-            let afterProps = clip.videoProperties, afterKeys = clip.keyframes
+            durationBefore = nil
+            if speedChanged(from: beforeProps, beforeKeys) { clip.refitDuration() }
+            let afterProps = clip.videoProperties, afterKeys = clip.keyframes, afterDuration = clip.duration
             guard beforeProps != afterProps || beforeKeys != afterKeys else { return }
             let target = clip
             commandManager.execute(GenericCommand(
                 description: "Change properties: \(clip.clipName)",
-                undo: { target.videoProperties = beforeProps; target.keyframes = beforeKeys; onChanged() },
-                redo: { target.videoProperties = afterProps; target.keyframes = afterKeys; onChanged() }
+                undo: { target.videoProperties = beforeProps; target.keyframes = beforeKeys; target.duration = beforeDuration; onChanged() },
+                redo: { target.videoProperties = afterProps; target.keyframes = afterKeys; target.duration = afterDuration; onChanged() }
             ))
             onChanged()
         }
@@ -270,7 +285,7 @@ extension EditingView {
         private func toggleKey(_ type: EditingView.VideoProperties.ValueType,
                                _ kp: WritableKeyPath<EditingView.VideoProperties, Float>) {
             guard playheadInsideClip else { return }
-            let beforeProps = clip.videoProperties, beforeKeys = clip.keyframes
+            let beforeProps = clip.videoProperties, beforeKeys = clip.keyframes, beforeDuration = clip.duration
             var props = beforeProps, keys = beforeKeys
             if keys.keyframeIndex(atLocal: localTime, animating: type) != nil {
                 if let removed = keys.removeKey(type, atLocal: localTime), !keys.isAnimated(type) {
@@ -283,11 +298,13 @@ extension EditingView {
             guard props != beforeProps || keys != beforeKeys else { return }
             clip.videoProperties = props
             clip.keyframes = keys
+            if type == .speed { clip.refitDuration() }
+            let afterDuration = clip.duration
             let target = clip
             commandManager.execute(GenericCommand(
                 description: "Keyframe \(EditingView.VideoProperties.displayName(for: type)): \(clip.clipName)",
-                undo: { target.videoProperties = beforeProps; target.keyframes = beforeKeys; onChanged() },
-                redo: { target.videoProperties = props; target.keyframes = keys; onChanged() }
+                undo: { target.videoProperties = beforeProps; target.keyframes = beforeKeys; target.duration = beforeDuration; onChanged() },
+                redo: { target.videoProperties = props; target.keyframes = keys; target.duration = afterDuration; onChanged() }
             ))
             onChanged()
         }
@@ -480,16 +497,22 @@ extension EditingView {
             let old = clip.keyframes.keyframes[index].easing
             guard old != easing else { return }
             let target = clip
+            let beforeDuration = clip.duration
+            let isSpeedKey = clip.keyframes.keyframes[index].animates(.speed)
+            clip.keyframes.keyframes[index].easing = easing
+            if isSpeedKey { clip.refitDuration() }
+            let afterDuration = clip.duration
             commandManager.execute(GenericCommand(
                 description: "Easing: \(clip.clipName)",
-                undo: { if target.keyframes.keyframes.indices.contains(index) { target.keyframes.keyframes[index].easing = old }; onChanged() },
-                redo: { if target.keyframes.keyframes.indices.contains(index) { target.keyframes.keyframes[index].easing = easing }; onChanged() }
+                undo: { if target.keyframes.keyframes.indices.contains(index) { target.keyframes.keyframes[index].easing = old }; target.duration = beforeDuration; onChanged() },
+                redo: { if target.keyframes.keyframes.indices.contains(index) { target.keyframes.keyframes[index].easing = easing }; target.duration = afterDuration; onChanged() }
             ))
+            onChanged()
         }
         
         private func deleteKeyframe(_ index: Int) {
             guard clip.keyframes.keyframes.indices.contains(index) else { return }
-            let beforeKeys = clip.keyframes, beforeProps = clip.videoProperties
+            let beforeKeys = clip.keyframes, beforeProps = clip.videoProperties, beforeDuration = clip.duration
             var afterKeys = beforeKeys
             let removed = afterKeys.keyframes.remove(at: index)
             // A property that loses its last keyframe stays at the value that keyframe gave it.
@@ -499,19 +522,25 @@ extension EditingView {
             }
             clip.keyframes = afterKeys
             clip.videoProperties = afterProps
+            if removed.animates(.speed) { clip.refitDuration() }
+            let afterDuration = clip.duration
             let target = clip
             commandManager.execute(GenericCommand(description: "Remove keyframe: \(clip.clipName)",
-                undo: { target.keyframes = beforeKeys; target.videoProperties = beforeProps; onChanged() },
-                redo: { target.keyframes = afterKeys; target.videoProperties = afterProps; onChanged() }))
+                undo: { target.keyframes = beforeKeys; target.videoProperties = beforeProps; target.duration = beforeDuration; onChanged() },
+                redo: { target.keyframes = afterKeys; target.videoProperties = afterProps; target.duration = afterDuration; onChanged() }))
             onChanged()
         }
         
         private func clearAll() {
-            let before = clip.keyframes
+            let before = clip.keyframes, beforeDuration = clip.duration
+            let hadSpeed = before.isAnimated(.speed)
+            clip.keyframes = EditingView.AnimatedProperty()
+            if hadSpeed { clip.refitDuration() }
+            let afterDuration = clip.duration
             let target = clip
             commandManager.execute(GenericCommand(description: "Clear keyframes: \(clip.clipName)",
-                undo: { target.keyframes = before; onChanged() },
-                redo: { target.keyframes = EditingView.AnimatedProperty(); onChanged() }))
+                undo: { target.keyframes = before; target.duration = beforeDuration; onChanged() },
+                redo: { target.keyframes = EditingView.AnimatedProperty(); target.duration = afterDuration; onChanged() }))
         }
     }
 }

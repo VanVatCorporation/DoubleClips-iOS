@@ -41,6 +41,8 @@ extension EditingView {
         let startTime: Double   // clip start on the timeline
         let startTrim: Double   // Clip.startClipTrim
         let duration: Double
+        /// Timeline seconds -> source seconds (speed); read only on the audio queue.
+        let timeMap: ClipTimeMap
     }
     
     /// Scrub audio as a small granular engine.
@@ -227,7 +229,7 @@ extension EditingView {
             var mix = [[Float]](repeating: [Float](repeating: 0, count: grainFrames), count: 2)
             var any = false
             for source in active {
-                let clipTime = seconds - source.startTime + source.startTrim
+                let clipTime = source.startTrim + source.timeMap.sourceOffset(atLocal: seconds - source.startTime)
                 guard let chunk = read(source.url, at: clipTime), let data = chunk.floatChannelData else { continue }
                 let frames = min(Int(chunk.frameLength), grainFrames)
                 let channels = Int(chunk.format.channelCount)

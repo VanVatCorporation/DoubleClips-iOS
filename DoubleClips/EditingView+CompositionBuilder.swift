@@ -91,17 +91,53 @@ extension EditingView {
                     switch clip.type {
                     case .video, .audio:
                         let asset = AVAsset(url: clipURL)
-                        // Android trims [startClipTrim, startClipTrim + duration] from the source.
-                        let sourceRange = CMTimeRange(start: cm(clip.startClipTrim), duration: duration)
+                        // The source from startClipTrim on plays at the clip's speed (a curve when speed is keyframed) inside the clip's
+                        // window. Speed 1 is the old behaviour (Android trims [startClipTrim, startClipTrim + duration]); a clip that has
+                        // speed edits runs out of source when the trim says so (`sourceLimit`).
+                        let timeMap = clip.timeMap
+                        let atSpeed1 = timeMap.isIdentity
+                        let trimStart = Double(clip.startClipTrim)
+                        let windowSeconds = Double(clip.duration)
+                        let sourceLimit: Double? = (!atSpeed1 && clip.originalDuration > 0)
+                            ? Double(clip.originalDuration - clip.endClipTrim) : nil
+                        /// Source seconds the whole window uses (the clip's "length" in the pre/post-roll maths below).
+                        let sourceSpan = atSpeed1 ? windowSeconds
+                            : max(0, min(timeMap.sourceOffset(atLocal: windowSeconds), (sourceLimit ?? .infinity) - trimStart))
+                        let pieceScale: CMTimeScale = 24000
+                        
+                        /// Put the clip's footage into `track`: one scaled edit for a constant speed, short scaled pieces for a curve.
+                        func insertFootage(of source: AVAssetTrack, into track: AVMutableCompositionTrack) -> Bool {
+                            let cap = min(source.timeRange.end.seconds, sourceLimit ?? .infinity)
+                            var inserted = false
+                            for piece in timeMap.pieces(duration: windowSeconds) {
+                                let s0 = trimStart + piece.s0
+                                let s1 = min(trimStart + piece.s1, cap)
+                                guard s1 - s0 > 0.0005 else { break }
+                                let ratio = piece.s1 > piece.s0 ? (piece.b - piece.a) / (piece.s1 - piece.s0) : 1
+                                let at = CMTime(seconds: Double(clip.startTime) + piece.a, preferredTimescale: pieceScale)
+                                let range = CMTimeRange(start: CMTime(seconds: s0, preferredTimescale: pieceScale),
+                                                        duration: CMTime(seconds: s1 - s0, preferredTimescale: pieceScale))
+                                guard (try? track.insertTimeRange(range, of: source, at: at)) != nil else { return inserted }
+                                inserted = true
+                                let timelineLength = (s1 - s0) * ratio
+                                if abs(timelineLength - (s1 - s0)) > 0.0005 {
+                                    track.scaleTimeRange(CMTimeRange(start: at, duration: range.duration),
+                                                         toDuration: CMTime(seconds: timelineLength, preferredTimescale: pieceScale))
+                                }
+                                if s1 < trimStart + piece.s1 - 0.0005 { break }     // the source ran out inside this piece
+                            }
+                            return inserted
+                        }
                         
                         if clip.type == .video, let sourceTrack = asset.tracks(withMediaType: .video).first {
                             // Footage around the trimmed range, for the blend (pre-roll / post-roll).
-                            let trim = Double(clip.startClipTrim)
-                            let length = Double(clip.duration)
+                            let trim = trimStart
+                            let length = sourceSpan
                             let sourceEnd = max(sourceTrack.timeRange.end.seconds, 0)
-                            let preReal = min(preRoll, max(0, trim))
+                            // Footage around the clip is real only at speed 1; a clip with a speed edit blends over held frames.
+                            let preReal = atSpeed1 ? min(preRoll, max(0, trim)) : 0
                             let preHold = max(0, preRoll - preReal)
-                            let postReal = min(postRoll, max(0, sourceEnd - (trim + length)))
+                            let postReal = atSpeed1 ? min(postRoll, max(0, sourceEnd - (trim + length))) : 0
                             let postHold = max(0, postRoll - postReal)
                             
                             let firstNeeded = cm(clip.startTime - Float(preRoll))
@@ -126,18 +162,7 @@ extension EditingView {
                                                                     at: cm(clip.startTime - Float(preReal)))
                                 }
                                 
-                                if (try? target.insertTimeRange(sourceRange, of: sourceTrack, at: start)) != nil {
-                                // Speed: Android does setpts=PTS/speed inside the fixed [start, start+duration]
-                                // window — the source range keeps its length, it just plays faster/slower.
-                                let speed = Double(max(0.1, clip.videoProperties.valueSpeed))
-                                if abs(speed - 1) > 0.001 {
-                                    target.scaleTimeRange(window, toDuration: CMTime(seconds: Double(clip.duration) / speed, preferredTimescale: scale))
-                                    // Slower than 1x would spill past the window into the next clip; trim the overflow.
-                                    let scaledEnd = CMTimeAdd(start, CMTime(seconds: Double(clip.duration) / speed, preferredTimescale: scale))
-                                    if CMTimeCompare(scaledEnd, window.end) > 0 {
-                                        target.removeTimeRange(CMTimeRange(start: window.end, end: scaledEnd))
-                                    }
-                                }
+                                if insertFootage(of: sourceTrack, into: target) {
                                     let layer = snapshot(.video(trackID: target.trackID,
                                                                 preferredTransform: sourceTrack.preferredTransform))
                                     layers.append((layer, shown, drawOrder))
@@ -162,12 +187,12 @@ extension EditingView {
                                 compositionAudioTrack = composition.addMutableTrack(withMediaType: .audio,
                                                                                     preferredTrackID: kCMPersistentTrackID_Invalid)
                             }
-                            try? compositionAudioTrack?.insertTimeRange(sourceRange, of: audioSource, at: start)
+                            if let audioTrack = compositionAudioTrack { _ = insertFootage(of: audioSource, into: audioTrack) }
                             // Same clips, same condition as the composition's audio: what scrubbing
                             // plays is exactly what playback would.
                             scrubSources.append(ScrubSource(url: clipURL, startTime: Double(clip.startTime),
                                                             startTrim: Double(clip.startClipTrim),
-                                                            duration: Double(clip.duration)))
+                                                            duration: Double(clip.duration), timeMap: clip.timeMap))
                         }
                         
                     case .image:

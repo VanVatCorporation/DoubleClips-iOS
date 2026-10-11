@@ -238,6 +238,7 @@ final class TimelineExporter: ObservableObject {
                 ]
                 let output = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: pcm)
                 output.alwaysCopiesSampleData = false
+                output.audioTimePitchAlgorithm = .spectral     // audio of a sped-up / slowed clip keeps its pitch
                 if reader.canAdd(output) {
                     reader.add(output)
                     audioOutput = output
