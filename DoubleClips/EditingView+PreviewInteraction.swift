@@ -350,11 +350,9 @@ extension EditingView {
                         onBegin: { point, twoFinger in
                             // Mask editing: the gesture belongs to the mask of the selected clip.
                             if maskEdit.isEditing,
-                               let selectedID = selectedClipID,
-                               let clip = visualClips().first(where: { $0.id == selectedID && $0.isActive(at: playhead) }),
+                               let clip = maskTarget(),
                                clip.mask != nil,
-                               let quad = clip.previewQuad(at: playhead, canvas: canvas, stretchToFull: settings.isStretchToFull,
-                                                           live: LiveOverrides.shared.state(for: clip.id)),
+                               let quad = maskQuad(clip, canvas: canvas),
                                let frame = MaskFrame(quad: quad) {
                                 maskSession.begin(clip: clip, playhead: playhead, frameRate: settings.frameRate, frame: frame,
                                                   canvasPoint: CGPoint(x: (point.x - origin.x) / fit, y: (point.y - origin.y) / fit),
@@ -438,16 +436,31 @@ extension EditingView {
         
         // MARK: Helpers
         
+        /// The selected clip when it can carry a mask and is on screen at the playhead: a picture clip or an effect clip.
+        private func maskTarget() -> Clip? {
+            guard let id = selectedClipID else { return nil }
+            return timeline.tracks.flatMap { $0.clips }.first {
+                $0.id == id && ($0.isVisualClip || $0.type == .effect) && $0.isActive(at: playhead)
+            }
+        }
+        
+        /// The box the mask lives in, in canvas pixels: the clip's quad, or the whole canvas for an effect clip.
+        private func maskQuad(_ clip: Clip, canvas: CGSize) -> [CGPoint]? {
+            if clip.type == .effect {
+                return [CGPoint(x: 0, y: 0), CGPoint(x: canvas.width, y: 0),
+                        CGPoint(x: canvas.width, y: canvas.height), CGPoint(x: 0, y: canvas.height)]
+            }
+            return clip.previewQuad(at: playhead, canvas: canvas, stretchToFull: settings.isStretchToFull,
+                                    live: LiveOverrides.shared.state(for: clip.id))
+        }
+        
         /// The selected clip's mask outline + handles (live while a mask gesture is running), with a Done pill.
         @ViewBuilder
         private func maskOverlay(canvas: CGSize, fit: CGFloat, origin: CGPoint) -> some View {
             let _ = maskSession.tick       // redraw while a mask gesture is running
-            if let id = selectedClipID,
-               let clip = visualClips().first(where: { $0.id == id }),
-               clip.isActive(at: playhead),
-               let mask = clip.resolvedMask(at: playhead, live: LiveOverrides.shared.state(for: id)),
-               let quad = clip.previewQuad(at: playhead, canvas: canvas, stretchToFull: settings.isStretchToFull,
-                                           live: LiveOverrides.shared.state(for: id)),
+            if let clip = maskTarget(),
+               let mask = clip.resolvedMask(at: playhead, live: LiveOverrides.shared.state(for: clip.id)),
+               let quad = maskQuad(clip, canvas: canvas),
                let frame = MaskFrame(quad: quad) {
                 let pts = quad.map { CGPoint(x: origin.x + $0.x * fit, y: origin.y + $0.y * fit) }
                 ZStack {

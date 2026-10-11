@@ -160,9 +160,16 @@ extension EditingView {
                                     ? layer.keyframes.value(for: .strength, base: layer.baseProperties,
                                                             clipStartTime: layer.startTime, at: time)
                                     : intensity
-                                frame = EffectRenderer.apply(style: style, intensity: CGFloat(strength), to: frame,
-                                                             progress: CGFloat(progress), time: time,
-                                                             elapsed: elapsed, canvas: canvasRect)
+                                let effected = EffectRenderer.apply(style: style, intensity: CGFloat(strength), to: frame,
+                                                                    progress: CGFloat(progress), time: time,
+                                                                    elapsed: elapsed, canvas: canvasRect)
+                                // A mask on an effect clip (canvas-sized box) limits where the effect shows.
+                                if let mask = Self.effectMask(layer, time: time),
+                                   let picture = Self.clipMaskImage(mask, size: canvas) {
+                                    frame = Self.masked(effected, over: frame, mask: picture).cropped(to: canvasRect)
+                                } else {
+                                    frame = effected
+                                }
                             } else if let image = render(layer, request: request, canvas: canvas,
                                                          time: time, stretchToFull: instruction.stretchToFull) {
                                 frame = image.composited(over: frame)

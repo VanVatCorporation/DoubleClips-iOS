@@ -994,7 +994,7 @@ struct EditingView: View {
     /// Toolbar "Mask": the mask panel (EditingView+Mask.swift) for the selected picture clip. The panel turns on
     /// canvas editing of the mask while it is open.
     private func openMaskEditor() {
-        guard let clip = selectedClip, clip.isVisualClip else { return }
+        guard let clip = selectedClip, clip.isVisualClip || clip.type == .effect else { return }
         engine.pause()
         MaskEditState.shared.refresh = { [weak engine] in engine?.refreshFrame() }
         withAnimation { activeOverlay = .mask }

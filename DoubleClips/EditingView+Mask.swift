@@ -891,6 +891,13 @@ extension EditingView.ClipCompositor {
         return masked(image, over: clear, mask: picture).cropped(to: box)
     }
     
+    /// The mask of an effect clip at `time` (its box is the whole canvas), with a gesture's live state and keyframes applied.
+    static func effectMask(_ layer: EditingView.RenderLayer, time: Float) -> EditingView.ClipMask? {
+        let live = EditingView.LiveOverrides.shared.state(for: layer.clipID)
+        guard let base = live?.mask ?? layer.mask else { return nil }
+        return (live?.maskKeys ?? layer.maskKeys).applied(to: base, atLocal: time - layer.startTime)
+    }
+    
     /// White where the clip shows, black where it doesn't; `size` pixels, origin (0, 0). Cached while it doesn't change.
     static func clipMaskImage(_ mask: EditingView.ClipMask, size: CGSize) -> CIImage? {
         guard size.width >= 1, size.height >= 1, size.width.isFinite, size.height.isFinite else { return nil }
