@@ -141,6 +141,8 @@ extension EditingView {
         /// iOS addition, set only in a PUBLISHED template (TemplateGrouping): replaceable clips that share one source carry the
         /// same id, so "Use template" can ask for that media once. nil = the clip stands alone. Never set in a project.
         @Published var templateGroup: String?
+        /// iOS addition (EditingView+Blend.swift): how the clip mixes with what is drawn below it.
+        @Published var blendMode: ClipBlendMode = .normal
         
         enum CodingKeys: String, CodingKey {
             case type
@@ -176,6 +178,7 @@ extension EditingView {
             case mask
             case maskKeys
             case templateGroup
+            case blendMode
         }
         
         init(clipName: String, startTime: Float, duration: Float, trackIndex: Int, type: ClipType, isClipHasAudio: Bool, width: Int, height: Int) {
@@ -238,6 +241,7 @@ extension EditingView {
             self.mask = try? container.decodeIfPresent(ClipMask.self, forKey: .mask)
             self.maskKeys = (try? container.decodeIfPresent([MaskKeyframe].self, forKey: .maskKeys)) ?? []
             self.templateGroup = (try? container.decodeIfPresent(String.self, forKey: .templateGroup)) ?? nil
+            self.blendMode = (try? container.decodeIfPresent(ClipBlendMode.self, forKey: .blendMode)) ?? .normal
         }
         
         func encode(to encoder: Encoder) throws {
@@ -275,6 +279,7 @@ extension EditingView {
             try container.encodeIfPresent(mask, forKey: .mask)
             if !maskKeys.isEmpty { try container.encode(maskKeys, forKey: .maskKeys) }
             try container.encodeIfPresent(templateGroup, forKey: .templateGroup)
+            if blendMode != .normal { try container.encode(blendMode, forKey: .blendMode) }
         }
     }
     

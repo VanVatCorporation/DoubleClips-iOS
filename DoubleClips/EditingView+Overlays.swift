@@ -8,6 +8,7 @@ extension EditingView {
         case textEdit
         case effectEdit
         case mask
+        case blend
         case projectFiles
         case transition
     }
@@ -51,6 +52,8 @@ extension EditingView {
                                 TextClipEditor(clip: clip, commandManager: commandManager, projectPath: projectPath, onChanged: onChanged)
                             case .mask:
                                 MaskPanel(clip: clip, commandManager: commandManager, playhead: playhead, frameRate: frameRate, onChanged: onChanged)
+                            case .blend:
+                                BlendPanel(clip: clip, commandManager: commandManager, onChanged: onChanged)
                             case .effectEdit:
                                 EffectClipEditor(clip: clip, commandManager: commandManager,
                                                  playhead: playhead, frameRate: frameRate, onChanged: onChanged)
@@ -77,6 +80,7 @@ extension EditingView {
             case .textEdit: return "Edit Text"
             case .effectEdit: return "Effect"
             case .mask: return "Mask"
+            case .blend: return "Blend"
             case .projectFiles: return "Project Files"
             case .transition: return "Transition"
             }

@@ -60,6 +60,7 @@ extension EditingView {
         /// iOS addition: clip mask (EditingView+Mask.swift), applied in the clip's own box.
         var mask: ClipMask?
         var maskKeys: [MaskKeyframe] = []
+        var blendMode: ClipBlendMode = .normal
     }
     
     /// A transition between two clips of one track (EditingView+TransitionPlan.swift): both sides are
@@ -148,6 +149,12 @@ extension EditingView {
                     let time = Float(request.compositionTime.seconds)
                     
                     var frame = CIImage(color: .black).cropped(to: canvasRect)
+                    // A blend mode needs something drawn below to mix with; until a picture is on the canvas the first one goes on as it is.
+                    var hasBackdrop = false
+                    func put(_ picture: CIImage, mode: ClipBlendMode) {
+                        frame = Self.compose(picture, over: frame, mode: mode, canvas: canvasRect, hasBackdrop: hasBackdrop)
+                        hasBackdrop = true
+                    }
                     for entry in instruction.entries {
                         switch entry {
                         case .layer(let layer):
@@ -172,7 +179,7 @@ extension EditingView {
                                 }
                             } else if let image = render(layer, request: request, canvas: canvas,
                                                          time: time, stretchToFull: instruction.stretchToFull) {
-                                frame = image.composited(over: frame)
+                                put(image, mode: layer.blendMode)
                             }
                         case .transition(let transition):
                             // The outgoing clip's out animation runs through the transition's window.
@@ -182,6 +189,8 @@ extension EditingView {
                             }
                             let progress = transition.duration > 0
                                 ? CGFloat(min(max((time - transition.start) / transition.duration, 0), 1)) : 1
+                            // The clip that is more on screen sets the blend mode of the transition's picture.
+                            let transitionMode = progress < 0.5 ? outgoing.blendMode : transition.to.blendMode
                             
                             if let style = TransitionStyleLoader.get(transition.style), let mask = style.mask {
                                 // Data-driven style in mode "mask": both clips for the whole window, B revealed through the mask.
@@ -195,7 +204,7 @@ extension EditingView {
                                     let clear = CIImage(color: .clear).cropped(to: canvasRect)
                                     let picture = EditingView.ClipCompositor.masked(b ?? clear, over: a ?? clear,
                                                                                     mask: EditingView.ClipCompositor.transitionMask(mask, progress: CGFloat(progress), canvas: canvasRect))
-                                    frame = picture.composited(over: frame)
+                                    put(picture, mode: transitionMode)
                                 }
                             } else if let style = TransitionStyleLoader.get(transition.style), style.layers {
                                 // Data-driven style in mode "layers" (slides, cross fades): BOTH clips are drawn for the whole
@@ -207,7 +216,7 @@ extension EditingView {
                                                stretchToFull: instruction.stretchToFull,
                                                extraAnim: style.to.evaluate(Float(progress)))
                                 let picture: CIImage? = (a != nil && b != nil) ? b!.composited(over: a!) : (b ?? a)
-                                if let picture { frame = picture.composited(over: frame) }
+                                if let picture { put(picture, mode: transitionMode) }
                             } else if let style = TransitionStyleLoader.get(transition.style) {
                                 // Data-driven style (animations/transitions/*.json): ONE of the two clips is drawn,
                                 // A before the style's cut and B after it, each with its side's channels merged into
@@ -219,7 +228,7 @@ extension EditingView {
                                              stretchToFull: instruction.stretchToFull, extraAnim: extra)
                                     : render(transition.to, request: request, canvas: canvas, time: time,
                                              stretchToFull: instruction.stretchToFull, extraAnim: extra)
-                                if let picture { frame = picture.composited(over: frame) }
+                                if let picture { put(picture, mode: transitionMode) }
                             } else {
                                 // Both clips as full-canvas pictures at this very time, then the blend
                                 // (Android: two offscreen layers + TransitionBlendShader).
@@ -229,7 +238,7 @@ extension EditingView {
                                                 time: time, stretchToFull: instruction.stretchToFull)
                                 if let blended = Self.blend(from, to, style: transition.style,
                                                             progress: progress, canvas: canvasRect) {
-                                    frame = blended.composited(over: frame)
+                                    put(blended, mode: transitionMode)
                                 }
                             }
                         }
