@@ -38,6 +38,12 @@ struct TemplateClipSlot: Identifiable {
     var endTrim: Double = 0
     /// How long the template keeps this clip on screen (seconds; 0 = unknown, an old template).
     var targetDuration: Double = 0
+    /// Id of the group the template put this clip in (clips that share one source), nil = it stands alone.
+    var group: String?
+    /// The person gave this clip its own media after the group was filled: the group no longer sets it.
+    var detached = false
+    /// Where the template's own clip starts inside its source (seconds): where a grouped clip starts by default.
+    var sourceTrim: Double = 0
     
     var isFilled: Bool { kind != .empty }
     
@@ -62,8 +68,37 @@ private struct PickedMovie: Transferable {
     }
 }
 
+/// The dot colours that mark clips sharing one media (CapCut's coloured dots).
+enum TemplateGroupPalette {
+    static let colors: [Color] = [
+        Color(red: 0.96, green: 0.55, blue: 0.20),   // orange
+        Color(red: 0.70, green: 0.45, blue: 1.00),   // purple
+        Color(red: 0.25, green: 0.80, blue: 0.40),   // green
+        Color(red: 0.20, green: 0.60, blue: 1.00),   // blue
+        Color(red: 1.00, green: 0.25, blue: 0.40),   // red
+        Color(red: 0.45, green: 0.50, blue: 0.95),   // indigo
+        Color(red: 0.95, green: 0.80, blue: 0.20),   // yellow
+        Color(red: 0.20, green: 0.80, blue: 0.80)    // teal
+    ]
+    static func color(_ index: Int) -> Color { colors[((index % colors.count) + colors.count) % colors.count] }
+}
+
+/// One tile of the first stage: a group of clips that share a source (they take one media), or a clip on its own.
+struct TemplateSlotEntry: Identifiable {
+    let id: String
+    /// Slot indices, in time order.
+    let members: [Int]
+    /// Position of the group among the groups (picks the dot colour); nil for a clip on its own.
+    let colorIndex: Int?
+}
+
 @MainActor
 final class TemplateExportModel: ObservableObject {
+    
+    /// First stage = one tile per group, second = every clip (CapCut's two steps). Templates without groups only have the second.
+    enum Stage { case groups, clips }
+    @Published var stage: Stage = .clips
+    
     @Published var slots: [TemplateClipSlot]
     @Published var settings: EditingView.VideoSettings = .androidDefault
     @Published var isImporting = false
@@ -96,6 +131,11 @@ final class TemplateExportModel: ObservableObject {
         } else {
             for i in slots.indices { slots[i].targetDuration = info.slots[i].duration }
         }
+        for i in slots.indices where info.slots.indices.contains(i) {
+            slots[i].group = info.slots[i].group
+            slots[i].sourceTrim = info.slots[i].sourceTrim
+        }
+        if !slots.contains(where: { $0.isFilled }) { stage = hasGroups ? .groups : .clips }
         if let canvas = info.canvas { settings = canvas }
         log("Template timeline loaded: \(info.slots.count) clip slot(s), \(String(format: "%.1f", info.duration))s.")
     }
@@ -126,9 +166,46 @@ final class TemplateExportModel: ObservableObject {
         logText = text
     }
     
+    // MARK: Groups
+    
+    var hasGroups: Bool { slots.contains { $0.group != nil } }
+    
+    /// The first stage's tiles: clips that share a group are one tile (placed where the group's first clip is), every
+    /// clip on its own is a tile.
+    var entries: [TemplateSlotEntry] {
+        var result: [TemplateSlotEntry] = []
+        var positions: [String: Int] = [:]
+        var colors: [String: Int] = [:]
+        for (index, slot) in slots.enumerated() {
+            guard let group = slot.group else {
+                result.append(TemplateSlotEntry(id: "slot-\(index)", members: [index], colorIndex: nil))
+                continue
+            }
+            if let at = positions[group] {
+                let old = result[at]
+                result[at] = TemplateSlotEntry(id: old.id, members: old.members + [index], colorIndex: old.colorIndex)
+            } else {
+                positions[group] = result.count
+                colors[group] = colors.count
+                result.append(TemplateSlotEntry(id: "group-\(group)", members: [index], colorIndex: colors[group]))
+            }
+        }
+        return result
+    }
+    
+    /// The dot colour index of a clip's group (the same numbering the first stage uses), nil for a clip on its own.
+    func colorIndex(ofSlot index: Int) -> Int? {
+        guard slots.indices.contains(index), slots[index].group != nil else { return nil }
+        return entries.first { $0.members.contains(index) }?.colorIndex
+    }
+    
+    /// The first stage is complete when every tile has media.
+    var groupsFilled: Bool { !slots.isEmpty && slots.allSatisfy { $0.isFilled } }
+    
     // MARK: Picking
     
-    /// Fills slot `start`, `start + 1`, … with the picked items; leftovers are discarded (Android).
+    /// Second stage: fills slot `start`, `start + 1`, … with the picked items; leftovers are discarded (Android).
+    /// A clip of a group that is filled this way leaves its group (the group no longer sets it).
     func fill(from start: Int, with items: [PhotosPickerItem]) async {
         guard !items.isEmpty else { return }
         isImporting = true
@@ -141,29 +218,96 @@ final class TemplateExportModel: ObservableObject {
                 break
             }
             do {
-                try await load(item, into: index)
+                try await load(item, into: index, detach: true)
                 index += 1
             } catch {
                 log("Clip \(index + 1): couldn't load that item (\(error.localizedDescription)).")
             }
         }
+        pruneTempFiles()
     }
     
-    private func load(_ item: PhotosPickerItem, into index: Int) async throws {
+    /// First stage: item k goes to tile `start + k`. A group's media goes to every clip of the group that hasn't been
+    /// given its own (when every clip of it has, the group takes them all back).
+    func fillEntries(from start: Int, with items: [PhotosPickerItem]) async {
+        let list = entries
+        guard !items.isEmpty, list.indices.contains(start) else { return }
+        isImporting = true
+        defer { isImporting = false }
+        
+        var tile = start
+        for item in items {
+            guard tile < list.count else {
+                log("Discarded \(items.count - (tile - start)) extra item(s): no more tiles.")
+                break
+            }
+            var members = list[tile].members
+            if members.allSatisfy({ slots[$0].detached }) {
+                for m in members { slots[m].detached = false }
+            }
+            members = members.filter { !slots[$0].detached }
+            do {
+                try await load(item, into: members[0], detach: false)
+                spread(from: members[0], to: members)
+                if members.count > 1 { log("Tile \(tile + 1) ← the same media for \(members.count) clips.") }
+                tile += 1
+            } catch {
+                log("Tile \(tile + 1): couldn't load that item (\(error.localizedDescription)).")
+            }
+        }
+        pruneTempFiles()
+    }
+    
+    /// Gives the other clips of a group the media `source` holds (a file is shared, not copied), each with its own length.
+    private func spread(from source: Int, to members: [Int]) {
+        let origin = slots[source]
+        for m in members where m != source {
+            var slot = TemplateClipSlot()
+            slot.kind = origin.kind
+            slot.path = origin.path
+            slot.fileName = origin.fileName
+            slot.typeDescription = origin.typeDescription
+            slot.thumbnail = origin.thumbnail
+            slot.mediaDuration = origin.mediaDuration
+            slot.targetDuration = slots[m].targetDuration
+            slot.group = slots[m].group
+            slot.sourceTrim = slots[m].sourceTrim
+            applyDefaultTrim(&slot)
+            slots[m] = slot
+        }
+    }
+    
+    /// A video starts at the template clip's own start inside its source when it is long enough (so the pieces of one
+    /// split video stay different pieces), else as early as it can; it runs as long as the template keeps the clip.
+    private func applyDefaultTrim(_ slot: inout TemplateClipSlot) {
+        guard slot.kind == .video else { return }
+        let media = slot.mediaDuration
+        let want = slot.targetDuration > 0 ? min(media, slot.targetDuration) : media
+        let start = slot.group != nil ? min(max(0, slot.sourceTrim), max(0, media - want)) : 0
+        slot.startTrim = start
+        slot.endTrim = min(media, start + want)
+    }
+    
+    private func load(_ item: PhotosPickerItem, into index: Int, detach: Bool) async throws {
         let directory = Self.tempDirectory
         IOHelper.createEmptyDirectories(directory)
-        removeFiles(forSlot: index)
+        let unique = String(UUID().uuidString.prefix(6))
         
         let isVideo = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
         var slot = TemplateClipSlot()
-        slot.targetDuration = slots.indices.contains(index) ? slots[index].targetDuration : 0
+        if slots.indices.contains(index) {
+            slot.targetDuration = slots[index].targetDuration
+            slot.group = slots[index].group
+            slot.sourceTrim = slots[index].sourceTrim
+        }
+        slot.detached = detach && slot.group != nil
         
         if isVideo {
             guard let movie = try await item.loadTransferable(type: PickedMovie.self) else {
                 throw ExportError("The video could not be read.")
             }
             let ext = movie.url.pathExtension.isEmpty ? "mov" : movie.url.pathExtension.lowercased()
-            let destination = URL(fileURLWithPath: IOHelper.combinePath(directory, "\(index).\(ext)"))
+            let destination = URL(fileURLWithPath: IOHelper.combinePath(directory, "\(index)-\(unique).\(ext)"))
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: movie.url, to: destination)
             
@@ -174,16 +318,15 @@ final class TemplateExportModel: ObservableObject {
             slot.fileName = destination.lastPathComponent
             slot.typeDescription = UTType(filenameExtension: ext)?.localizedDescription ?? ext.uppercased()
             slot.mediaDuration = duration.isFinite ? max(0, duration) : 0
-            slot.startTrim = 0
             // The template keeps this clip on screen for `targetDuration`: start with that much of the video.
-            slot.endTrim = slot.targetDuration > 0 ? min(slot.mediaDuration, slot.targetDuration) : slot.mediaDuration
+            applyDefaultTrim(&slot)
             slot.thumbnail = await Self.videoThumbnail(asset)
         } else {
             guard let data = try await item.loadTransferable(type: Data.self) else {
                 throw ExportError("The image could not be read.")
             }
             let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "png"
-            let destination = URL(fileURLWithPath: IOHelper.combinePath(directory, "\(index).\(ext)"))
+            let destination = URL(fileURLWithPath: IOHelper.combinePath(directory, "\(index)-\(unique).\(ext)"))
             try data.write(to: destination, options: .atomic)
             
             slot.kind = .image
@@ -206,11 +349,26 @@ final class TemplateExportModel: ObservableObject {
     
     func clear(_ index: Int) {
         guard slots.indices.contains(index) else { return }
-        removeFiles(forSlot: index)
         var empty = TemplateClipSlot()
         empty.targetDuration = slots[index].targetDuration
+        empty.group = slots[index].group
+        empty.sourceTrim = slots[index].sourceTrim
         slots[index] = empty
+        pruneTempFiles()
         log("Clip \(index + 1) cleared.")
+    }
+    
+    /// Clears a first-stage tile: every clip of the group that the group sets.
+    func clearEntry(_ entry: TemplateSlotEntry) {
+        for m in entry.members where !slots[m].detached || entry.members.count == 1 {
+            var empty = TemplateClipSlot()
+            empty.targetDuration = slots[m].targetDuration
+            empty.group = slots[m].group
+            empty.sourceTrim = slots[m].sourceTrim
+            slots[m] = empty
+        }
+        pruneTempFiles()
+        log("Tile cleared.")
     }
     
     func setTrim(_ index: Int, start: Double, end: Double) {
@@ -220,10 +378,10 @@ final class TemplateExportModel: ObservableObject {
         log(String(format: "Clip %d trim: %.1fs – %.1fs", index + 1, start, end))
     }
     
-    private func removeFiles(forSlot index: Int) {
-        let directory = Self.tempDirectory
-        for url in IOHelper.listFiles(directory, options: .files)
-        where url.deletingPathExtension().lastPathComponent == String(index) {
+    /// Media files are shared between the clips of a group, so a file goes only when no clip uses it any more.
+    private func pruneTempFiles() {
+        let used = Set(slots.filter { !$0.path.isEmpty }.map { URL(fileURLWithPath: $0.path).lastPathComponent })
+        for url in IOHelper.listFiles(Self.tempDirectory, options: .files) where !used.contains(url.lastPathComponent) {
             _ = IOHelper.deleteFile(url.path)
         }
     }
@@ -273,6 +431,9 @@ struct TemplateExportView: View {
     
     private struct SlotRef: Identifiable { let id: Int }
     
+    /// How many tiles the picker can fill from the tapped one on: the first stage's tiles, or every clip.
+    private var pickerLimit: Int { model.stage == .groups ? model.entries.count : model.slots.count }
+    
     init(template: TemplateData) {
         self.template = template
         _model = StateObject(wrappedValue: TemplateExportModel(clipCount: template.templateTotalClip))
@@ -284,11 +445,14 @@ struct TemplateExportView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    clipsSection
+                    if model.stage == .groups { groupsSection } else { clipsSection }
                     logSection
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 16)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if model.stage == .groups { groupsBar }
             }
         }
         .background(Color(uiColor: .systemBackground))
@@ -301,13 +465,16 @@ struct TemplateExportView: View {
         }
         .photosPicker(isPresented: $pickerPresented,
                       selection: $pickerSelection,
-                      maxSelectionCount: max(1, model.slots.count - (pickingIndex ?? 0)),
+                      maxSelectionCount: max(1, pickerLimit - (pickingIndex ?? 0)),
                       matching: .any(of: [.images, .videos]))
         .onChange(of: pickerSelection) { items in
             guard !items.isEmpty, let start = pickingIndex else { return }
             pickerSelection = []
             pickingIndex = nil
-            Task { await model.fill(from: start, with: items) }
+            Task {
+                if model.stage == .groups { await model.fillEntries(from: start, with: items) }
+                else { await model.fill(from: start, with: items) }
+            }
         }
         .sheet(isPresented: $showSettings) {
             ExportSettingsSheet(initial: model.settings) { edited in
@@ -428,15 +595,40 @@ struct TemplateExportView: View {
                 .background(Color.mdPrimary)
                 .cornerRadius(8)
             }
-            .disabled(model.isPreparing)
+            .disabled(model.isPreparing || model.stage == .groups)
+            .opacity(model.stage == .groups ? 0 : 1)
             .padding(.trailing, 12)
         }
         .foregroundColor(.primary)
         .frame(height: 50)
     }
     
-    // MARK: Clips section (android:id="clipsSection")
+    // MARK: Clips sections (android:id="clipsSection")
     
+    /// Tiles in a strip (a template without groups, as before) or in a grid (a grouped one: 50 clips in one strip is no way to choose).
+    @ViewBuilder
+    private func tiles<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        if model.hasGroups {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8, alignment: .top)],
+                      alignment: .leading, spacing: 10) { content() }
+                .padding(12)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 8) { content() }.padding(12)
+            }
+        }
+    }
+    
+    private var importingRow: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+            Text("Importing…").font(.footnote).foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+    }
+    
+    /// Second stage (and the only one of a template without groups): every clip.
     private var clipsSection: some View {
         ExportSection(title: "Clips") {
             if model.slots.isEmpty {
@@ -446,28 +638,84 @@ struct TemplateExportView: View {
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(model.slots.enumerated()), id: \.element.id) { index, slot in
-                            clipTile(index: index, slot: slot)
+                if model.hasGroups {
+                    HStack(spacing: 10) {
+                        Button {
+                            withAnimation { model.stage = .groups }
+                        } label: {
+                            Label("Back to groups", systemImage: "square.grid.2x2")
+                                .font(.system(size: 13, weight: .semibold))
                         }
+                        Spacer()
+                        Text("Tap a clip to give it other media. Same dot = same media.")
+                            .font(.system(size: 11)).foregroundColor(.secondary)
+                            .multilineTextAlignment(.trailing)
                     }
-                    .padding(12)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
                 }
-                if model.isImporting {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                        Text("Importing…").font(.footnote).foregroundColor(.secondary)
+                tiles {
+                    ForEach(Array(model.slots.enumerated()), id: \.element.id) { index, slot in
+                        clipTile(index: index, slot: slot)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
                 }
+                if model.isImporting { importingRow }
             }
         }
     }
     
-    /// cpn_clip_replacement_element.xml: 100dp tile, centre-cropped preview, big index number.
-    private func clipTile(index: Int, slot: TemplateClipSlot) -> some View {
+    /// First stage: one tile per group of clips that share a source, one per clip on its own.
+    private var groupsSection: some View {
+        ExportSection(title: "Choose media") {
+            if model.slots.isEmpty {
+                Text("This template has no replaceable clips.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                let entries = model.entries
+                tiles {
+                    ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                        entryTile(index: index, entry: entry)
+                    }
+                }
+                if model.isImporting { importingRow }
+            }
+        }
+    }
+    
+    /// Under the first stage's tiles: what the dots mean, and Next (once every tile has media).
+    private var groupsBar: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Circle().fill(TemplateGroupPalette.color(4)).frame(width: 8, height: 8)
+                Text("Clips marked with the same coloured dot use the same media. You can change single clips on the next step.")
+                    .font(.system(size: 12)).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            Button {
+                withAnimation { model.stage = .clips }
+            } label: {
+                Text("Next")
+                    .font(.system(size: 16, weight: .bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .foregroundColor(.white)
+                    .background(model.groupsFilled ? Color.mdPrimary : Color.gray.opacity(0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .disabled(!model.groupsFilled)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .background(Color(uiColor: .secondarySystemBackground).ignoresSafeArea(edges: .bottom))
+    }
+    
+    /// cpn_clip_replacement_element.xml: 100dp tile, centre-cropped preview, big index number. `badge`: how many clips share it.
+    private func tileFace(number: Int, slot: TemplateClipSlot, badge: Int? = nil) -> some View {
         ZStack {
             if let image = slot.thumbnail {
                 Image(uiImage: image)
@@ -483,7 +731,7 @@ struct TemplateExportView: View {
                     .foregroundColor(.secondary.opacity(0.6))
                     .offset(y: 22)
             }
-            Text("\(index + 1)")
+            Text("\(number)")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(slot.thumbnail == nil ? .primary : .white)
                 .shadow(radius: slot.thumbnail == nil ? 0 : 2)
@@ -492,6 +740,18 @@ struct TemplateExportView: View {
         .overlay(alignment: .bottomLeading) {
             if slot.targetDuration > 0 {
                 Text(String(format: "%.1fs", slot.targetDuration))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.black.opacity(0.55))
+                    .clipShape(Capsule())
+                    .padding(5)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if let badge, badge > 1 {
+                Text("×\(badge)")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 5)
@@ -512,20 +772,67 @@ struct TemplateExportView: View {
         }
         .cornerRadius(8)
         .contentShape(RoundedRectangle(cornerRadius: 8))
-        .onTapGesture {
-            pickingIndex = index
-            pickerSelection = []
-            pickerPresented = true
-        }
-        .contextMenu {
-            if slot.isFilled {
-                Button { propertiesRef = SlotRef(id: index) } label: {
-                    Label("Properties", systemImage: "slider.horizontal.3")
-                }
-                Button(role: .destructive) { deleteIndex = index } label: {
-                    Label("Delete", systemImage: "trash")
-                }
+    }
+    
+    /// The dot under a tile: its group's colour, hollow once the clip was given its own media. Clips on their own get
+    /// an empty row, so every tile lines up.
+    private func dotRow(colorIndex: Int?, hollow: Bool = false) -> some View {
+        HStack {
+            if let colorIndex {
+                let color = TemplateGroupPalette.color(colorIndex)
+                Circle()
+                    .fill(hollow ? Color.clear : color)
+                    .overlay(Circle().stroke(color, lineWidth: 1.5))
+                    .frame(width: 8, height: 8)
+            } else {
+                Color.clear.frame(width: 8, height: 8)
             }
+        }
+        .frame(height: 8)
+    }
+    
+    /// Second stage: one clip.
+    private func clipTile(index: Int, slot: TemplateClipSlot) -> some View {
+        VStack(spacing: 6) {
+            tileFace(number: index + 1, slot: slot)
+                .onTapGesture {
+                    pickingIndex = index
+                    pickerSelection = []
+                    pickerPresented = true
+                }
+                .contextMenu {
+                    if slot.isFilled {
+                        Button { propertiesRef = SlotRef(id: index) } label: {
+                            Label("Properties", systemImage: "slider.horizontal.3")
+                        }
+                        Button(role: .destructive) { deleteIndex = index } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+            dotRow(colorIndex: model.colorIndex(ofSlot: index), hollow: slot.detached)
+        }
+    }
+    
+    /// First stage: a group (or a clip on its own). It shows the media of its first clip that follows the group.
+    private func entryTile(index: Int, entry: TemplateSlotEntry) -> some View {
+        let shown = entry.members.first { !model.slots[$0].detached } ?? entry.members[0]
+        let slot = model.slots[shown]
+        return VStack(spacing: 6) {
+            tileFace(number: index + 1, slot: slot, badge: entry.members.count)
+                .onTapGesture {
+                    pickingIndex = index
+                    pickerSelection = []
+                    pickerPresented = true
+                }
+                .contextMenu {
+                    if slot.isFilled {
+                        Button(role: .destructive) { model.clearEntry(entry) } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+            dotRow(colorIndex: entry.colorIndex)
         }
     }
     

@@ -22,6 +22,8 @@ struct PostTemplateView: View {
     @State private var descriptionText = ""
     @State private var showLoginAlert = false
     @State private var templateId = ""
+    /// "Group the same clip": on by default, like CapCut's template maker.
+    @State private var groupSameClips = true
     @FocusState private var focused: Field?
     private enum Field { case title, description }
     
@@ -119,6 +121,8 @@ struct PostTemplateView: View {
                             .focused($focused, equals: .description)
                     }
                     Divider()
+                    groupSwitch
+                    Divider()
                     contentsSummary
                 }
                 .padding(16)
@@ -130,6 +134,33 @@ struct PostTemplateView: View {
                 bigButton("Upload template", filled: true) { startUpload() }
             }
             .padding(16)
+        }
+    }
+    
+    /// "Group the same clip": clips that use one source share a slot (and a coloured dot) when someone uses the template.
+    private var groupSwitch: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(isOn: Binding(
+                get: { groupSameClips && draft.groupCount > 0 },
+                set: { groupSameClips = $0 }
+            )) {
+                Text("Group the same clip").font(.system(size: 16, weight: .semibold))
+            }
+            .tint(Color.mdPrimary)
+            .disabled(draft.groupCount == 0)
+            
+            Group {
+                if draft.groupCount == 0 {
+                    Text("No clip in this template uses the same media as another, so there is nothing to group.")
+                } else if groupSameClips {
+                    Text("Clips that use the same media share one slot. People pick that media once, then can still change single clips. That makes \(draft.groupedSlotCount) slot\(draft.groupedSlotCount == 1 ? "" : "s") to fill first instead of \(draft.replaceableCount).")
+                } else {
+                    Text("Every clip is its own slot: \(draft.replaceableCount) to fill one by one.")
+                }
+            }
+            .font(.system(size: 12))
+            .foregroundColor(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
     
@@ -254,7 +285,7 @@ struct PostTemplateView: View {
             ("accountPassword", Constants.TEMPLATE_POST_PASSWORD_PLACEHOLDER),
             ("templateTitle", finalTitle),
             ("templateDescription", finalDescription),
-            ("templateTimelineJson", draft.timelineJSON),
+            ("templateTimelineJson", groupSameClips && draft.groupCount > 0 ? draft.groupedTimelineJSON : draft.timelineJSON),
             ("templateTotalClips", String(draft.replaceableCount))
         ]
         var files: [(field: String, file: PostFile)] = draft.contentFiles.map { ("videoFiles", $0) }

@@ -31,6 +31,13 @@ struct PostTemplateDraft: Identifiable {
     var previewImage: URL?
     var contentFiles: [PostFile]
     var timelineJSON: String
+    /// The same timeline with `templateGroup` ids on clips that share one source (see TemplateGrouping); equals
+    /// `timelineJSON` when no clip repeats a source.
+    var groupedTimelineJSON: String = ""
+    /// How many groups there are, and how many slots a person fills first when the template is grouped
+    /// (every group counts once, every clip that stands alone counts once).
+    var groupCount: Int = 0
+    var groupedSlotCount: Int = 0
     var replaceableCount: Int
     var lockedCount: Int
     var duration: Double
@@ -164,12 +171,28 @@ enum TemplatePackager {
             }
             exported = copy
         }
-        let document = TemplateDocument(
-            format: Constants.TEMPLATE_DOCUMENT_FORMAT,
-            settings: .init(videoWidth: settings.videoWidth, videoHeight: settings.videoHeight,
-                            frameRate: settings.frameRate, isStretchToFull: settings.isStretchToFull),
-            timeline: exported)
-        let json = String(decoding: try JSONEncoder().encode(document), as: UTF8.self)
+        func encodeDocument(_ timeline: EditingView.Timeline) throws -> String {
+            let document = TemplateDocument(
+                format: Constants.TEMPLATE_DOCUMENT_FORMAT,
+                settings: .init(videoWidth: settings.videoWidth, videoHeight: settings.videoHeight,
+                                frameRate: settings.frameRate, isStretchToFull: settings.isStretchToFull),
+                timeline: timeline)
+            return String(decoding: try JSONEncoder().encode(document), as: UTF8.self)
+        }
+        let json = try encodeDocument(exported)
+        
+        // The grouped variant ("Group the same clip" on the details screen): on another copy, so the plain one stays plain.
+        var groupedJSON = json
+        var groupCount = 0
+        var groupedClips = 0
+        do {
+            let copy = try JSONDecoder().decode(EditingView.Timeline.self, from: JSONEncoder().encode(exported))
+            groupCount = TemplateGrouping.assign(to: copy)
+            if groupCount > 0 {
+                groupedClips = copy.tracks.flatMap { $0.clips }.filter { $0.templateGroup != nil }.count
+                groupedJSON = try encodeDocument(copy)
+            }
+        }
         
         return PostTemplateDraft(
             defaultTitle: project.projectTitle,
@@ -177,6 +200,9 @@ enum TemplatePackager {
             previewImage: fm.fileExists(atPath: previewImage.path) ? previewImage : nil,
             contentFiles: files,
             timelineJSON: json,
+            groupedTimelineJSON: groupedJSON,
+            groupCount: groupCount,
+            groupedSlotCount: info.slots.count - groupedClips + groupCount,
             replaceableCount: info.slots.count,
             lockedCount: lockedCount,
             duration: Double(timeline.duration),

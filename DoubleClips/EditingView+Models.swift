@@ -138,6 +138,9 @@ extension EditingView {
         @Published var mask: ClipMask?
         /// Keyframes of the mask's parameters (EditingView+Mask.swift); empty = the mask is static.
         @Published var maskKeys: [MaskKeyframe] = []
+        /// iOS addition, set only in a PUBLISHED template (TemplateGrouping): replaceable clips that share one source carry the
+        /// same id, so "Use template" can ask for that media once. nil = the clip stands alone. Never set in a project.
+        @Published var templateGroup: String?
         
         enum CodingKeys: String, CodingKey {
             case type
@@ -172,6 +175,7 @@ extension EditingView {
             case comboAnimation
             case mask
             case maskKeys
+            case templateGroup
         }
         
         init(clipName: String, startTime: Float, duration: Float, trackIndex: Int, type: ClipType, isClipHasAudio: Bool, width: Int, height: Int) {
@@ -233,6 +237,7 @@ extension EditingView {
             // A mask that can't be read must never cost the clip.
             self.mask = try? container.decodeIfPresent(ClipMask.self, forKey: .mask)
             self.maskKeys = (try? container.decodeIfPresent([MaskKeyframe].self, forKey: .maskKeys)) ?? []
+            self.templateGroup = (try? container.decodeIfPresent(String.self, forKey: .templateGroup)) ?? nil
         }
         
         func encode(to encoder: Encoder) throws {
@@ -269,6 +274,7 @@ extension EditingView {
             try container.encode(comboAnimation, forKey: .comboAnimation)
             try container.encodeIfPresent(mask, forKey: .mask)
             if !maskKeys.isEmpty { try container.encode(maskKeys, forKey: .maskKeys) }
+            try container.encodeIfPresent(templateGroup, forKey: .templateGroup)
         }
     }
     

@@ -73,6 +73,10 @@ struct TemplateSlotInfo: Identifiable {
     let start: Double
     let duration: Double        // how long the template keeps this clip on screen
     let isImage: Bool           // the template's own clip was a still
+    /// Id the author's template gave the clips that share one source ("g1", "g2"...); nil = the clip stands alone.
+    var group: String? = nil
+    /// Where the template's own clip starts inside its source (seconds): where a grouped clip starts by default.
+    var sourceTrim: Double = 0
 }
 
 struct TemplateTimelineInfo {
@@ -133,7 +137,8 @@ struct TemplateTimelineInfo {
         for (i, c) in candidates.enumerated() {
             numbers[c.clip.id] = i + 1
             slots.append(TemplateSlotInfo(id: c.clip.id, number: i + 1, start: Double(c.clip.startTime),
-                                          duration: Double(c.clip.duration), isImage: c.clip.type == .image))
+                                          duration: Double(c.clip.duration), isImage: c.clip.type == .image,
+                                          group: c.clip.templateGroup, sourceTrim: Double(c.clip.startClipTrim)))
         }
         
         var clips: [TemplateStripClip] = []
@@ -252,5 +257,45 @@ enum TemplateTimelineLoader {
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
         try? data.write(to: cached, options: .atomic)
         return info
+    }
+}
+
+// MARK: - Grouping the same clip (CapCut's "same media" dots)
+
+enum TemplateGrouping {
+    
+    /// Gives the replaceable clips of a timeline that share one source (the same file, so the pieces of one split
+    /// video, or one photo used many times) a common `templateGroup` id: "g1", "g2"... in order of first appearance.
+    /// A clip whose source is used once stays alone. Run on a COPY of the timeline: the project is left untouched.
+    /// Returns how many groups were made.
+    @discardableResult
+    static func assign(to timeline: EditingView.Timeline) -> Int {
+        let tracks = timeline.tracks
+            .sorted { $0.timelineIndex < $1.timelineIndex }
+            .filter { !$0.clips.isEmpty }
+        // Same order as the slots (time, then top row first), so ids follow the numbering people see.
+        var list: [(clip: EditingView.Clip, row: Int)] = []
+        for (row, track) in tracks.enumerated() {
+            for clip in track.clips where TemplateClipRole.role(of: clip) == .replaceable {
+                list.append((clip, row))
+            }
+        }
+        list.sort { a, b in
+            a.clip.startTime != b.clip.startTime ? a.clip.startTime < b.clip.startTime : a.row < b.row
+        }
+        func key(_ clip: EditingView.Clip) -> String {
+            (clip.type == .image ? "image|" : "video|") + clip.clipName
+        }
+        var counts: [String: Int] = [:]
+        for item in list { counts[key(item.clip), default: 0] += 1 }
+        var ids: [String: String] = [:]
+        var next = 1
+        for item in list {
+            let k = key(item.clip)
+            guard counts[k, default: 0] > 1 else { item.clip.templateGroup = nil; continue }
+            if ids[k] == nil { ids[k] = "g\(next)"; next += 1 }
+            item.clip.templateGroup = ids[k]
+        }
+        return ids.count
     }
 }
