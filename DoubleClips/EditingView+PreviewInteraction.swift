@@ -351,10 +351,11 @@ extension EditingView {
                             // Mask editing: the gesture belongs to the mask of the selected clip.
                             if maskEdit.isEditing,
                                let clip = maskTarget(),
-                               clip.mask != nil,
+                               !clip.masks.isEmpty,
                                let quad = maskQuad(clip, canvas: canvas),
                                let frame = MaskFrame(quad: quad) {
-                                maskSession.begin(clip: clip, playhead: playhead, frameRate: settings.frameRate, frame: frame,
+                                maskSession.begin(clip: clip, index: min(maskEdit.selected, clip.masks.count - 1),
+                                                  playhead: playhead, frameRate: settings.frameRate, frame: frame,
                                                   canvasPoint: CGPoint(x: (point.x - origin.x) / fit, y: (point.y - origin.y) / fit),
                                                   fit: fit)
                                 return
@@ -459,7 +460,8 @@ extension EditingView {
         private func maskOverlay(canvas: CGSize, fit: CGFloat, origin: CGPoint) -> some View {
             let _ = maskSession.tick       // redraw while a mask gesture is running
             if let clip = maskTarget(),
-               let mask = clip.resolvedMask(at: playhead, live: LiveOverrides.shared.state(for: clip.id)),
+               case let masks = clip.resolvedMasks(at: playhead, live: LiveOverrides.shared.state(for: clip.id)),
+               !masks.isEmpty,
                let quad = maskQuad(clip, canvas: canvas),
                let frame = MaskFrame(quad: quad) {
                 let pts = quad.map { CGPoint(x: origin.x + $0.x * fit, y: origin.y + $0.y * fit) }
@@ -471,7 +473,7 @@ extension EditingView {
                     }
                     .stroke(Color.white.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
                     
-                    MaskOverlay(mask: mask, frame: frame, fit: fit, origin: origin)
+                    MaskOverlay(masks: masks, selected: maskEdit.selected, frame: frame, fit: fit, origin: origin)
                 }
             }
         }

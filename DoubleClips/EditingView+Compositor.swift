@@ -58,8 +58,7 @@ extension EditingView {
         }
         var outWindow: OutWindow?
         /// iOS addition: clip mask (EditingView+Mask.swift), applied in the clip's own box.
-        var mask: ClipMask?
-        var maskKeys: [MaskKeyframe] = []
+        var masks: [ClipMask] = []
         var blendMode: ClipBlendMode = .normal
     }
     
@@ -171,8 +170,8 @@ extension EditingView {
                                                                     progress: CGFloat(progress), time: time,
                                                                     elapsed: elapsed, canvas: canvasRect)
                                 // A mask on an effect clip (canvas-sized box) limits where the effect shows.
-                                if let mask = Self.effectMask(layer, time: time),
-                                   let picture = Self.clipMaskImage(mask, size: canvas) {
+                                let effectMasks = Self.effectMasks(layer, time: time)
+                                if !effectMasks.isEmpty, let picture = Self.clipMaskImage(effectMasks, size: canvas) {
                                     frame = Self.masked(effected, over: frame, mask: picture).cropped(to: canvasRect)
                                 } else {
                                     frame = effected
@@ -259,8 +258,7 @@ extension EditingView {
             let props = (live?.keyframes ?? layer.keyframes).resolved(base: live?.properties ?? layer.baseProperties,
                                                                      clipStartTime: layer.startTime, at: time)
             // A mask gesture in progress overrides the snapshot's mask the same way.
-            let maskBase = live?.mask ?? layer.mask
-            let mask = maskBase.map { (live?.maskKeys ?? layer.maskKeys).applied(to: $0, atLocal: time - layer.startTime) }
+            let masks = (live?.masks ?? layer.masks).map { $0.resolved(atLocal: time - layer.startTime) }
             
             switch layer.kind {
             case .text(let spec):
@@ -277,18 +275,18 @@ extension EditingView {
                 let origin = CGPoint(x: (canvas.width - rendered.size.width) / 2,
                                      y: (canvas.height - rendered.size.height) / 2)
                 return place(rendered.image, layer: box, props: props, canvas: canvas, stretchToFull: false,
-                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), origin: origin, mask: mask)
+                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), origin: origin, masks: masks)
                 
             case .video(let trackID, let preferredTransform):
                 guard let buffer = request.sourceFrame(byTrackID: trackID) else { return nil }
                 let upright = Self.upright(CIImage(cvPixelBuffer: buffer), preferredTransform)
                 return place(upright, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull,
-                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), mask: mask)
+                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), masks: masks)
                 
             case .image(let url):
                 guard let source = Self.cachedImage(url) else { return nil }
                 return place(source, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull,
-                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), mask: mask)
+                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), masks: masks)
                 
             case .effect:
                 return nil      // handled where the layers are composited
@@ -389,7 +387,7 @@ extension EditingView {
         /// then the pivot-based scale/rotate/translate from OpenGLEdit.buildClipMvp.
         private func place(_ source: CIImage, layer: RenderLayer, props: VideoProperties,
                            canvas: CGSize, stretchToFull: Bool, anim: ClipAnimationFrame,
-                           origin: CGPoint = .zero, mask: EditingView.ClipMask? = nil) -> CIImage? {
+                           origin: CGPoint = .zero, masks: [EditingView.ClipMask] = []) -> CIImage? {
             let srcW = source.extent.width, srcH = source.extent.height
             guard srcW > 0, srcH > 0 else { return nil }
             
@@ -422,8 +420,8 @@ extension EditingView {
             // The clip mask works in the scaled, still unrotated box (EditingView+Mask.swift), so it turns and moves
             // with the clip and keeps its proportions however the clip is stretched.
             var scaledPicture = colored.transformed(by: CGAffineTransform(scaleX: scaledW / srcW, y: scaledH / srcH))
-            if let mask {
-                scaledPicture = Self.applyClipMask(mask, to: scaledPicture, size: CGSize(width: scaledW, height: scaledH))
+            if !masks.isEmpty {
+                scaledPicture = Self.applyClipMask(masks, to: scaledPicture, size: CGSize(width: scaledW, height: scaledH))
             }
             let transform = CGAffineTransform(translationX: -pivotLocal.x, y: -pivotLocal.y)
                 .concatenating(CGAffineTransform(rotationAngle: -theta))

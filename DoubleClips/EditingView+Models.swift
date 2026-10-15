@@ -135,9 +135,9 @@ extension EditingView {
         @Published var outAnimation: AnimationClip = AnimationClip()
         @Published var comboAnimation: AnimationClip = AnimationClip()
         /// iOS addition (EditingView+Mask.swift): limits where the clip is visible. nil = no mask.
-        @Published var mask: ClipMask?
-        /// Keyframes of the mask's parameters (EditingView+Mask.swift); empty = the mask is static.
-        @Published var maskKeys: [MaskKeyframe] = []
+        /// iOS addition (EditingView+Mask.swift): the masks that limit where the clip is visible, combined in order
+        /// (the first defines the area, later ones add, subtract or intersect). Same `masks` format as desktop. Empty = no mask.
+        @Published var masks: [ClipMask] = []
         /// iOS addition, set only in a PUBLISHED template (TemplateGrouping): replaceable clips that share one source carry the
         /// same id, so "Use template" can ask for that media once. nil = the clip stands alone. Never set in a project.
         @Published var templateGroup: String?
@@ -175,8 +175,9 @@ extension EditingView {
             case inAnimation
             case outAnimation
             case comboAnimation
-            case mask
-            case maskKeys
+            case masks
+            case mask          // read only: the single mask older builds wrote
+            case maskKeys      // read only
             case templateGroup
             case blendMode
         }
@@ -238,8 +239,13 @@ extension EditingView {
             self.outAnimation = try container.decodeIfPresent(AnimationClip.self, forKey: .outAnimation) ?? AnimationClip()
             self.comboAnimation = try container.decodeIfPresent(AnimationClip.self, forKey: .comboAnimation) ?? AnimationClip()
             // A mask that can't be read must never cost the clip.
-            self.mask = try? container.decodeIfPresent(ClipMask.self, forKey: .mask)
-            self.maskKeys = (try? container.decodeIfPresent([MaskKeyframe].self, forKey: .maskKeys)) ?? []
+            var loadedMasks = (try? container.decodeIfPresent([ClipMask].self, forKey: .masks)) ?? []
+            if loadedMasks.isEmpty, var legacy = (try? container.decodeIfPresent(ClipMask.self, forKey: .mask)) ?? nil {
+                // An older single mask + its keyframes become the first mask.
+                legacy.keys = (try? container.decodeIfPresent([MaskKeyframe].self, forKey: .maskKeys)) ?? []
+                loadedMasks = [legacy]
+            }
+            self.masks = Array(loadedMasks.prefix(ClipMask.maxCount))
             self.templateGroup = (try? container.decodeIfPresent(String.self, forKey: .templateGroup)) ?? nil
             self.blendMode = (try? container.decodeIfPresent(ClipBlendMode.self, forKey: .blendMode)) ?? .normal
         }
@@ -276,8 +282,7 @@ extension EditingView {
             try container.encode(inAnimation, forKey: .inAnimation)
             try container.encode(outAnimation, forKey: .outAnimation)
             try container.encode(comboAnimation, forKey: .comboAnimation)
-            try container.encodeIfPresent(mask, forKey: .mask)
-            if !maskKeys.isEmpty { try container.encode(maskKeys, forKey: .maskKeys) }
+            if !masks.isEmpty { try container.encode(masks, forKey: .masks) }
             try container.encodeIfPresent(templateGroup, forKey: .templateGroup)
             if blendMode != .normal { try container.encode(blendMode, forKey: .blendMode) }
         }

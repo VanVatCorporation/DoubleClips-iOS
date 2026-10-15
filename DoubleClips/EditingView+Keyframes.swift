@@ -239,8 +239,7 @@ extension EditingView.Clip {
         c.inAnimation = inAnimation
         c.outAnimation = outAnimation
         c.comboAnimation = comboAnimation
-        c.mask = mask
-        c.maskKeys = maskKeys
+        c.masks = masks
         c.templateGroup = templateGroup
         c.blendMode = blendMode
         c.textContent = textContent

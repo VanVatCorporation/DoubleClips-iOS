@@ -1701,10 +1701,10 @@ private struct ClipBlockView: View {
             
             // Mask keyframes: a teal diamond along the bottom edge, tap = jump to it.
             if isSelected && !isMultiSelected && !isGhostSource {
-                ForEach(Array(clip.maskKeys.enumerated()), id: \.offset) { _, key in
-                    let exact = CGFloat(key.time) * pps
+                ForEach(Array(Set(clip.masks.flatMap { $0.keys.map { $0.time } })).sorted(), id: \.self) { keyTime in
+                    let exact = CGFloat(keyTime) * pps
                     let x = min(max(exact, 8), max(8, blockWidth - 8))
-                    let active = abs(key.time + clip.startTime - currentTime) <= Constants.KEYFRAME_KNOT_ACTIVE_SECONDS
+                    let active = abs(keyTime + clip.startTime - currentTime) <= Constants.KEYFRAME_KNOT_ACTIVE_SECONDS
                     Rectangle()
                         .fill(active ? Color.white : Color.mdSecondary)
                         .overlay(Rectangle().stroke(Color.black.opacity(0.55), lineWidth: 1))
@@ -1712,7 +1712,7 @@ private struct ClipBlockView: View {
                         .rotationEffect(.degrees(45))
                         .frame(width: Constants.KEYFRAME_KNOT_HIT, height: Constants.KEYFRAME_KNOT_HIT)
                         .contentShape(Rectangle())
-                        .onTapGesture { onKeyframeTap(clip.startTime + key.time) }
+                        .onTapGesture { onKeyframeTap(clip.startTime + keyTime) }
                         .position(x: x, y: Constants.TRACK_CLIP_HEIGHT - 10)
                 }
             }
