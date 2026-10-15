@@ -32,6 +32,8 @@ final class ClipAnimation {
         case redTint
         /// 0 = unchanged, 1 = washed out to white (colours lerp toward white, alpha untouched): Fade White.
         case whiteMix
+        /// Pixelate: the size of one square block as a fraction of the canvas WIDTH (0 = none): the Pixelize transition.
+        case pixelate
         
         var json: String {
             switch self {
@@ -59,6 +61,7 @@ final class ClipAnimation {
             case .edgeSlideY:      return "edgeSlideY"
             case .redTint:         return "redTint"
             case .whiteMix:        return "whiteMix"
+            case .pixelate:        return "pixelate"
             }
         }
         
@@ -87,7 +90,7 @@ final class ClipAnimation {
             case .exposure: return 0
             case .blurAngle: return -180
             case .squeezeX: return 0.02
-            case .squeezeAnchor, .edgeFill, .redTint, .whiteMix: return 0
+            case .squeezeAnchor, .edgeFill, .redTint, .whiteMix, .pixelate: return 0
             case .warpTopWidth, .warpBottomWidth, .warpHeight: return 0.1
             }
         }
@@ -110,6 +113,7 @@ final class ClipAnimation {
             case .blurAngle: return 180
             case .squeezeX: return 2
             case .squeezeAnchor, .edgeFill, .redTint, .whiteMix: return 1
+            case .pixelate: return 0.2
             case .warpTopWidth, .warpBottomWidth, .warpHeight: return 2
             }
         }
@@ -284,6 +288,8 @@ struct ClipAnimationFrame {
     var redTint: Float { value(.redTint) }
     /// Wash-out toward white, 0 = none ... 1 = all white.
     var whiteMix: Float { value(.whiteMix) }
+    /// Pixelate block size as a fraction of the canvas WIDTH (0 = none).
+    var pixelateWidthFraction: Float { value(.pixelate) }
     /// Direction of the motion-blur streaks, degrees counter-clockwise from the right (0 = horizontal).
     var blurAngleDegrees: Float { value(.blurAngle) }
     /// Horizontal squeeze of the picture toward its anchor (1 = unchanged); the edge pixels smear into the gap.
@@ -318,7 +324,7 @@ extension ClipAnimationFrame {
             let a = Double(values[i]), b = Double(other.values[i])
             let combined: Double
             switch channel {
-            case .offsetX, .offsetY, .rotation, .hue, .brightness, .temperature, .edgeSlide, .edgeSlideY, .motionBlur, .blur, .redTint, .whiteMix:
+            case .offsetX, .offsetY, .rotation, .hue, .brightness, .temperature, .edgeSlide, .edgeSlideY, .motionBlur, .blur, .redTint, .whiteMix, .pixelate:
                 combined = a + b
             case .opacity, .scale, .saturation, .contrast, .exposure, .warpTopWidth, .warpBottomWidth, .warpHeight, .squeezeX:
                 combined = a * b

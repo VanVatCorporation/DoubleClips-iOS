@@ -73,6 +73,36 @@ enum TransitionStyleDefaults {
 """#,
         "wiperight": #"""
 {"schema":1,"id":"wiperight","name":"Wipe Right","description":"B is revealed from the left edge, sweeping right (mask: wipe).","defaultDuration":0.5,"mode":"mask","mask":{"shape":"wipe","reveal":{"kind":"knots","interp":"linear","points":[[0,0],[1,1]]},"angle":0}}
+"""#,
+        "pixelize": #"""
+{"schema":1,"id":"pixelize","name":"Pixelize","description":"A breaks into growing square blocks, hard cut at the middle, then B's blocks shrink back to sharp (like xfade pixelize).","defaultDuration":0.8,"cut":0.5,"from":{"channels":{"pixelate":{"kind":"knots","interp":"linear","points":[[0,0],[0.5,0.07]]}}},"to":{"channels":{"pixelate":{"kind":"knots","interp":"linear","points":[[0.5,0.07],[1,0]]}}}}
+"""#,
+        "hblur": #"""
+{"schema":1,"id":"hblur","name":"Horizontal Blur","description":"A smears sideways into a streaked blur, cut at the middle, B comes out of the same blur (like xfade hblur).","defaultDuration":0.8,"cut":0.5,"from":{"channels":{"motionBlur":{"kind":"knots","interp":"smooth","points":[[0,0],[0.5,0.3]]}}},"to":{"channels":{"motionBlur":{"kind":"knots","interp":"smooth","points":[[0.5,0.3],[1,0]]}}}}
+"""#,
+        "circlecrop": #"""
+{"schema":1,"id":"circlecrop","name":"Circle Crop","description":"A is seen through a circle that shrinks to nothing on black, then B through a circle that grows (like xfade circlecrop).","defaultDuration":0.9,"mode":"crop","mask":{"shape":"circle","reveal":{"kind":"knots","interp":"linear","points":[[0,1],[0.5,0],[1,1]]}}}
+"""#,
+        "rectcrop": #"""
+{"schema":1,"id":"rectcrop","name":"Rect Crop","description":"A is seen through a rectangle that shrinks to nothing on black, then B through a rectangle that grows (like xfade rectcrop).","defaultDuration":0.9,"mode":"crop","mask":{"shape":"rect","reveal":{"kind":"knots","interp":"linear","points":[[0,1],[0.5,0],[1,1]]}}}
+"""#,
+        "distance": #"""
+{"schema":1,"id":"distance","name":"Distance","description":"B takes over pixel by pixel, first where the two pictures are closest in colour (mask: distance).","defaultDuration":0.8,"mode":"mask","mask":{"shape":"distance","reveal":{"kind":"knots","interp":"linear","points":[[0,0],[1,1]]},"softness":0.04}}
+"""#,
+        "custom_expose": #"""
+{"schema":1,"id":"custom_expose","name":"Expose","description":"B is exposed from the top edge downward as a hard wipe (Android's Expose).","defaultDuration":0.6,"mode":"mask","mask":{"shape":"wipe","reveal":{"kind":"knots","interp":"linear","points":[[0,0],[1,1]]},"angle":-90}}
+"""#,
+        "custom_two-stage-slide": #"""
+{"schema":1,"id":"custom_two-stage-slide","name":"Two Stage Slide","description":"Both pictures slide left in two stages with a pause in the middle; B enters from the right.","defaultDuration":1.0,"mode":"layers","from":{"channels":{"offsetX":{"kind":"knots","interp":"smooth","points":[[0,0],[0.4,-0.5],[0.6,-0.5],[1,-1]]}}},"to":{"channels":{"offsetX":{"kind":"knots","interp":"smooth","points":[[0,1],[0.4,0.5],[0.6,0.5],[1,0]]}}}}
+"""#,
+        "custom_radial-shockwave": #"""
+{"schema":1,"id":"custom_radial-shockwave","name":"Radial Shockwave","description":"B bursts out of the centre as a soft ring: a flash on A, B lands slightly enlarged and settles.","defaultDuration":0.9,"mode":"mask","mask":{"shape":"circle","reveal":{"kind":"knots","interp":"smooth","points":[[0,0],[1,1]]},"softness":0.2},"from":{"channels":{"exposure":{"kind":"knots","interp":"smooth","points":[[0,1],[0.4,1.7],[0.8,1]]}}},"to":{"channels":{"scale":{"kind":"knots","interp":"smooth","points":[[0,1.12],[1,1]]},"blur":{"kind":"knots","interp":"smooth","points":[[0,0.012],[1,0]]}}}}
+"""#,
+        "custom_fake-glass-shatter": #"""
+{"schema":1,"id":"custom_fake-glass-shatter","name":"Fake Glass Shatter","description":"B appears in scattered square shards over A while both drift slightly (mask: noise).","defaultDuration":0.9,"mode":"mask","mask":{"shape":"noise","reveal":{"kind":"knots","interp":"linear","points":[[0,0],[1,1]]},"softness":0.03,"grain":36},"from":{"channels":{"scale":{"kind":"knots","interp":"linear","points":[[0,1],[1,1.05]]}}},"to":{"channels":{"scale":{"kind":"knots","interp":"linear","points":[[0,1.05],[1,1]]}}}}
+"""#,
+        "custom_massive-effect": #"""
+{"schema":1,"id":"custom_massive-effect","name":"Massive Effect","description":"A is flung toward the viewer, blurred and blown out, cut at the middle; B lands from far away, spinning back to level.","defaultDuration":1.0,"cut":0.5,"from":{"channels":{"scale":{"kind":"knots","interp":"smooth","points":[[0,1],[0.5,1.7]]},"blur":{"kind":"knots","interp":"smooth","points":[[0,0],[0.5,0.04]]},"exposure":{"kind":"knots","interp":"smooth","points":[[0,1],[0.5,2.6]]},"rotation":{"kind":"knots","interp":"smooth","points":[[0,0],[0.5,8]]}}},"to":{"channels":{"scale":{"kind":"knots","interp":"smooth","points":[[0.5,0.55],[1,1]]},"blur":{"kind":"knots","interp":"smooth","points":[[0.5,0.04],[1,0]]},"exposure":{"kind":"knots","interp":"smooth","points":[[0.5,2.6],[1,1]]},"rotation":{"kind":"knots","interp":"smooth","points":[[0.5,-8],[1,0]]}}}}
 """#
     ]
 }

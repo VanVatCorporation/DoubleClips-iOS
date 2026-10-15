@@ -102,6 +102,17 @@ extension EditingView.ClipCompositor {
             }
             return strips.transformed(by: CGAffineTransform(translationX: c.x, y: c.y).rotated(by: theta)).cropped(to: canvas)
             
+        case "rect":
+            // A centred rectangle, `reveal` of the canvas in both directions (a crop transition).
+            let rw = w * r, rh = h * r
+            let rect = CGRect(x: c.x - rw / 2, y: c.y - rh / 2, width: rw, height: rh)
+            var shape = CIImage(color: .white).cropped(to: rect).composited(over: black).cropped(to: canvas)
+            let soft = v("softness") * min(w, h)
+            if soft > 0.5 {
+                shape = shape.clampedToExtent().applyingGaussianBlur(sigma: Double(soft) / 2).cropped(to: canvas)
+            }
+            return shape
+            
         case "clock":
             // A pie slice drawn into a grey bitmap: from the start angle, clockwise, `reveal` of a full turn.
             let width = Int(ceil(w)), height = Int(ceil(h))
@@ -125,5 +136,38 @@ extension EditingView.ClipCompositor {
         default:
             return fallback
         }
+    }
+    
+    /// The "distance" mask: B shows where the two pictures are close in colour first (the pixels' average channel
+    /// difference is below `reveal`), so the picture dissolves along its own detail. Needs A and B, not just a shape.
+    static func distanceMask(_ a: CIImage, _ b: CIImage, mask: EffectFilter, progress p: CGFloat, canvas: CGRect) -> CIImage {
+        func v(_ name: String) -> CGFloat {
+            guard let curve = mask.curves[name] else { return 0 }
+            return CGFloat(curve.at(Double(p)))
+        }
+        let r = min(max(v("reveal"), 0), 1)
+        if r <= 0 { return CIImage(color: .black).cropped(to: canvas) }
+        if r >= 1 { return CIImage(color: .white).cropped(to: canvas) }
+        let soft = max(v("softness"), 0.001)
+        let diff = a.applyingFilter("CIDifferenceBlendMode", parameters: [kCIInputBackgroundImageKey: b])
+        let third: CGFloat = 1.0 / 3.0
+        let average = CIVector(x: third, y: third, z: third, w: 0)
+        let gray = diff.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": average, "inputGVector": average, "inputBVector": average,
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+            "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 0)
+        ])
+        // mask = (reveal - gray) / softness + 0.5, clamped: white where gray < reveal.
+        let gain = 1 / soft
+        let bias = r * gain + 0.5
+        let down = CIVector(x: -gain, y: 0, z: 0, w: 0)
+        return gray.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": down, "inputGVector": down, "inputBVector": down,
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+            "inputBiasVector": CIVector(x: bias, y: bias, z: bias, w: 0)
+        ]).applyingFilter("CIColorClamp", parameters: [
+            "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1)
+        ]).cropped(to: canvas)
     }
 }

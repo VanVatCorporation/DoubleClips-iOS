@@ -63,6 +63,16 @@ extension EditingView.ClipCompositor {
                 .cropped(to: box)
         }
         
+        // Pixelate (iOS only): square blocks, a fraction of the canvas width, lined up with the picture's corner.
+        let block = CGFloat(anim.pixelateWidthFraction) * canvas.width
+        if block > 1.5 {
+            let box = placed.extent
+            placed = placed.clampedToExtent()
+                .applyingFilter("CIPixellate", parameters: [kCIInputCenterKey: CIVector(x: box.minX, y: box.minY),
+                                                            kCIInputScaleKey: block])
+                .cropped(to: box)
+        }
+        
         // Blur sigma is a fraction of the canvas WIDTH, applied to the drawn layer in canvas pixels.
         let sigma = CGFloat(anim.blurWidthFraction) * canvas.width
         if sigma > 0.25 {
@@ -96,7 +106,16 @@ extension EditingView.ClipCompositor {
         if let mask = style.mask {
             let a = style.from.channels.isEmpty ? from : looked(from, anim: style.from.evaluate(Float(p)), canvas: canvas)
             let b = style.to.channels.isEmpty ? to : looked(to, anim: style.to.evaluate(Float(p)), canvas: canvas)
-            return masked(b, over: a, mask: transitionMask(mask, progress: p, canvas: canvas)).cropped(to: canvas)
+            if style.crop {
+                // Crop styles: A inside a shrinking shape, then B inside a growing one, on black (xfade circlecrop / rectcrop).
+                let picture = Double(p) < style.cut ? a : b
+                let black = CIImage(color: .black).cropped(to: canvas)
+                return masked(picture, over: black, mask: transitionMask(mask, progress: p, canvas: canvas)).cropped(to: canvas)
+            }
+            let reveal = mask.op == "distance"
+                ? distanceMask(a, b, mask: mask, progress: p, canvas: canvas)
+                : transitionMask(mask, progress: p, canvas: canvas)
+            return masked(b, over: a, mask: reveal).cropped(to: canvas)
         }
         if style.layers {
             // Both pictures for the whole window, B over A.

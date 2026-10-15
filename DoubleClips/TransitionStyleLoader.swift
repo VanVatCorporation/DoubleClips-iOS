@@ -14,6 +14,7 @@ import Foundation
 //     "cut": 0.76,                     // where A is replaced by B, 0.05 ... 0.95 of the window (default 0.5)
 //     "mode": "cut",                   // optional: "cut" (default) draws ONE picture, A before the cut and B after it;
 //                                      //   "layers" draws BOTH for the whole window, B over A (slides, cross fades); `cut` is ignored;
+//                                      //   "crop" draws ONE picture through a mask shape, A before `cut` and B after, the rest black (circle / rect crop);
 //                                      //   "mask" draws both and reveals B through a mask: "mask": { "shape": "wipe", "reveal": curve, ... }
 //                                      //   (shapes and parameters in EditingView+TransitionMask.swift); `from` / `to` are then optional
 //     "referenceFrames": 100,          // only needed by "frames" knots
@@ -43,9 +44,11 @@ final class TransitionStyle {
     let layers: Bool
     /// mode "mask": the shape that reveals B over A.
     let mask: EffectFilter?
+    /// mode "crop": the mask's shape is the window onto the picture (A before `cut`, B after), the rest is black.
+    let crop: Bool
     
     init(id: String, name: String, defaultDuration: Float, cut: Double, from: ClipAnimation, to: ClipAnimation,
-         layers: Bool = false, mask: EffectFilter? = nil) {
+         layers: Bool = false, mask: EffectFilter? = nil, crop: Bool = false) {
         self.id = id
         self.name = name
         self.defaultDuration = defaultDuration
@@ -54,6 +57,7 @@ final class TransitionStyle {
         self.to = to
         self.layers = layers
         self.mask = mask
+        self.crop = crop
     }
 }
 
@@ -196,13 +200,15 @@ enum TransitionStyleLoader {
         }
         var layers = false
         var maskMode = false
+        var cropMode = false
         if top["mode"] != nil {
             let mode = try L.reqString(top, "mode", "$", 16)
-            guard mode == "cut" || mode == "layers" || mode == "mask" else {
-                throw ClipAnimationFormatError("$.mode: must be \"cut\", \"layers\" or \"mask\"")
+            guard mode == "cut" || mode == "layers" || mode == "mask" || mode == "crop" else {
+                throw ClipAnimationFormatError("$.mode: must be \"cut\", \"layers\", \"mask\" or \"crop\"")
             }
             layers = mode == "layers"
-            maskMode = mode == "mask"
+            cropMode = mode == "crop"
+            maskMode = mode == "mask" || mode == "crop"
         }
         var referenceFrames = 0
         if top["referenceFrames"] != nil {
@@ -247,6 +253,6 @@ enum TransitionStyleLoader {
         }
         return TransitionStyle(id: id, name: name!, defaultDuration: Float(duration), cut: cut,
                                from: try side("from", direction: .out), to: try side("to", direction: .in),
-                               layers: layers, mask: mask)
+                               layers: layers, mask: mask, crop: cropMode)
     }
 }
