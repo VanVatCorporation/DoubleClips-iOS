@@ -1,0 +1,173 @@
+// Embedded copy of VanVatDriveKit (Sources/VanVatDriveKit/Models.swift) so DoubleClips needs no package setup.
+// Keep in sync with the package; replace with the package dependency later if you prefer.
+import Foundation
+
+public enum DriveRole: String, Codable, Sendable, Comparable, CaseIterable {
+    case viewer, editor, manager, owner
+
+    private var rank: Int {
+        switch self {
+        case .viewer: return 1
+        case .editor: return 2
+        case .manager: return 3
+        case .owner: return 4
+        }
+    }
+    public static func < (a: DriveRole, b: DriveRole) -> Bool { a.rank < b.rank }
+
+    public var canEdit: Bool { self >= .editor }
+    public var canManage: Bool { self >= .manager }
+    /// Roles that can be handed to another account.
+    public static let grantable: [DriveRole] = [.viewer, .editor, .manager]
+}
+
+public struct DriveNode: Codable, Identifiable, Hashable, Sendable {
+    public let id: String
+    public let parentId: String?
+    public let ownerId: String
+    public let createdBy: String
+    public var name: String
+    public let isFolder: Bool
+    public let size: Int64
+    public let mimeType: String?
+    public let sha256: String?
+    public let createdAt: Date
+    public let updatedAt: Date
+    public let deletedAt: Date?
+    /// "openeditz" for the protected OpenEditz folder.
+    public let systemKey: String?
+    public let myRole: DriveRole
+
+    public var isSystemFolder: Bool { systemKey != nil }
+}
+
+public struct PathItem: Codable, Hashable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+}
+
+public struct Me: Codable, Sendable, Equatable {
+    public let userId: String
+    public let username: String?
+    public let email: String?
+    public let quotaBytes: Int64
+    public let usedBytes: Int64
+    public let chunkSize: Int
+}
+
+public struct Listing: Decodable, Sendable {
+    public let role: DriveRole
+    public let path: [PathItem]
+    public let items: [DriveNode]
+    public let hasMore: Bool
+}
+
+public struct SharedItem: Decodable, Sendable, Identifiable {
+    public let node: DriveNode
+    public let permissionId: String
+    public let sharedBy: String?
+    public var id: String { node.id }
+}
+
+public struct Person: Decodable, Sendable, Identifiable {
+    public let permissionId: String
+    public let granteeId: String
+    public let role: DriveRole
+    public let username: String?
+    public let email: String?
+    public var id: String { permissionId }
+}
+
+public struct LinkInfo: Decodable, Sendable, Identifiable {
+    public let id: String
+    public let nodeId: String
+    public let token: String
+    public let url: String
+    public let rawServing: Bool
+    public let expiresAt: Date?
+    public let createdAt: Date
+    public let downloadCount: Int64
+}
+
+public struct AccessInfo: Decodable, Sendable {
+    public struct Owner: Decodable, Sendable { public let id: String; public let username: String? }
+    public let myRole: DriveRole
+    public let owner: Owner
+    public let people: [Person]
+    public let links: [LinkInfo]
+}
+
+public struct PublicNode: Decodable, Hashable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public let isFolder: Bool
+    public let size: Int64
+    public let mimeType: String?
+    public let updatedAt: Date
+}
+
+public struct PublicMeta: Decodable, Sendable {
+    public let rawServing: Bool
+    public let node: PublicNode
+}
+
+public struct PublicListing: Decodable, Sendable {
+    public struct Root: Decodable, Sendable { public let id: String; public let name: String }
+    public let root: Root
+    public let parentId: String
+    public let items: [PublicNode]
+}
+
+public struct UploadSession: Decodable, Sendable {
+    public let uploadId: String
+    public let chunkSize: Int
+    public let received: Int64
+}
+
+// MARK: - Dates (.NET writes up to 7 fractional digits)
+
+enum DriveDates {
+    private static let fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let plain = ISO8601DateFormatter()
+
+    static func parse(_ raw: String) -> Date? {
+        var s = raw
+        if let r = s.range(of: #"(\.\d{3})\d+"#, options: .regularExpression) {
+            s.replaceSubrange(r, with: String(s[r].prefix(4)))
+        }
+        return fractional.date(from: s) ?? plain.date(from: s)
+    }
+}
+
+extension JSONDecoder {
+    static let drive: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .custom { decoder in
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            guard let date = DriveDates.parse(raw) else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Bad date: \(raw)"))
+            }
+            return date
+        }
+        return d
+    }()
+}
+
+// MARK: - Errors
+
+public struct DriveError: LocalizedError, Sendable {
+    public let status: Int
+    public let code: String?
+    public let message: String
+    public init(status: Int, code: String? = nil, message: String) {
+        self.status = status
+        self.code = code
+        self.message = message
+    }
+    public var errorDescription: String? { message }
+    public var isUnauthorized: Bool { status == 401 }
+}

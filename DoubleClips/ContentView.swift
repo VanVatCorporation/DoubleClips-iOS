@@ -39,7 +39,7 @@ struct ContentView: View {
                 }
                 .tag(Tab.search)
             
-            Text("Inbox Screen")
+            StorageView()
                 .tabItem {
                     Label("Storage", systemImage: "server.rack")
                 }
