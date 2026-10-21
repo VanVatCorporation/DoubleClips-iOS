@@ -93,29 +93,51 @@ struct GetMoreResourcesButton: View {
     }
 }
 
-/// Storage + daily limits + plan, for the top of the Storage tab.
+/// Storage + daily limits + plan, for the top of the Storage tab. Minimalist: only the storage bar shows;
+/// the chevron animates open to reveal the plan, the daily limits and the upgrade link.
 struct QuotaSummary: View {
     let me: Me
+    @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let plan = me.plan {
-                Text("Plan: \(plan.name)").font(.footnote.weight(.semibold))
-            }
-            QuotaBar(used: Double(me.usedBytes), total: Double(me.quotaBytes),
-                     label: "\(StorageModel.bytes(me.usedBytes)) of \(StorageModel.bytes(me.quotaBytes)) used")
-            if let usage = me.usage {
-                let reset = "Resets \(usage.resetsAt.formatted(date: .abbreviated, time: .shortened))"
-                QuotaBar(used: Double(usage.uploadedBytes), total: Double(usage.uploadLimit),
-                         label: "Today: ↑ \(StorageModel.bytes(usage.uploadedBytes)) / \(StorageModel.bytes(usage.uploadLimit))", caption: reset)
-                QuotaBar(used: Double(usage.downloadedBytes), total: Double(usage.downloadLimit),
-                         label: "Today: ↓ \(StorageModel.bytes(usage.downloadedBytes)) / \(StorageModel.bytes(usage.downloadLimit))", caption: reset)
-                if let limit = usage.computeLimit {
-                    QuotaBar(used: usage.computeUsed ?? 0, total: limit,
-                             label: "Today: compute \(QuotaText.credits(usage.computeUsed ?? 0)) / \(QuotaText.credits(limit)) credits", caption: reset)
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { expanded.toggle() }
+            } label: {
+                HStack(alignment: .center, spacing: 8) {
+                    QuotaBar(used: Double(me.usedBytes), total: Double(me.quotaBytes),
+                             label: "\(StorageModel.bytes(me.usedBytes)) of \(StorageModel.bytes(me.quotaBytes)) used")
+                    Image(systemName: "chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(expanded ? 180 : 0))
                 }
+                .contentShape(Rectangle())
             }
-            GetMoreResourcesButton().font(.footnote)
+            .buttonStyle(.plain)
+            .accessibilityLabel(expanded ? "Hide other limits" : "Show other limits")
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let plan = me.plan {
+                        Text("Plan: \(plan.name)").font(.footnote.weight(.semibold))
+                    }
+                    if let usage = me.usage {
+                        let reset = "Resets \(usage.resetsAt.formatted(date: .abbreviated, time: .shortened))"
+                        QuotaBar(used: Double(usage.uploadedBytes), total: Double(usage.uploadLimit),
+                                 label: "Today: ↑ \(StorageModel.bytes(usage.uploadedBytes)) / \(StorageModel.bytes(usage.uploadLimit))", caption: reset)
+                        QuotaBar(used: Double(usage.downloadedBytes), total: Double(usage.downloadLimit),
+                                 label: "Today: ↓ \(StorageModel.bytes(usage.downloadedBytes)) / \(StorageModel.bytes(usage.downloadLimit))", caption: reset)
+                        if let limit = usage.computeLimit {
+                            QuotaBar(used: usage.computeUsed ?? 0, total: limit,
+                                     label: "Today: compute \(QuotaText.credits(usage.computeUsed ?? 0)) / \(QuotaText.credits(limit)) credits", caption: reset)
+                        }
+                    }
+                    GetMoreResourcesButton().font(.footnote)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
+        .clipped()
     }
 }
