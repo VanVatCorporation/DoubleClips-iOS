@@ -17,6 +17,7 @@ struct StorageView: View {
     @State private var showImporter = false
     @State private var showBackup = false
     @State private var activityURL: ActivityItem?
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
@@ -49,7 +50,9 @@ struct StorageView: View {
                     renameTarget = nil
                 }
             }
-            .alert("Storage", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
+            .quotaWarning($model.warning)
+            .alert("Storage", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil; model.errorIsQuota = false } })) {
+                if model.errorIsQuota { Button("Get more resources") { openURL(Plans.url) } }
                 Button("OK", role: .cancel) {}
             } message: { Text(model.errorMessage ?? "") }
             .confirmationDialog("Delete “\(deleteTarget?.name ?? "")” for good?",
@@ -61,9 +64,11 @@ struct StorageView: View {
                                 isPresented: Binding(get: { fileTarget != nil }, set: { if !$0 { fileTarget = nil } }),
                                 titleVisibility: .visible, presenting: fileTarget) { node in
                 if isProjectZip(node) {
-                    Button("Restore into DoubleClips") { Task { await model.restore(node) } }
+                    Button("Restore into DoubleClips") { model.guardDownload(node) { Task { await model.restore(node) } } }
                 }
-                Button("Share or save to Files") { Task { if let url = await model.download(node) { activityURL = ActivityItem(url: url) } } }
+                Button("Share or save to Files") {
+                    model.guardDownload(node) { Task { if let url = await model.download(node) { activityURL = ActivityItem(url: url) } } }
+                }
                 Button("Rename") { renameText = node.name; renameTarget = node }
                 Button("Delete", role: .destructive) { deleteTarget = node }
             } message: { node in
@@ -83,14 +88,7 @@ struct StorageView: View {
     private var content: some View {
         List {
             if let me = model.me {
-                Section {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ProgressView(value: Double(me.usedBytes), total: Double(max(me.quotaBytes, 1)))
-                            .tint(me.usedBytes * 10 > me.quotaBytes * 9 ? .red : .accentColor)
-                        Text("\(StorageModel.bytes(me.usedBytes)) of \(StorageModel.bytes(me.quotaBytes)) used")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
+                Section { QuotaSummary(me: me) }
             }
 
             if !model.trail.isEmpty {
@@ -106,7 +104,9 @@ struct StorageView: View {
                             switch row.state {
                             case .running: Text("\(StorageModel.bytes(row.loaded)) of \(StorageModel.bytes(row.size))").font(.caption).foregroundStyle(.secondary)
                             case .done: Text("Uploaded").font(.caption).foregroundStyle(.green)
-                            case .failed(let message): Text(message).font(.caption).foregroundStyle(.red)
+                            case .failed(let message):
+                                Text(message).font(.caption).foregroundStyle(.red)
+                                if row.quotaFailure { GetMoreResourcesButton().font(.caption) }
                             }
                         }
                     }
@@ -165,7 +165,7 @@ struct StorageView: View {
         .buttonStyle(.plain)
         .contextMenu {
             if !node.isFolder && isProjectZip(node) {
-                Button { Task { await model.restore(node) } } label: { Label("Restore into DoubleClips", systemImage: "arrow.down.circle") }
+                Button { model.guardDownload(node) { Task { await model.restore(node) } } } label: { Label("Restore into DoubleClips", systemImage: "arrow.down.circle") }
             }
             Button { renameText = node.name; renameTarget = node } label: { Label("Rename", systemImage: "pencil") }
             Button(role: .destructive) { deleteTarget = node } label: { Label("Delete", systemImage: "trash") }

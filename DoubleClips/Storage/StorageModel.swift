@@ -12,13 +12,17 @@ final class StorageModel: ObservableObject {
         let size: Int64
         var loaded: Int64 = 0
         var state: State = .running
+        /// The server refused for a quota/plan reason: the row offers "Get more resources".
+        var quotaFailure = false
     }
 
     struct BackupState {
-        enum Phase: Equatable { case zipping, uploading, done, failed(String) }
+        /// `.warning`: the ZIP probably won't fit today's upload allowance; waiting for "Continue anyway" or "Cancel".
+        enum Phase: Equatable { case zipping, uploading, warning(String), done, failed(String) }
         let title: String
         var phase: Phase
         var fraction: Double
+        var quotaFailure = false
     }
 
     @Published private(set) var items: [DriveNode] = []
@@ -27,6 +31,10 @@ final class StorageModel: ObservableObject {
     @Published private(set) var me: Me?
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
+    /// The error above is a quota/plan limit: the alert offers "Get more resources".
+    @Published var errorIsQuota = false
+    /// "Continue anyway" popup for an upload/download that probably won't fit today's allowance.
+    @Published var warning: QuotaWarning?
     @Published var busyText: String?
     @Published private(set) var uploads: [UploadRow] = []
     @Published private(set) var backup: BackupState?
@@ -34,9 +42,12 @@ final class StorageModel: ObservableObject {
     private let oe = DoubleClipsDrive.openEditz
     private var backupTask: Task<Void, Never>?
     private var backupCancellation: ProjectImporter.Cancellation?
+    private var backupWarningContinuation: CheckedContinuation<Bool, Never>?
 
     var currentFolder: DriveNode? { trail.last }
     var freeBytes: Int64 { max(0, (me?.quotaBytes ?? 0) - (me?.usedBytes ?? 0)) }
+    var uploadFree: Int64 { me?.usage?.uploadFree ?? .max }
+    var downloadFree: Int64 { me?.usage?.downloadFree ?? .max }
     var hasSession: Bool { DoubleClipsDrive.sessionToken() != nil }
 
     // MARK: - Browse
@@ -91,11 +102,24 @@ final class StorageModel: ObservableObject {
 
     // MARK: - Download / restore
 
+    /// Runs `action` (a download) now, or after "Continue anyway" when the file probably won't fit today's download allowance.
+    func guardDownload(_ node: DriveNode, _ action: @escaping () -> Void) {
+        let free = downloadFree
+        if node.size > free {
+            warning = QuotaWarning(title: QuotaText.downloadTitle, message: QuotaText.download(size: node.size, free: free), onConfirm: action)
+        } else {
+            action()
+        }
+    }
+
     func download(_ node: DriveNode) async -> URL? {
         busyText = "Downloading…"
         defer { busyText = nil }
-        do { return try await oe.download(node) }
-        catch { handle(error); return nil }
+        do {
+            let url = try await oe.download(node)
+            await refreshQuota()                 // the download spent part of today's allowance
+            return url
+        } catch { handle(error); return nil }
     }
 
     /// Hands a downloaded project ZIP to the normal import (IncomingFileCenter -> HomeView -> ProjectImporter).
@@ -107,14 +131,39 @@ final class StorageModel: ObservableObject {
     // MARK: - Upload files
 
     func upload(_ urls: [URL]) {
-        let copies = Self.copyIntoSandbox(urls)
+        var copies = Self.copyIntoSandbox(urls)
+        // Not enough storage cannot work: stop with an upgrade offer. The daily cap only warns (like the web Drive).
+        var kept: [URL] = []
         for url in copies {
-            let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
+            let size = Self.size(of: url)
             if size > freeBytes {
                 try? FileManager.default.removeItem(at: url)
+                errorIsQuota = true
                 errorMessage = "Not enough space for “\(url.lastPathComponent)”: \(Self.bytes(freeBytes)) left."
-                continue
+            } else {
+                kept.append(url)
             }
+        }
+        copies = kept
+        guard !copies.isEmpty else { return }
+
+        let total = copies.reduce(Int64(0)) { $0 + Self.size(of: $1) }
+        let free = uploadFree
+        if total > free {
+            let pending = copies
+            warning = QuotaWarning(
+                title: QuotaText.uploadTitle,
+                message: QuotaText.upload(size: total, free: free),
+                onConfirm: { [weak self] in self?.start(uploading: pending) },
+                onCancel: { pending.forEach { try? FileManager.default.removeItem(at: $0) } })
+            return
+        }
+        start(uploading: copies)
+    }
+
+    private func start(uploading copies: [URL]) {
+        for url in copies {
+            let size = Self.size(of: url)
             let row = UploadRow(name: url.lastPathComponent, size: size)
             uploads.append(row)
             let folder = currentFolder
@@ -125,12 +174,16 @@ final class StorageModel: ObservableObject {
                     }
                     finishUpload(row.id, .done)
                 } catch {
-                    finishUpload(row.id, .failed(error.localizedDescription))
+                    finishUpload(row.id, .failed(error.localizedDescription), quota: (error as? DriveError)?.isQuotaLimit ?? false)
                 }
                 try? FileManager.default.removeItem(at: url)
                 await reload()
             }
         }
+    }
+
+    private static func size(of url: URL) -> Int64 {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
     }
 
     func clearFinishedUploads() {
@@ -142,9 +195,10 @@ final class StorageModel: ObservableObject {
         uploads[i].loaded = min(uploads[i].size, value)
     }
 
-    private func finishUpload(_ id: UUID, _ state: UploadRow.State) {
+    private func finishUpload(_ id: UUID, _ state: UploadRow.State, quota: Bool = false) {
         guard let i = uploads.firstIndex(where: { $0.id == id }) else { return }
         uploads[i].state = state
+        uploads[i].quotaFailure = quota
         if state == .done { uploads[i].loaded = uploads[i].size }
     }
 
@@ -179,6 +233,16 @@ final class StorageModel: ObservableObject {
                                      message: "The backup is \(Self.bytes(size)) but only \(Self.bytes(freeBytes)) of storage is left.")
                 }
 
+                // The daily upload cap only warns: the user can still continue (the server has the final say).
+                let freeToday = uploadFree
+                if size > freeToday {
+                    let message = QuotaText.upload(size: size, free: freeToday)
+                    setBackup(phase: .warning(message))
+                    let proceed = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in backupWarningContinuation = c }
+                    backupWarningContinuation = nil
+                    if !proceed { throw CancellationError() }
+                }
+
                 setBackup(phase: .uploading, fraction: 0)
                 let folder = try await oe.ensureFolder(path: ["Projects"])
                 let name = "\(ProjectData.sanitizedFolderName(project.projectTitle)) \(Self.stamp()).zip"
@@ -192,7 +256,10 @@ final class StorageModel: ObservableObject {
             } catch is CancellationError {
                 backup = nil
             } catch {
-                if Task.isCancelled { backup = nil } else { setBackup(phase: .failed(error.localizedDescription)) }
+                if Task.isCancelled { backup = nil } else {
+                    setBackup(phase: .failed(error.localizedDescription))
+                    if (error as? DriveError)?.isQuotaLimit == true { backup?.quotaFailure = true }
+                }
             }
             ProjectExporter.cleanOldFiles()
         }
@@ -201,6 +268,15 @@ final class StorageModel: ObservableObject {
     func cancelBackup() {
         backupCancellation?.cancel()
         backupTask?.cancel()
+        backupWarningContinuation?.resume(returning: false)
+        backupWarningContinuation = nil
+    }
+
+    /// Answers the "Continue anyway" prompt shown inside the backup sheet.
+    func answerBackupWarning(continue proceed: Bool) {
+        backupWarningContinuation?.resume(returning: proceed)
+        backupWarningContinuation = nil
+        if proceed { setBackup(phase: .uploading, fraction: 0) }
     }
 
     func dismissBackup() { backup = nil }
@@ -229,6 +305,7 @@ final class StorageModel: ObservableObject {
         } else if (error as? URLError)?.code == .cancelled {
             return
         } else {
+            errorIsQuota = (error as? DriveError)?.isQuotaLimit ?? false
             errorMessage = error.localizedDescription
         }
     }

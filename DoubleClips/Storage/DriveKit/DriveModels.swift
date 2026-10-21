@@ -53,6 +53,32 @@ public struct Me: Codable, Sendable, Equatable {
     public let quotaBytes: Int64
     public let usedBytes: Int64
     public let chunkSize: Int
+    /// Largest single file the plan allows (nil from older servers).
+    public let maxFileBytes: Int64?
+    /// The account tier (free, personal, pro...). Tiers are bought in the Account Center.
+    public let plan: Plan?
+    /// Today's transfer counters and the account-wide compute quota.
+    public let usage: Usage?
+
+    public struct Plan: Codable, Sendable, Equatable {
+        public let key: String
+        public let name: String
+        public let expiresAt: Date?
+    }
+
+    public struct Usage: Codable, Sendable, Equatable {
+        public let uploadedBytes: Int64
+        public let downloadedBytes: Int64
+        public let uploadLimit: Int64
+        public let downloadLimit: Int64
+        public let resetsAt: Date
+        /// Credits, shared with every Van Vat service.
+        public let computeUsed: Double?
+        public let computeLimit: Double?
+
+        public var uploadFree: Int64 { max(0, uploadLimit - uploadedBytes) }
+        public var downloadFree: Int64 { max(0, downloadLimit - downloadedBytes) }
+    }
 }
 
 public struct Listing: Decodable, Sendable {
@@ -136,6 +162,8 @@ enum DriveDates {
 
     static func parse(_ raw: String) -> Date? {
         var s = raw
+        // DateTimes read from the database (plan expiry...) can come without a zone marker: they are UTC.
+        if s.range(of: #"(Z|[+-]\d{2}:\d{2})$"#, options: .regularExpression) == nil { s += "Z" }
         if let r = s.range(of: #"(\.\d{3})\d+"#, options: .regularExpression) {
             s.replaceSubrange(r, with: String(s[r].prefix(4)))
         }
@@ -170,4 +198,11 @@ public struct DriveError: LocalizedError, Sendable {
     }
     public var errorDescription: String? { message }
     public var isUnauthorized: Bool { status == 401 }
+
+    /// The server refused because of a quota or plan limit (storage, file size, daily transfer, compute):
+    /// the useful next step is "Get more resources" (the account tier upgrade).
+    public var isQuotaLimit: Bool {
+        guard let code else { return false }
+        return ["quota_exceeded", "file_too_large", "daily_upload_limit", "daily_download_limit", "daily_compute_limit"].contains(code)
+    }
 }

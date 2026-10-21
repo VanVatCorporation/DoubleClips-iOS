@@ -10,6 +10,7 @@ struct BackupProjectView: View {
 
     private var running: Bool {
         guard let b = model.backup else { return false }
+        if case .warning = b.phase { return true }
         return b.phase == .zipping || b.phase == .uploading
     }
 
@@ -64,6 +65,14 @@ struct BackupProjectView: View {
                     .padding(.horizontal, 40)
                 Text(backup.phase == .zipping ? "Packing “\(backup.title)”…" : "Uploading “\(backup.title)”…")
                 Text("\(Int(backup.fraction * 100))%").font(.footnote).foregroundStyle(.secondary)
+            case .warning(let message):
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 48)).foregroundStyle(.orange)
+                Text(QuotaText.uploadTitle).font(.headline)
+                Text(message).multilineTextAlignment(.center).padding(.horizontal, 30)
+                HStack {
+                    Button("Cancel") { model.answerBackupWarning(continue: false) }.buttonStyle(.bordered)
+                    Button("Continue anyway") { model.answerBackupWarning(continue: true) }.buttonStyle(.borderedProminent)
+                }
             case .done:
                 Image(systemName: "checkmark.circle.fill").font(.system(size: 56)).foregroundStyle(.green)
                 Text("Backed up to OpenEditz/Projects")
@@ -71,6 +80,7 @@ struct BackupProjectView: View {
             case .failed(let message):
                 Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 48)).foregroundStyle(.orange)
                 Text(message).multilineTextAlignment(.center).padding(.horizontal, 30)
+                if backup.quotaFailure { GetMoreResourcesButton() }
                 Button("Back") { model.dismissBackup() }.buttonStyle(.bordered)
             }
             Spacer()
