@@ -3,6 +3,8 @@ import UIKit
 
 struct HomeView: View {
     @Binding var isBlockingGestures: Bool // Controls parent TabView swipe
+    /// Shared StorageModel (owned by ContentView) — used for the "Back up to Drive" shortcut.
+    @EnvironmentObject private var storageModel: StorageModel
     
     @State private var projects: [ProjectData] = []
     @State private var isLoading: Bool = false
@@ -168,7 +170,9 @@ struct HomeView: View {
                                         }
                                     }
                                 },
-                                onUpload: { print("Upload \(project.projectTitle)") },
+                                onUpload: {
+                                    storageModel.startBackup(project)
+                                },
                                 onDelete: {
                                     projectToDelete = project
                                     showingDeleteAlert = true
@@ -285,4 +289,5 @@ struct HomeView: View {
 
 #Preview {
     HomeView(isBlockingGestures: .constant(false))
+        .environmentObject(StorageModel())
 }

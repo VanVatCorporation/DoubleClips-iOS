@@ -94,7 +94,7 @@ struct ProjectElementView: View {
         }
         
         Button(action: onUpload) {
-            Label("Upload", systemImage: "icloud.and.arrow.up")
+            Label("Back up to Drive", systemImage: "icloud.and.arrow.up")
         }
         
         Button(action: onClone) {

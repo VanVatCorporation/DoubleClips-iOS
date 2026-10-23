@@ -15,6 +15,8 @@ struct ContentView: View {
     @State private var selection: Tab = .home
     @State private var isBlockingGestures: Bool = false // Prevents tabs swipe when in Editor
     @ObservedObject private var incoming = IncomingFileCenter.shared
+    /// Shared between HomeView ("Back up" context-menu shortcut) and StorageView (full Storage tab).
+    @StateObject private var storageModel = StorageModel()
     
     // Ordered list of tabs for swipe navigation
     private let tabOrder: [Tab] = [.home, .template, .search, .storage, .profile]
@@ -22,6 +24,7 @@ struct ContentView: View {
     var body: some View {
         TabView(selection: $selection) {
             HomeView(isBlockingGestures: $isBlockingGestures)
+                .environmentObject(storageModel)
                 .tabItem {
                     Label("Home", systemImage: "house")
                 }
@@ -40,6 +43,7 @@ struct ContentView: View {
                 .tag(Tab.search)
             
             StorageView()
+                .environmentObject(storageModel)
                 .tabItem {
                     Label("Storage", systemImage: "server.rack")
                 }

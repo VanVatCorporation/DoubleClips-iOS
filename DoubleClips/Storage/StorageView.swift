@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 /// Back up projects as ZIPs, restore them, upload and download files. Everything here stays inside OpenEditz
 /// (the full Drive — sharing, trash, other folders — lives in the Van Vat Drive app).
 struct StorageView: View {
-    @StateObject private var model = StorageModel()
+    @EnvironmentObject private var model: StorageModel
     @ObservedObject private var auth = AuthRepository.shared
 
     @State private var showFolderAlert = false
