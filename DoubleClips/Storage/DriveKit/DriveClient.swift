@@ -16,13 +16,15 @@ private struct AnyEncodable: Encodable {
 /// Typed client for the Van Vat Drive API (docs/vanvat-drive-internal-api.md). Auth is `Authorization: Bearer <jwt>`.
 public final class DriveClient: @unchecked Sendable {
     public let endpoints: DriveEndpoints
-    private let session: URLSession
+    let session: URLSession                 // internal: Thumbnails.swift downloads with it
     private let tokenProvider: @Sendable () -> String?
 
     /// The server sends a fresh JWT (X-Refreshed-Token) when the current one is close to expiring: store it.
     public var onTokenRefreshed: (@Sendable (String) -> Void)?
     /// Called on any 401, so the app can sign out.
     public var onUnauthorized: (@Sendable () -> Void)?
+    /// Called when the API refuses with 403 tos_required: new terms were published, the app should refresh /me (its `legal` then shows the popup).
+    public var onTosRequired: (@Sendable () -> Void)?
 
     public init(endpoints: DriveEndpoints = DriveEndpoints(), tokenProvider: @escaping @Sendable () -> String?) {
         self.endpoints = endpoints
@@ -37,8 +39,9 @@ public final class DriveClient: @unchecked Sendable {
 
     // MARK: - Plumbing
 
-    func makeRequest(_ method: String, _ path: String, query: [String: String?] = [:], body: (any Encodable)? = nil, auth: Bool = true) throws -> URLRequest {
-        guard var comps = URLComponents(url: endpoints.drive.appendingPathComponent("api/v2/drive" + path), resolvingAgainstBaseURL: false) else {
+    func makeRequest(_ method: String, _ path: String, query: [String: String?] = [:], body: (any Encodable)? = nil, auth: Bool = true,
+                     prefix: String = "api/v2/drive") throws -> URLRequest {
+        guard var comps = URLComponents(url: endpoints.drive.appendingPathComponent(prefix + path), resolvingAgainstBaseURL: false) else {
             throw DriveError(status: 0, message: "Bad URL")
         }
         let items = query.compactMap { k, v in v.map { URLQueryItem(name: k, value: $0) } }
@@ -66,6 +69,7 @@ public final class DriveClient: @unchecked Sendable {
                 code = obj["code"] as? String
             }
             if http.statusCode == 401 { onUnauthorized?() }
+            if http.statusCode == 403, code == "tos_required" { onTosRequired?() }
             throw DriveError(status: http.statusCode, code: code, message: message)
         }
     }
@@ -130,6 +134,12 @@ public final class DriveClient: @unchecked Sendable {
         struct R: Decodable { let node: DriveNode }
         let body = destination == nil ? B(parentId: nil, moveToRoot: true) : B(parentId: destination, moveToRoot: nil)
         return try await send(R.self, "PATCH", "/nodes/\(node.id)", body: body).node
+    }
+
+    /// Turns image thumbnails on/off for this account (shared with the web and the Drive apps).
+    public func updateSettings(previewThumbnails: Bool) async throws {
+        struct B: Encodable { let previewThumbnails: Bool }
+        _ = try await send(Empty.self, "PUT", "/settings", body: B(previewThumbnails: previewThumbnails))
     }
 
     public func trash(_ node: DriveNode) async throws { _ = try await send(Empty.self, "DELETE", "/nodes/\(node.id)") }

@@ -29,6 +29,17 @@ struct StorageView: View {
             .toolbar { toolbarContent }
             .task(id: auth.currentUser?.username) { await model.reload() }
             .refreshable { await model.reload() }
+            // The Terms of Service popup: not dismissable, the only way on is accepting (the server records it).
+            .fullScreenCover(isPresented: Binding(get: { model.legalRequired != nil }, set: { _ in })) {
+                if let legal = model.legalRequired {
+                    TermsGateView(
+                        status: legal,
+                        loadDocument: { key, lang in try await DoubleClipsDrive.client.legalDocument(key: key, lang: lang) },
+                        accept: { versions, lang in try await DoubleClipsDrive.client.acceptLegal(versions: versions, lang: lang) },
+                        pageURL: { slug, lang in DoubleClipsDrive.client.legalPageURL(slug: slug, lang: lang) },
+                        onAccepted: { await model.refreshLegal() })
+                }
+            }
             .overlay { if let text = model.busyText { busyOverlay(text) } }
             // dialogs
             .alert("New folder", isPresented: $showFolderAlert) {
@@ -142,15 +153,23 @@ struct StorageView: View {
         }
     }
 
+    private func rowIcon(_ node: DriveNode) -> some View {
+        Image(systemName: symbol(for: node))
+            .font(.title3)
+            .foregroundStyle(node.isFolder ? Color.accentColor : .secondary)
+            .frame(width: 40, height: 40)
+    }
+
     @ViewBuilder private func row(_ node: DriveNode) -> some View {
         Button {
             if node.isFolder { Task { await model.enter(node) } } else { fileTarget = node }
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: symbol(for: node))
-                    .font(.title3)
-                    .foregroundStyle(node.isFolder ? Color.accentColor : .secondary)
-                    .frame(width: 30)
+                if (model.me?.previewThumbnails ?? true) && DriveClient.hasThumbnail(node) {
+                    StorageThumbnail(node: node) { rowIcon(node) }
+                } else {
+                    rowIcon(node)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(node.name).lineLimit(1)
                     Text(node.isFolder ? node.updatedAt.formatted(date: .abbreviated, time: .omitted)

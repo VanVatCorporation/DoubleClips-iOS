@@ -59,6 +59,18 @@ public struct Me: Codable, Sendable, Equatable {
     public let plan: Plan?
     /// Today's transfer counters and the account-wide compute quota.
     public let usage: Usage?
+    /// Per-account Drive preferences (nil from older servers).
+    public let settings: Settings?
+    /// Terms of Service / Privacy Policy: what this user still has to accept (a blocking popup when `required`).
+    public let legal: LegalStatus?
+
+    public struct Settings: Codable, Sendable, Equatable {
+        /// nil = default (on).
+        public let previewThumbnails: Bool?
+    }
+
+    /// Image thumbnails in the lists: on unless the account turned them off.
+    public var previewThumbnails: Bool { settings?.previewThumbnails ?? true }
 
     public struct Plan: Codable, Sendable, Equatable {
         public let key: String
@@ -198,6 +210,9 @@ public struct DriveError: LocalizedError, Sendable {
     }
     public var errorDescription: String? { message }
     public var isUnauthorized: Bool { status == 401 }
+
+    /// New terms were published and the user has not accepted them yet.
+    public var isTosRequired: Bool { code == "tos_required" }
 
     /// The server refused because of a quota or plan limit (storage, file size, daily transfer, compute):
     /// the useful next step is "Get more resources" (the account tier upgrade).

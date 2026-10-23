@@ -259,6 +259,7 @@ final class StorageModel: ObservableObject {
                 if Task.isCancelled { backup = nil } else {
                     setBackup(phase: .failed(error.localizedDescription))
                     if (error as? DriveError)?.isQuotaLimit == true { backup?.quotaFailure = true }
+                    if (error as? DriveError)?.isTosRequired == true { await refreshQuota() }     // the Terms popup appears
                 }
             }
             ProjectExporter.cleanOldFiles()
@@ -293,13 +294,23 @@ final class StorageModel: ObservableObject {
         backup = b
     }
 
-    private func refreshQuota() async {
+    func refreshQuota() async {
         if let fresh = try? await DoubleClipsDrive.client.me() { me = fresh }
     }
 
     // MARK: - Helpers
 
+    /// Which Terms of Service / Privacy Policy the user still has to accept (from /me); the Storage tab shows a blocking popup.
+    var legalRequired: LegalStatus? { me?.legal?.required == true ? me?.legal : nil }
+
+    /// Re-reads /me after accepting (or after the server said tos_required): the popup follows `legalRequired`.
+    func refreshLegal() async { await refreshQuota() }
+
     private func handle(_ error: Error) {
+        if (error as? DriveError)?.isTosRequired == true {
+            Task { await refreshQuota() }           // new terms were published: /me says so, the popup appears
+            return
+        }
         if let drive = error as? DriveError, drive.isUnauthorized {
             errorMessage = "Your session expired. Please sign in again from the Profile tab."
         } else if (error as? URLError)?.code == .cancelled {
