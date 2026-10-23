@@ -8,6 +8,7 @@ struct HomeView: View {
     
     @State private var projects: [ProjectData] = []
     @State private var isLoading: Bool = false
+    @State private var showBackupSheet = false
     // Import project (ZIP) — see ProjectImporter.swift
     @StateObject private var importer = ProjectImportController()
     @State private var showImporter = false
@@ -172,6 +173,7 @@ struct HomeView: View {
                                 },
                                 onUpload: {
                                     storageModel.startBackup(project)
+                                    showBackupSheet = true
                                 },
                                 onDelete: {
                                     projectToDelete = project
@@ -239,6 +241,9 @@ struct HomeView: View {
                     showAddProjectPopup = false
                 }
             )
+        }
+        .sheet(isPresented: $showBackupSheet) {
+            BackupProjectView(model: storageModel)
         }
         .projectImport(controller: importer, showImporter: $showImporter, onProjectsChanged: { loadProjects() })
         .projectShare(controller: shareController)
