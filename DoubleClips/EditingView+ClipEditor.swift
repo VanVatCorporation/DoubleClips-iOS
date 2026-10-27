@@ -201,7 +201,10 @@ extension EditingView {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.plain)
-                    
+                }
+                
+                // Audio clips animate their volume, so they get the same list: every key with its easing chip.
+                if isVisual || clip.type == .audio {
                     SectionTitle(text: "Keyframes (\(clip.keyframes.keyframes.count))")
                     keyframeList
                 }

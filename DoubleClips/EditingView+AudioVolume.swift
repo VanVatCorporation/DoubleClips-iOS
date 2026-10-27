@@ -64,6 +64,11 @@ extension EditingView {
                       let track = composition.track(withTrackID: trackID) else { continue }
                 let input = AVMutableAudioMixInputParameters(track: track)
                 
+                // AVFoundation throws when two ramps of a track overlap, even by a rounding sliver. So every break point is
+                // converted to a CMTime ONCE and shared: the end of one ramp IS the start of the next, and nothing may start
+                // before the previous instruction ended (clips are sequential on a track; this also survives a malformed overlap).
+                var lastEnd = CMTime.zero
+                
                 for entry in list.sorted(by: { $0.startTime < $1.startTime }) where entry.duration > 0 {
                     func gain(at local: Float) -> Float {
                         Self.gain(entry.baseProperties, entry.keyframes, clipStart: entry.startTime,
@@ -71,7 +76,9 @@ extension EditingView {
                     }
                     
                     guard entry.keyframes.isAnimated(.volume) else {
-                        input.setVolume(gain(at: 0), at: time(entry.startTime))
+                        let at = max(time(entry.startTime), lastEnd)
+                        input.setVolume(gain(at: 0), at: at)
+                        lastEnd = at
                         continue
                     }
                     
@@ -90,20 +97,30 @@ extension EditingView {
                         for j in 0..<pieces { marks.append(from + (to - from) * Float(j) / Float(pieces)) }
                     }
                     marks.append(entry.duration)
-                    guard marks.count >= 2 else {
-                        input.setVolume(gain(at: 0), at: time(entry.startTime))
-                        continue
+                    
+                    // One CMTime per mark, from the absolute time in Double (not Float): the same value ends one ramp and starts the next.
+                    let times: [CMTime] = marks.map {
+                        CMTime(seconds: Double(entry.startTime) + Double($0), preferredTimescale: 6000)
                     }
                     
+                    var wroteAny = false
                     for i in 0..<(marks.count - 1) {
-                        let from = marks[i], to = marks[i + 1]
+                        let start = max(times[i], lastEnd)
+                        let end = times[i + 1]
+                        guard end > start else { continue }              // empty or already covered
+                        let startGain = gain(at: marks[i])
                         // The end of a step is read just before the next mark, so a key that holds its value (or the start
                         // of the next segment) isn't pulled into this step.
-                        let startGain = gain(at: from)
-                        let endGain = gain(at: max(to - 0.0002, from))
+                        let endGain = gain(at: max(marks[i + 1] - 0.0002, marks[i]))
                         input.setVolumeRamp(fromStartVolume: startGain, toEndVolume: endGain,
-                                            timeRange: CMTimeRange(start: time(entry.startTime + from),
-                                                                   duration: time(to - from)))
+                                            timeRange: CMTimeRange(start: start, end: end))
+                        lastEnd = end
+                        wroteAny = true
+                    }
+                    if !wroteAny {
+                        let at = max(time(entry.startTime), lastEnd)
+                        input.setVolume(gain(at: 0), at: at)
+                        lastEnd = at
                     }
                 }
                 parameters.append(input)

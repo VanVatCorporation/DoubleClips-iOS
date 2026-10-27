@@ -56,14 +56,15 @@ struct ClipVisualContent: View {
                         ClipWaveformView(url: url, startTrim: clip.startClipTrim,
                                          pps: pps, blockWidth: blockWidth,
                                          height: Constants.VIDEO_WAVEFORM_BAND_HEIGHT,
-                                         visible: visible, timeMap: clip.visualTimeMap, isBand: true)
+                                         visible: visible, timeMap: clip.visualTimeMap, isBand: true,
+                                         volume: WaveformVolume(clip))
                     }
                 }
                 .frame(width: blockWidth, height: height, alignment: .bottomLeading)
             case .audio:
                 ClipWaveformView(url: url, startTrim: clip.startClipTrim,
                                  pps: pps, blockWidth: blockWidth, height: height, visible: visible,
-                                 timeMap: clip.visualTimeMap)
+                                 timeMap: clip.visualTimeMap, volume: WaveformVolume(clip))
             default:
                 EmptyView()
             }
@@ -153,6 +154,8 @@ struct ClipWaveformView: View {
     var timeMap: EditingView.ClipTimeMap? = nil
     /// Video blocks: a short, white-on-scrim strip instead of the full-height navy audio block.
     var isBand: Bool = false
+    /// The clip's volume (static or keyframed): each bar is drawn at the loudness you will HEAR, not the file's own. nil = as recorded.
+    var volume: WaveformVolume? = nil
     @State private var envelope: WaveformEnvelope?
     
     // Android: thumbnailAudioBarWidth / thumbnailAudioBarGap. Edited live in the project settings
@@ -181,6 +184,8 @@ struct ClipWaveformView: View {
             
             let stride = barWidth + barGap
             let maxHalf = midY - 2
+            let animatedVolume = volume?.keyframes.isAnimated(.volume) ?? false
+            let flatGain = volume?.gain(atLocal: 0) ?? 1
             let firstBar = max(0, Int((sliceStart / stride).rounded(.down)))
             let lastBar = Int(((sliceStart + sliceWidth) / stride).rounded(.up))
             guard firstBar <= lastBar else { return }
@@ -192,7 +197,12 @@ struct ClipWaveformView: View {
                 let local0 = Double(blockX / max(pps, 1)), local1 = Double((blockX + stride) / max(pps, 1))
                 let t0 = Double(startTrim) + (timeMap?.sourceOffset(atLocal: local0) ?? local0)
                 let t1 = Double(startTrim) + (timeMap?.sourceOffset(atLocal: local1) ?? local1)
-                let amp = CGFloat(envelope.rms(from: t0, to: t1))
+                var level = envelope.rms(from: t0, to: t1)
+                if let volume {
+                    // The gain under the middle of the bar (timeline seconds into the clip); bars over 100 % just touch the edges.
+                    level = min(level * (animatedVolume ? volume.gain(atLocal: Float((local0 + local1) / 2)) : flatGain), 1)
+                }
+                let amp = CGFloat(level)
                 let half = max(2, amp * maxHalf)
                 let rect = CGRect(x: blockX - sliceStart, y: midY - half, width: barWidth, height: half * 2)
                 // Android: alpha = 10 + 245 * amp — quiet parts fade away, loud ones are solid.
@@ -208,5 +218,25 @@ struct ClipWaveformView: View {
         .task(id: url.lastPathComponent) {
             envelope = await ClipMediaCache.shared.waveform(for: url)
         }
+    }
+}
+
+
+/// Value snapshot of a clip's volume for the waveform: the same gain the audio mix and the scrub audio use
+/// (EditingView+AudioVolume.swift), so the picture follows the keyframe curve and the static Volume.
+struct WaveformVolume {
+    let properties: EditingView.VideoProperties
+    let keyframes: EditingView.AnimatedProperty
+    let clipStart: Float
+    
+    init(_ clip: EditingView.Clip) {
+        properties = clip.videoProperties
+        keyframes = clip.keyframes
+        clipStart = clip.startTime
+    }
+    
+    /// The gain `local` timeline seconds into the clip.
+    func gain(atLocal local: Float) -> Float {
+        EditingView.AudioVolume.gain(properties, keyframes, clipStart: clipStart, at: clipStart + local)
     }
 }
