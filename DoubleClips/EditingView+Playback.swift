@@ -282,6 +282,7 @@ extension EditingView {
             if let videoComposition = built.videoComposition {
                 item.videoComposition = videoComposition
             }
+            item.audioMix = built.audioMix          // clip volumes (static and keyframed)
             
             currentComposition = composition
             scrubAudio.setSources(built.scrubSources)

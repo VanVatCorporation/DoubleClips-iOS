@@ -43,6 +43,9 @@ extension EditingView {
         let duration: Double
         /// Timeline seconds -> source seconds (speed); read only on the audio queue.
         let timeMap: ClipTimeMap
+        /// The clip's volume (static and keyframed), applied to its grains like the preview / export mix does.
+        var baseProperties = VideoProperties()
+        var keyframes = AnimatedProperty()
     }
     
     /// Scrub audio as a small granular engine.
@@ -233,9 +236,11 @@ extension EditingView {
                 guard let chunk = read(source.url, at: clipTime), let data = chunk.floatChannelData else { continue }
                 let frames = min(Int(chunk.frameLength), grainFrames)
                 let channels = Int(chunk.format.channelCount)
+                let gain = AudioVolume.gain(source.baseProperties, source.keyframes,
+                                            clipStart: Float(source.startTime), at: Float(seconds))
                 for channel in 0..<2 {
                     let from = data[min(channel, channels - 1)]
-                    for i in 0..<frames { mix[channel][i] += from[i] }
+                    for i in 0..<frames { mix[channel][i] += from[i] * gain }
                 }
                 any = true
             }

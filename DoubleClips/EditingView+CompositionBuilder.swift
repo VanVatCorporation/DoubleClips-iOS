@@ -25,6 +25,8 @@ extension EditingView {
         let scrubSources: [ScrubSource]
         /// Number of visual layers (video, image, text clips) that were composited.
         let layerCount: Int
+        /// Clip volumes, static and keyframed (EditingView+AudioVolume.swift); nil = no clip changes its loudness.
+        let audioMix: AVAudioMix?
     }
 
     enum CompositionBuilder {
@@ -47,6 +49,7 @@ extension EditingView {
             var drawOrder = 0
             var contentEnd: Float = 0
             var scrubSources: [ScrubSource] = []
+            var audioVolumes: [AudioVolumeEntry] = []
             
             for trackModel in timeline.tracks.sorted(by: { $0.timelineIndex < $1.timelineIndex }) {
                 /// Video lanes of this track (see the header). Reused whenever they are free.
@@ -188,12 +191,17 @@ extension EditingView {
                                 compositionAudioTrack = composition.addMutableTrack(withMediaType: .audio,
                                                                                     preferredTrackID: kCMPersistentTrackID_Invalid)
                             }
-                            if let audioTrack = compositionAudioTrack { _ = insertFootage(of: audioSource, into: audioTrack) }
+                            if let audioTrack = compositionAudioTrack, insertFootage(of: audioSource, into: audioTrack) {
+                                audioVolumes.append(AudioVolumeEntry(trackID: audioTrack.trackID, startTime: clip.startTime,
+                                                                     duration: clip.duration, baseProperties: clip.videoProperties,
+                                                                     keyframes: clip.keyframes))
+                            }
                             // Same clips, same condition as the composition's audio: what scrubbing
                             // plays is exactly what playback would.
                             scrubSources.append(ScrubSource(url: clipURL, startTime: Double(clip.startTime),
                                                             startTrim: Double(clip.startClipTrim),
-                                                            duration: Double(clip.duration), timeMap: clip.timeMap))
+                                                            duration: Double(clip.duration), timeMap: clip.timeMap,
+                                                            baseProperties: clip.videoProperties, keyframes: clip.keyframes))
                         }
                         
                     case .image:
@@ -296,7 +304,8 @@ extension EditingView {
                                     videoComposition: builtVideoComposition,
                                     settings: projectSettings,
                                     scrubSources: scrubSources,
-                                    layerCount: layers.count)
+                                    layerCount: layers.count,
+                                    audioMix: AudioVolume.makeMix(audioVolumes, in: composition))
         }
     }
 }

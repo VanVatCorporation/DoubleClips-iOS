@@ -180,7 +180,7 @@ extension EditingView {
                 if clip.type == .video || clip.type == .audio {
                     SectionTitle(text: "Playback")
                     slider("Speed", \.valueSpeed, 0.1...4, reset: 1)
-                    field("Volume", \.valueVolume)
+                    slider("Volume", \.valueVolume, 0...2, reset: 1)
                     toggle("Mute audio", clip.isMute) { $0.isMute = $1 }
                     if clip.type == .video {
                         toggle("Reverse", clip.isReverse) { $0.isReverse = $1 }
