@@ -147,6 +147,10 @@ struct ProfileView: View {
                             if isLoggedIn {
                                 SettingsRow(icon: "chart.bar.fill", title: "Statistics", height: 50)
                                 Divider().padding(.leading, 56)
+                                Button(action: { templateCollection = .mine }) {
+                                    SettingsRow(icon: "film.stack", title: "My Templates", height: 50)
+                                }
+                                Divider().padding(.leading, 56)
                                 Button(action: { templateCollection = .liked }) {
                                     SettingsRow(icon: "heart.fill", title: "Liked Templates", height: 50)
                                 }

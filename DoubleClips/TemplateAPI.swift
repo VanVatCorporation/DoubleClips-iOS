@@ -14,6 +14,7 @@ enum TemplateFeedSource: Hashable, Identifiable {
     case search(String)
     case liked                 // Profile → Liked Templates
     case bookmarked            // Profile → Saved Templates
+    case mine                  // Profile → My Templates: what this account posted, newest first
 
     var id: String {
         switch self {
@@ -21,6 +22,7 @@ enum TemplateFeedSource: Hashable, Identifiable {
         case .search(let query): return "search:" + query
         case .liked: return "liked"
         case .bookmarked: return "bookmarked"
+        case .mine: return "mine"
         }
     }
 }
@@ -184,6 +186,12 @@ enum TemplateAPI {
         case .feed: path = "/templates/feed"
         case .liked: path = "/templates/liked"
         case .bookmarked: path = "/templates/bookmarked"
+        case .mine:
+            // The same endpoint as browse, filtered by author = this account.
+            guard let me = viewer else { throw TemplateAPIError.loginRequired }
+            path = "/templates"
+            query.append(URLQueryItem(name: "author", value: me))
+            query.append(URLQueryItem(name: "sort", value: "new"))
         case .search(let text):
             path = "/templates"
             query.append(URLQueryItem(name: "q", value: text))

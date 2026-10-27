@@ -10,11 +10,18 @@ struct TemplateCollectionView: View {
     @ObservedObject private var states = TemplateStateStore.shared
     @State private var navigationPath = NavigationPath()
 
-    private var title: String { source == .bookmarked ? "Saved templates" : "Liked templates" }
+    private var title: String {
+        switch source {
+        case .bookmarked: return "Saved templates"
+        case .mine: return "My templates"
+        default: return "Liked templates"
+        }
+    }
 
     /// What no longer belongs (unliked / unsaved in the preview) leaves the list at once, without a reload.
     private var visible: [TemplateData] {
         pager.items.filter { t in
+            if source == .mine { return true }               // everything this account posted stays listed
             let s = states.state(for: t)
             return source == .bookmarked ? s.isBookmarked : s.isLiked
         }
