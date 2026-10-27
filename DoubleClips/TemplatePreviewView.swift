@@ -1,17 +1,24 @@
 import SwiftUI
 
 struct TemplatePreviewView: View {
-    @State var templates: [TemplateData] // Passed from previous screen
-    @State var initialScrollIndex: Int = 0 // Which item to start on
+    /// The list the user came from (feed / search / liked / saved). Shared with that screen: swiping near the end
+    /// loads the next page into the same list, so the grid underneath grows too.
+    @ObservedObject var pager: TemplatePager
+    @State var initialScrollIndex: Int // Which item to start on
     
     @Environment(\.presentationMode) var presentationMode
+    
+    init(pager: TemplatePager, initialScrollIndex: Int = 0) {
+        self.pager = pager
+        _initialScrollIndex = State(initialValue: initialScrollIndex)
+    }
     
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
                 Color.black.edgesIgnoringSafeArea(.all) // Ensure black background
                 
-                if templates.isEmpty {
+                if pager.items.isEmpty {
                     Text("No Templates")
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -19,11 +26,12 @@ struct TemplatePreviewView: View {
                     // Vertical Paging using Rotated TabView
                     // Width and Height are swapped for the container
                     TabView(selection: $initialScrollIndex) {
-                        ForEach(Array(templates.enumerated()), id: \.offset) { index, template in
+                        ForEach(Array(pager.items.enumerated()), id: \.offset) { index, template in
                             TemplatePreviewItemView(
                                 template: template,
                                 index: index,
-                                currentIndex: initialScrollIndex
+                                currentIndex: initialScrollIndex,
+                                onBecameActive: { pager.loadNextIfNeeded(afterIndex: index) }
                             )
                             .background(ScrollEdgeEffectProbe()) // switches the paging scroll view's edge blur off
                             .tag(index)
@@ -75,6 +83,12 @@ struct TemplatePreviewItemView: View {
     let template: TemplateData
     let index: Int
     let currentIndex: Int
+    /// This page came on screen (the parent loads the next page when it is near the end of the list).
+    var onBecameActive: () -> Void = { }
+    
+    /// Likes, bookmarks and counters: the newest numbers the app knows (grid, Profile lists and this page agree).
+    @ObservedObject private var states = TemplateStateStore.shared
+    private var live: TemplateData { states.applied(template) }
     
     // Computed property for active state
     var isActive: Bool {
@@ -91,118 +105,46 @@ struct TemplatePreviewItemView: View {
     @State private var timelineError: String?
     @State private var showOldTemplate = false
     
-    // Mock States for interactivity
-    @State private var isLiked: Bool = false
-    @State private var likeCount: Int = 0
-    @State private var isBookmarked: Bool = false
-    @State private var bookmarkCount: Int = 0
-    
     @State private var showLoginAlert: Bool = false
+    @State private var loginMessage: String = "Please login to like this template"
+    @State private var actionError: String?
     // "Use template" -> TemplateExportView (Android: TemplateExportActivity)
     @State private var showTemplateExport: Bool = false
     
-    // API Function
+    // Like / bookmark: the heart answers at once, the request carries the wanted state, the server's numbers replace ours,
+    // and a failure puts everything back (all in TemplateAPI).
     func toggleLike() {
-        guard let user = AuthRepository.shared.currentUser else {
+        guard TemplateAPI.viewer != nil else {
+            loginMessage = "Please login to like this template"
             showLoginAlert = true
             return
         }
-        
-        // Optimistic Update
-        let wasLiked = isLiked
-        isLiked.toggle()
-        likeCount += isLiked ? 1 : -1
-        
-        // API Call
-        guard let url = URL(string: "https://app.vanvatcorp.com/doubleclips/api/toggle-like") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let body: [String: Any] = [
-            "username": user.username,
-            "templateId": template.templateId
-        ]
-        
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        } catch {
-            print("Failed to encode like body: \(error)")
-            return
+        let want = !(live.isLiked ?? false)
+        Task {
+            do { try await TemplateAPI.setLike(template, liked: want) }
+            catch { actionError = error.localizedDescription }
         }
-        
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                print("Like API Error: \(error)")
-                DispatchQueue.main.async {
-                    // Revert on error
-                    isLiked = wasLiked
-                    likeCount += isLiked ? 1 : -1
-                }
-                return
-            }
-            
-            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-                print("Like API Failed Status: \(httpResponse.statusCode)")
-                DispatchQueue.main.async {
-                    // Revert on failure
-                    isLiked = wasLiked
-                    likeCount += isLiked ? 1 : -1
-                }
-            }
-        }.resume()
     }
     
-    // Bookmark Function
     func toggleBookmark() {
-        guard let user = AuthRepository.shared.currentUser else {
+        guard TemplateAPI.viewer != nil else {
+            loginMessage = "Please login to bookmark this template"
             showLoginAlert = true
             return
         }
-        
-        // Optimistic Update
-        let wasBookmarked = isBookmarked
-        isBookmarked.toggle()
-        bookmarkCount += isBookmarked ? 1 : -1
-        
-        // API Call
-        guard let url = URL(string: "https://app.vanvatcorp.com/doubleclips/api/toggle-bookmark") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let body: [String: Any] = [
-            "username": user.username,
-            "templateId": template.templateId
-        ]
-        
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        } catch {
-            print("Failed to encode bookmark body: \(error)")
-            return
+        let want = !(live.isBookmarked ?? false)
+        Task {
+            do { try await TemplateAPI.setBookmark(template, bookmarked: want) }
+            catch { actionError = error.localizedDescription }
         }
-        
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                print("Bookmark API Error: \(error)")
-                DispatchQueue.main.async {
-                    // Revert on error
-                    isBookmarked = wasBookmarked
-                    bookmarkCount += isBookmarked ? 1 : -1
-                }
-                return
-            }
-            
-            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-                print("Bookmark API Failed Status: \(httpResponse.statusCode)")
-                DispatchQueue.main.async {
-                    // Revert on failure
-                    isBookmarked = wasBookmarked
-                    bookmarkCount += isBookmarked ? 1 : -1
-                }
-            }
-        }.resume()
+    }
+    
+    /// This page is the one on screen: report the view (the server counts once per viewer per 30 minutes)
+    /// and let the parent load more when the list is nearly over.
+    private func pageBecameActive() {
+        activatePreview()
+        onBecameActive()
+        Task { await TemplateAPI.postView(template.templateId) }
     }
     
     var body: some View {
@@ -281,9 +223,9 @@ struct TemplatePreviewItemView: View {
                     
                     // Heart
                     ActionItem(
-                        icon: isLiked ? "heart.fill" : "heart",
-                        label: "\(/*isLiked ? likeCount + 1 : */likeCount)",
-                        color: isLiked ? .red : .white
+                        icon: (live.isLiked ?? false) ? "heart.fill" : "heart",
+                        label: "\(live.heartCount)",
+                        color: (live.isLiked ?? false) ? .red : .white
                     ) {
                         toggleLike()
                     }
@@ -291,7 +233,7 @@ struct TemplatePreviewItemView: View {
                     // Comment
                     ActionItem(
                         icon: "bubble.right.fill", // baseline_comment_24
-                        label: "\(template.comments.count)", // assuming mock comments or 0
+                        label: "\(live.commentCount)", // the server's count (the comments panel is not on iOS yet)
                         color: .white
                     ) {
                         print("Open Comments")
@@ -299,9 +241,9 @@ struct TemplatePreviewItemView: View {
                     
                     // Bookmark
                     ActionItem(
-                        icon: isBookmarked ? "bookmark.fill" : "bookmark",
-                        label: "\(/*isBookmarked ? bookmarkCount + 1 : */bookmarkCount)",
-                        color: isBookmarked ? .yellow : .white
+                        icon: (live.isBookmarked ?? false) ? "bookmark.fill" : "bookmark",
+                        label: "\(live.bookmarkCount)",
+                        color: (live.isBookmarked ?? false) ? .yellow : .white
                     ) {
                         toggleBookmark()
                     }
@@ -369,15 +311,10 @@ struct TemplatePreviewItemView: View {
         }
         
         .onAppear {
-            if isActive { activatePreview() }
-            // Init mock counts
-            likeCount = template.heartCount
-            bookmarkCount = template.bookmarkCount
-            isLiked = template.isLiked ?? false
-            isBookmarked = template.isBookmarked ?? false
+            if isActive { pageBecameActive() }
         }
         .onChange(of: isActive) { active in
-            if active { activatePreview() } else { preview.deactivate() }
+            if active { pageBecameActive() } else { preview.deactivate() }
         }
         .task(id: isActive) {
             // The template's timeline for the strip: from the server's timeline JSON when it has one,
@@ -406,7 +343,12 @@ struct TemplatePreviewItemView: View {
                 // In Android it just shows "Please login to like this template"
             }
         } message: {
-            Text("Please login to like this template")
+            Text(loginMessage)
+        }
+        .alert("Couldn't update", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(actionError ?? "")
         }
     }
     
@@ -465,9 +407,4 @@ struct ActionItem: View {
             }
         }
     }
-}
-
-// Temporary Mock for TemplateData extension if comments missing in model
-extension TemplateData {
-    var comments: [String] { [] } // Placeholder until Comment model added
 }

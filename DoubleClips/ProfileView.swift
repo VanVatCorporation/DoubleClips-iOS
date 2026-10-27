@@ -5,6 +5,8 @@ struct ProfileView: View {
     @State private var isLoading: Bool = false
     @State private var showLoginView: Bool = false
     @State private var showSettingsView: Bool = false
+    /// The account's Liked / Saved templates, shown full screen.
+    @State private var templateCollection: TemplateFeedSource?
     
     var isLoggedIn: Bool {
         authRepo.currentUser != nil
@@ -145,7 +147,13 @@ struct ProfileView: View {
                             if isLoggedIn {
                                 SettingsRow(icon: "chart.bar.fill", title: "Statistics", height: 50)
                                 Divider().padding(.leading, 56)
-                                SettingsRow(icon: "heart.fill", title: "Saved Templates", height: 50)
+                                Button(action: { templateCollection = .liked }) {
+                                    SettingsRow(icon: "heart.fill", title: "Liked Templates", height: 50)
+                                }
+                                Divider().padding(.leading, 56)
+                                Button(action: { templateCollection = .bookmarked }) {
+                                    SettingsRow(icon: "bookmark.fill", title: "Saved Templates", height: 50)
+                                }
                                 Divider().padding(.leading, 56)
                                 SettingsRow(icon: "questionmark.circle.dashed", title: "Legal information", height: 50)
                                 
@@ -197,6 +205,9 @@ struct ProfileView: View {
                 NavigationStack {
                     SettingsView()
                 }
+            }
+            .fullScreenCover(item: $templateCollection) { source in
+                TemplateCollectionView(source: source)
             }
             
             if isLoading {

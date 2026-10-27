@@ -234,13 +234,9 @@ enum TemplateRenderer {
 // MARK: - Use count
 
 enum TemplateUseCounter {
-    /// Android / the v1 server: POST /api/increment-use { templateId }. Best effort.
+    /// POST /api/increment-use (backend v2) through TemplateAPI, which also sends the account / device so the server can
+    /// ignore a double-fire and keep the use count of the template in step everywhere. Best effort.
     static func increment(_ templateId: String) {
-        guard let url = URL(string: Constants.TEMPLATE_INCREMENT_USE_URL) else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["templateId": templateId])
-        URLSession.shared.dataTask(with: request).resume()
+        Task { @MainActor in await TemplateAPI.postUse(templateId) }
     }
 }

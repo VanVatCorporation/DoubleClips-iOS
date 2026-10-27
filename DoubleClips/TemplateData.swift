@@ -24,6 +24,8 @@ struct TemplateData: Identifiable, Codable, Hashable {
     var heartCount: Int
     // var comments: [TemplateComment] // Deferred for now as per "handle later" instruction
     var bookmarkCount: Int
+    /// Comments on the template, as the server counts them (the comments panel itself is not on iOS yet).
+    var commentCount: Int = 0
     
     // User Interaction State
     var isLiked: Bool?
@@ -47,7 +49,7 @@ extension TemplateData {
         case templateSnapshotLink, templateVideoLink, templateTimestamp, templateDuration
         case templateTotalClip, additionalResourceName, viewCount, useCount, heartCount
         case templateTimelineLink, templateContentLink
-        case bookmarkCount, isLiked, isBookmarked
+        case bookmarkCount, commentCount, isLiked, isBookmarked
     }
 
     init(from decoder: Decoder) throws {
@@ -76,6 +78,7 @@ extension TemplateData {
                   useCount: Int(clamping: c.lenientInt64(.useCount)),
                   heartCount: Int(clamping: c.lenientInt64(.heartCount)),
                   bookmarkCount: Int(clamping: c.lenientInt64(.bookmarkCount)),
+                  commentCount: Int(clamping: c.lenientInt64(.commentCount)),
                   isLiked: c.lenientBool(.isLiked),
                   isBookmarked: c.lenientBool(.isBookmarked))
     }
@@ -94,6 +97,31 @@ extension TemplateData {
         }
         return (result, items.count - result.count)
     }
+}
+
+extension TemplateData {
+    /// Decodes one page of the paged endpoints (`{ items, nextCursor, hasMore, personalized }`): same tolerance as
+    /// `decodeList` (a malformed template is skipped, never the page). Returns nil when the payload isn't an envelope.
+    static func decodePage(from data: Data) -> TemplatePage? {
+        guard let envelope = try? JSONDecoder().decode(TemplatePageEnvelope.self, from: data) else { return nil }
+        var seen = Set<String>()
+        var result: [TemplateData] = []
+        for item in envelope.items {
+            if let template = item.value, seen.insert(template.templateId).inserted { result.append(template) }
+        }
+        let cursor = (envelope.nextCursor?.isEmpty == false) ? envelope.nextCursor : nil
+        return TemplatePage(items: result,
+                            nextCursor: cursor,
+                            hasMore: (envelope.hasMore ?? false) && cursor != nil,
+                            personalized: envelope.personalized ?? false)
+    }
+}
+
+private struct TemplatePageEnvelope: Decodable {
+    let items: [LossyTemplate]
+    let nextCursor: String?
+    let hasMore: Bool?
+    let personalized: Bool?
 }
 
 /// One list element that never throws: a malformed template becomes `nil`.

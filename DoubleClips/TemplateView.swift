@@ -1,28 +1,11 @@
 import SwiftUI
 
 struct TemplateView: View {
-    @State private var templates: [TemplateData] = []
-    @State private var isLoading: Bool = false
+    /// The feed (or the search results): loaded a page at a time as the user scrolls, by the server's ranking.
+    @StateObject private var pager = TemplatePager()
     @State private var searchText: String = ""
     
     @State private var navigationPath = NavigationPath()
-    
-    // Masonry Grid Helpers
-    var filteredTemplates: [TemplateData] {
-        if searchText.isEmpty {
-            return templates
-        } else {
-            return templates.filter { $0.templateTitle.localizedCaseInsensitiveContains(searchText) }
-        }
-    }
-    
-    var leftColumnTemplates: [TemplateData] {
-        filteredTemplates.enumerated().filter { $0.offset % 2 == 0 }.map { $0.element }
-    }
-    
-    var rightColumnTemplates: [TemplateData] {
-        filteredTemplates.enumerated().filter { $0.offset % 2 != 0 }.map { $0.element }
-    }
     
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -72,85 +55,37 @@ struct TemplateView: View {
                     .padding(.bottom, 16)
                     
                     // ── Template List ─────────────────────────────────────────
-                    // Matches: SwipeRefreshLayout + StaggeredGridLayoutManager(2 cols)
-                    GeometryReader { geometry in
-                        let spacing: CGFloat = 4 // ~3dp like Android
-                        let itemWidth = (geometry.size.width - (spacing * 3)) / 2
-                        
-                        ScrollView {
-                            HStack(alignment: .top, spacing: spacing) {
-                                // Left Column
-                                LazyVStack(spacing: spacing) {
-                                    ForEach(leftColumnTemplates) { template in
-                                        TemplateElementView(template: template, itemWidth: itemWidth)
-                                            .onTapGesture {
-                                                navigationPath.append(template)
-                                            }
-                                    }
-                                }
-                                
-                                // Right Column
-                                LazyVStack(spacing: spacing) {
-                                    ForEach(rightColumnTemplates) { template in
-                                        TemplateElementView(template: template, itemWidth: itemWidth)
-                                            .onTapGesture {
-                                                navigationPath.append(template)
-                                            }
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, spacing)
-                            .padding(.bottom, 80) // Match Android paddingBottom="80dp" for nav bar
-                        }
-                        .refreshable {
-                            loadTemplates()
-                        }
-                    }
+                    // Matches: SwipeRefreshLayout + StaggeredGridLayoutManager(2 cols), now an endless feed
+                    TemplateMasonryGrid(templates: pager.items,
+                                        isLoading: pager.isLoading,
+                                        emptyText: pager.didStart ? "No templates found" : nil,
+                                        onSelect: { navigationPath.append($0) },
+                                        onAppearItem: { pager.loadNextIfNeeded(near: $0) })
+                        .refreshable { await pager.restart() }   // a new feed session
                 }
-                
-                // ── Center Progress Bar ───────────────────────────────────────
-                // Matches: ProgressBar android:layout_centerInParent="true"
-                if isLoading && templates.isEmpty {
-                    ProgressView()
-                        .scaleEffect(1.5)
+            }
+            .task(id: searchText) {
+                // Runs on first appearance (the feed) and again whenever the text changes. Typing cancels the previous run,
+                // so waiting a moment here is the debounce. Coming back from a preview changes nothing: no reload.
+                let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let wanted: TemplateFeedSource = query.isEmpty ? .feed : .search(query)
+                if pager.didStart && pager.source == wanted && !pager.viewerChanged { return }
+                if pager.didStart && !query.isEmpty {
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    if Task.isCancelled { return }
                 }
+                await pager.start(wanted)
             }
             .onAppear {
-                loadTemplates()
+                // Signed in / out in the Profile tab: the likes in this list belong to the previous account.
+                if pager.viewerChanged { Task { await pager.restart() } }
             }
             .navigationDestination(for: TemplateData.self) { template in
-                if let index = templates.firstIndex(where: { $0.id == template.id }) {
-                    TemplatePreviewView(templates: templates, initialScrollIndex: index)
+                if let index = pager.items.firstIndex(where: { $0.id == template.id }) {
+                    TemplatePreviewView(pager: pager, initialScrollIndex: index)
                 }
             }
         }
-    }
-    
-    // MARK: - Data Loading
-    
-    func loadTemplates() {
-        isLoading = true
-        
-        guard let url = URL(string: "https://app.vanvatcorp.com/doubleclips/api/fetch-templates") else {
-            isLoading = false
-            return
-        }
-        
-        URLSession.shared.dataTask(with: url) { data, _, error in
-            DispatchQueue.main.async {
-                isLoading = false
-                guard let data = data, error == nil else { return }
-                // Tolerant: a malformed template is skipped (and logged), never the whole list.
-                if let result = TemplateData.decodeList(from: data) {
-                    if result.skipped > 0 {
-                        print("[Templates] Skipped \(result.skipped) malformed/duplicate template(s); loaded \(result.templates.count).")
-                    }
-                    self.templates = result.templates
-                } else {
-                    print("[Templates] Response was not a JSON array; keeping the current list.")
-                }
-            }
-        }.resume()
     }
 }
 
