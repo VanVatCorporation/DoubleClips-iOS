@@ -1010,6 +1010,8 @@ struct EditingView: View {
     
     private func openClipEditor() {
         guard let clip = selectedClip else { return }
+        // The Effect section's strength slider re-renders the paused preview through this hook (as the mask panel does).
+        MaskEditState.shared.refresh = { [weak engine] in engine?.refreshFrame() }
         withAnimation {
             switch clip.type {
             case .text: activeOverlay = .textEdit

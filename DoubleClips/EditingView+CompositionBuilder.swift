@@ -85,7 +85,8 @@ extension EditingView {
                                     width: CGFloat(clip.width), height: CGFloat(clip.height),
                                     baseProperties: clip.videoProperties, keyframes: clip.keyframes,
                                     inAnimation: clip.inAnimation, outAnimation: clip.outAnimation,
-                                    duration: clip.duration, masks: clip.masks, blendMode: clip.blendMode)
+                                    duration: clip.duration, masks: clip.masks, blendMode: clip.blendMode,
+                                    ownEffect: clip.ownEffect)
                     }
                     
                     switch clip.type {

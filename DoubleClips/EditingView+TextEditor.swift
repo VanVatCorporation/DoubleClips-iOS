@@ -17,6 +17,8 @@ extension EditingView {
         @ObservedObject var clip: EditingView.Clip
         let commandManager: CommandManager
         let projectPath: String
+        var playhead: Float = 0
+        var frameRate: Int = 30
         let onChanged: () -> Void
         
         @State private var draft: String = ""
@@ -121,6 +123,10 @@ extension EditingView {
                        range: 0...80, resetTo: 0)
                 Text("The box shows once its colour has some opacity.")
                     .font(.system(size: 10)).foregroundColor(.white.opacity(0.45))
+                
+                section("EFFECT")
+                EditingView.ClipEffectSection(clip: clip, commandManager: commandManager,
+                                              playhead: playhead, frameRate: frameRate, onChanged: onChanged)
                 
                 section("ANIMATION")
                 animationMenu("In", \.inAnimation, .in)

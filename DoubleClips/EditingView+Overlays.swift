@@ -49,7 +49,8 @@ extension EditingView {
                                 ClipPropertiesEditor(clip: clip, commandManager: commandManager,
                                                      playhead: playhead, frameRate: frameRate, onChanged: onChanged)
                             case .textEdit:
-                                TextClipEditor(clip: clip, commandManager: commandManager, projectPath: projectPath, onChanged: onChanged)
+                                TextClipEditor(clip: clip, commandManager: commandManager, projectPath: projectPath,
+                                               playhead: playhead, frameRate: frameRate, onChanged: onChanged)
                             case .mask:
                                 MaskPanel(clip: clip, commandManager: commandManager, playhead: playhead, frameRate: frameRate, onChanged: onChanged)
                             case .blend:

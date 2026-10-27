@@ -191,6 +191,11 @@ extension EditingView.Clip {
         secondary.endClipTrim = oldEndTrim
         secondary.duration = oldDuration - local
         
+        // The effect window of the clip's own effect is cut with the clip.
+        let effects = EditingView.Clip.splitClipEffect(clipEffect, atLocal: Double(local))
+        clipEffect = effects.left
+        secondary.clipEffect = effects.right
+        
         // A transition belongs to the END of a clip, so it stays with the right half only.
         endTransition = nil
         endTransitionEnabled = false

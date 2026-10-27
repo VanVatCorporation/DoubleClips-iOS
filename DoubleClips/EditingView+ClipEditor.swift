@@ -171,6 +171,10 @@ extension EditingView {
                     slider("Brightness", \.valueBrightness, -10...10, reset: 0)
                     slider("Temperature", \.valueTemperature, 1000...12000, reset: 6500)
                     field("Hue", \.valueHue)
+                    
+                    SectionTitle(text: "Effect")
+                    EditingView.ClipEffectSection(clip: clip, commandManager: commandManager,
+                                                  playhead: playhead, frameRate: frameRate, onChanged: onChanged)
                 }
                 
                 if clip.type == .video || clip.type == .audio {

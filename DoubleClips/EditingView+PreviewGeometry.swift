@@ -15,6 +15,8 @@ extension EditingView {
         var keyframes: AnimatedProperty
         /// Set while a mask gesture is in flight (EditingView+Mask.swift); nil = use the clip's own mask.
         var masks: [ClipMask]? = nil
+        /// Set while the Effect section's strength slider is dragged (EditingView+ClipEffect.swift); nil = use the clip's own effect.
+        var ownEffect: OwnEffect? = nil
     }
     
     /// Thread-safe side channel: the main thread writes while a gesture is in flight, the

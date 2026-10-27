@@ -242,6 +242,7 @@ extension EditingView.Clip {
         c.masks = masks
         c.templateGroup = templateGroup
         c.blendMode = blendMode
+        c.clipEffect = clipEffect
         c.textContent = textContent
         c.fontSize = fontSize
         c.textStyle = textStyle

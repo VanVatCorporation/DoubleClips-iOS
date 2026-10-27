@@ -143,6 +143,9 @@ extension EditingView {
         @Published var templateGroup: String?
         /// iOS addition (EditingView+Blend.swift): how the clip mixes with what is drawn below it.
         @Published var blendMode: ClipBlendMode = .normal
+        /// An effect for THIS clip only (EditingView+ClipEffect.swift), same JSON as Android's `Clip.clipEffect`: `offset` is seconds after the
+        /// clip's start, `duration` the window's length (0 = until the clip's end), `params.intensity` the strength. nil = none.
+        @Published var clipEffect: EffectTemplate?
         
         enum CodingKeys: String, CodingKey {
             case type
@@ -180,6 +183,7 @@ extension EditingView {
             case maskKeys      // read only
             case templateGroup
             case blendMode
+            case clipEffect
         }
         
         init(clipName: String, startTime: Float, duration: Float, trackIndex: Int, type: ClipType, isClipHasAudio: Bool, width: Int, height: Int) {
@@ -248,6 +252,8 @@ extension EditingView {
             self.masks = Array(loadedMasks.prefix(ClipMask.maxCount))
             self.templateGroup = (try? container.decodeIfPresent(String.self, forKey: .templateGroup)) ?? nil
             self.blendMode = (try? container.decodeIfPresent(ClipBlendMode.self, forKey: .blendMode)) ?? .normal
+            // An effect that can't be read must never cost the clip.
+            self.clipEffect = (try? container.decodeIfPresent(EffectTemplate.self, forKey: .clipEffect)) ?? nil
         }
         
         func encode(to encoder: Encoder) throws {
@@ -285,6 +291,7 @@ extension EditingView {
             if !masks.isEmpty { try container.encode(masks, forKey: .masks) }
             try container.encodeIfPresent(templateGroup, forKey: .templateGroup)
             if blendMode != .normal { try container.encode(blendMode, forKey: .blendMode) }
+            try container.encodeIfPresent(clipEffect, forKey: .clipEffect)
         }
     }
     

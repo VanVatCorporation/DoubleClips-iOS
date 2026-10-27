@@ -60,6 +60,8 @@ extension EditingView {
         /// iOS addition: clip mask (EditingView+Mask.swift), applied in the clip's own box.
         var masks: [ClipMask] = []
         var blendMode: ClipBlendMode = .normal
+        /// The clip's own effect (EditingView+ClipEffect.swift): filters this clip's picture alone. nil = none.
+        var ownEffect: OwnEffect?
     }
     
     /// A transition between two clips of one track (EditingView+TransitionPlan.swift): both sides are
@@ -250,9 +252,22 @@ extension EditingView {
         
         // MARK: Per-layer rendering
         
+        /// One clip's picture, with the clip's own effect (if any) applied to it alone. Every path that draws a clip goes
+        /// through here, so plain layers, both sides of a transition and export all get it.
         private func render(_ layer: RenderLayer, request: AVAsynchronousVideoCompositionRequest,
                             canvas: CGSize, time: Float, stretchToFull: Bool,
                             extraAnim: ClipAnimationFrame? = nil) -> CIImage? {
+            guard let picture = renderPicture(layer, request: request, canvas: canvas, time: time,
+                                              stretchToFull: stretchToFull, extraAnim: extraAnim) else { return nil }
+            let live = LiveOverrides.shared.state(for: layer.clipID)
+            guard layer.ownEffect != nil || live?.ownEffect != nil else { return picture }
+            return Self.applyOwnEffect(to: picture, layer: layer, live: live,
+                                       time: time, canvas: CGRect(origin: .zero, size: canvas))
+        }
+        
+        private func renderPicture(_ layer: RenderLayer, request: AVAsynchronousVideoCompositionRequest,
+                                   canvas: CGSize, time: Float, stretchToFull: Bool,
+                                   extraAnim: ClipAnimationFrame? = nil) -> CIImage? {
             // A gesture in progress overrides the snapshot without rebuilding the player item.
             let live = LiveOverrides.shared.state(for: layer.clipID)
             let props = (live?.keyframes ?? layer.keyframes).resolved(base: live?.properties ?? layer.baseProperties,
