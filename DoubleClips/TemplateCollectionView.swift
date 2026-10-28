@@ -12,9 +12,9 @@ struct TemplateCollectionView: View {
 
     private var title: String {
         switch source {
-        case .bookmarked: return "Saved templates"
-        case .mine: return "My templates"
-        default: return "Liked templates"
+        case .bookmarked: return L("Saved templates")
+        case .mine: return L("My templates")
+        default: return L("Liked templates")
         }
     }
 
@@ -51,7 +51,7 @@ struct TemplateCollectionView: View {
 
                     TemplateMasonryGrid(templates: visible,
                                         isLoading: pager.isLoading,
-                                        emptyText: pager.didStart ? "Nothing here yet" : nil,
+                                        emptyText: pager.didStart ? L("Nothing here yet") : nil,
                                         onSelect: { navigationPath.append($0) },
                                         onAppearItem: { pager.loadNextIfNeeded(near: $0) })
                         .refreshable { await pager.restart() }

@@ -361,3 +361,15 @@
 "It was made with an older version of DoubleClips and can only be rendered with FFmpeg, which isn't available on iOS. Try another template." = "Mẫu này được tạo bằng phiên bản DoubleClips cũ hơn và chỉ có thể dựng bằng FFmpeg, vốn không có trên iOS. Hãy thử mẫu khác.";
 "Please login to like this template" = "Vui lòng đăng nhập để thích mẫu này";
 "Search templates..." = "Tìm mẫu...";
+
+/* Template lists (Profile / Search) */
+"My Templates" = "Mẫu của tôi";
+"Liked Templates" = "Mẫu đã thích";
+"Couldn't update" = "Không thể cập nhật";
+"Saved templates" = "Mẫu đã lưu";
+"My templates" = "Mẫu của tôi";
+"Liked templates" = "Mẫu đã thích";
+"Nothing here yet" = "Chưa có gì ở đây";
+"No templates found" = "Không tìm thấy mẫu";
+"Please login first" = "Vui lòng đăng nhập trước";
+"Unexpected answer from the server" = "Máy chủ trả về phản hồi không mong đợi";

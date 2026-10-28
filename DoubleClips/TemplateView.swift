@@ -58,7 +58,7 @@ struct TemplateView: View {
                     // Matches: SwipeRefreshLayout + StaggeredGridLayoutManager(2 cols), now an endless feed
                     TemplateMasonryGrid(templates: pager.items,
                                         isLoading: pager.isLoading,
-                                        emptyText: pager.didStart ? "No templates found" : nil,
+                                        emptyText: pager.didStart ? L("No templates found") : nil,
                                         onSelect: { navigationPath.append($0) },
                                         onAppearItem: { pager.loadNextIfNeeded(near: $0) })
                         .refreshable { await pager.restart() }   // a new feed session

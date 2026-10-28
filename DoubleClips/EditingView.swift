@@ -76,12 +76,32 @@ struct EditingView: View {
         return usable / max(CGFloat(timeline.duration), 0.1)
     }
     
+    /// How much smaller the long-press preview on the Home tab draws the editor: it is laid out at 1/scale of the card
+    /// size and then scaled down, so every track, label and thumbnail ends up at this fraction of its editor size.
+    private static let previewScale: CGFloat = 0.5
+    
     var body: some View {
+        if isPreview {
+            GeometryReader { card in
+                editorBody
+                    .frame(width: card.size.width / Self.previewScale, height: card.size.height / Self.previewScale)
+                    .scaleEffect(Self.previewScale, anchor: .topLeading)
+                    .frame(width: card.size.width, height: card.size.height, alignment: .topLeading)
+                    .clipped()
+            }
+            .allowsHitTesting(false)
+        } else {
+            editorBody
+        }
+    }
+    
+    private var editorBody: some View {
         GeometryReader { geo in
             VStack(spacing: 0) {
                 
                 // ── PREVIEW ZONE ──────────────────────────────────────────────
-                // Fills all space above the editing zone
+                // Fills all space above the editing zone. The Home preview has no canvas: the timeline gets the whole card.
+                if !isPreview {
                 ZStack {
                     Color.black // Video canvas background
                     
@@ -228,6 +248,7 @@ struct EditingView: View {
                             .background(Color.black.opacity(0.5))
                         }
                     }
+                }
                 }
                 
                 // ── EDITING ZONE (300dp) ──────────────────────────────────────
@@ -597,7 +618,7 @@ struct EditingView: View {
                     }
                 }
             }
-            .frame(height: 300)
+            .frame(height: isPreview ? nil : 300)
             .background(Color(hex: "#111111"))
             // The root ignores every safe area, so the keyboard never moves the panel by itself: lift it while an overlay is open.
             .keyboardLift(enabled: activeOverlay != nil)
@@ -618,7 +639,7 @@ struct EditingView: View {
             setupSpecificEdit()
             setupToolbars()
             handleEditZoneInteraction()
-            if hasLoadedProject, !timeline.tracks.isEmpty { rebuildPreview(markDirty: false) }
+            if hasLoadedProject, !timeline.tracks.isEmpty, !isPreview { rebuildPreview(markDirty: false) }   // the Home preview has no canvas
         }
         .onDisappear {
             saveNow()

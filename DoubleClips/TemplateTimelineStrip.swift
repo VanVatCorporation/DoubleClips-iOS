@@ -40,7 +40,11 @@ struct TemplateTimelineStrip: View {
                 let height = proxy.size.height
                 let rows = max(info.rowCount, 1)
                 let gap: CGFloat = 2
-                let rowHeight = min(max((height - 8 - CGFloat(rows - 1) * gap) / CGFloat(rows), 5), 18)
+                // One long mixed CGFloat/literal expression made the type checker give up on CI: spelled out step by step.
+                let gapTotal: CGFloat = CGFloat(rows - 1) * gap
+                let freeHeight: CGFloat = height - 8 - gapTotal
+                let fittedHeight: CGFloat = freeHeight / CGFloat(rows)
+                let rowHeight: CGFloat = min(max(fittedHeight, 5), 18)
                 
                 ZStack(alignment: .topLeading) {
                     // The clips, shifted so the current time sits under the playhead.

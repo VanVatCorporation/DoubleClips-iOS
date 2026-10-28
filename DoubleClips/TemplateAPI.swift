@@ -63,9 +63,9 @@ enum TemplateAPIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .loginRequired: return "Please login first"
+        case .loginRequired: return L("Please login first")
         case .server(let message): return message
-        case .badResponse: return "Unexpected answer from the server"
+        case .badResponse: return L("Unexpected answer from the server")
         }
     }
 }
