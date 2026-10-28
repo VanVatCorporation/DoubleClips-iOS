@@ -78,7 +78,7 @@ struct EditingView: View {
     
     /// How much smaller the long-press preview on the Home tab draws the editor: it is laid out at 1/scale of the card
     /// size and then scaled down, so every track, label and thumbnail ends up at this fraction of its editor size.
-    private static let previewScale: CGFloat = 0.5
+    private static let previewScale: CGFloat = 0.75
     
     var body: some View {
         if isPreview {
