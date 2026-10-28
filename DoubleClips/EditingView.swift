@@ -68,6 +68,14 @@ struct EditingView: View {
         case `default`, clip, track, clips
     }
     
+    /// Pixels per second of the timeline. The editor uses the pinch zoom; the long-press preview on the Home tab (`isPreview`)
+    /// has no playhead to scroll with, so it shows the WHOLE project: the duration is fitted to the width of the track area.
+    private func timelinePPS(width: CGFloat) -> CGFloat {
+        guard isPreview else { return pixelsPerSecond * pinchScale }
+        let usable = max(width - Constants.TRACK_LABEL_WIDTH, 1)
+        return usable / max(CGFloat(timeline.duration), 0.1)
+    }
+    
     var body: some View {
         GeometryReader { geo in
             VStack(spacing: 0) {
@@ -277,7 +285,8 @@ struct EditingView: View {
                                 TimelineRulerView(
                                     currentTime: engine.currentTime,
                                     totalDuration: Double(timeline.duration),
-                                    pps: pixelsPerSecond * pinchScale
+                                    pps: timelinePPS(width: geo.size.width),
+                                    fitted: isPreview
                                 )
                                 .frame(width: geo.size.width - Constants.TRACK_LABEL_WIDTH, height: 20)
                             }
@@ -325,8 +334,9 @@ struct EditingView: View {
                                     // ruler appeared frozen while the content visibly scrolled. Swapped for
                                     // a thin UIScrollView wrapper (TrackingHScrollView below), whose
                                     // scrollViewDidScroll fires every frame, guaranteed.
-                                    let centerOffset = (geo.size.width - Constants.TRACK_LABEL_WIDTH) / 2
-                                    let effectivePPS = pixelsPerSecond * pinchScale
+                                    // The Home preview starts at the left edge: no half-screen of blank before time 0.
+                                    let centerOffset = isPreview ? 0 : (geo.size.width - Constants.TRACK_LABEL_WIDTH) / 2
+                                    let effectivePPS = timelinePPS(width: geo.size.width)
                                     // Content width tied to timeline.duration (same basis the ruler uses),
                                     // NOT to however wide the clips happen to be. This keeps the
                                     // scrollable range and the ruler in sync, and guarantees there's
@@ -469,6 +479,7 @@ struct EditingView: View {
                                 .fill(Color.red)
                                 .frame(width: 2)
                                 .offset(x: Constants.TRACK_LABEL_WIDTH + (geo.size.width - Constants.TRACK_LABEL_WIDTH) / 2)
+                                .opacity(isPreview ? 0 : 1)             // the fitted Home preview has no playhead
                                 .allowsHitTesting(false),
                             alignment: .leading
                         )
@@ -1747,10 +1758,32 @@ private struct TimelineRulerView: View {
     let currentTime: Double
     let totalDuration: Double
     let pps: CGFloat
+    /// The whole project fitted to the width (Home preview): ticks start at the left edge and thin out to a readable step.
+    var fitted: Bool = false
     
     var body: some View {
         GeometryReader { geo in
             Canvas { context, size in
+                if fitted {
+                    let steps: [Double] = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200, 3600]
+                    let step = steps.first { CGFloat($0) * pps >= 44 } ?? 3600
+                    var t = 0.0
+                    while CGFloat(t) * pps <= size.width + 1 {
+                        let x = CGFloat(t) * pps
+                        context.stroke(
+                            Path { p in
+                                p.move(to: CGPoint(x: x, y: size.height))
+                                p.addLine(to: CGPoint(x: x, y: size.height - 12))
+                            },
+                            with: .color(.white.opacity(0.6)), lineWidth: 1)
+                        let label = String(format: "%02d:%02d", Int(t) / 60, Int(t) % 60)
+                        context.draw(
+                            Text(label).font(.system(size: 9)).foregroundColor(.white.opacity(0.6)),
+                            at: CGPoint(x: x + 2, y: 2), anchor: .topLeading)
+                        t += step
+                    }
+                    return
+                }
                 let totalWidth = max(size.width, CGFloat(totalDuration) * pps + size.width)
                 
                 // Draw tick marks every second
@@ -1907,7 +1940,7 @@ private struct ToolbarButton: View {
                 Image(systemName: icon)
                     .font(.system(size: 20))
                     .foregroundColor(.white)
-                Text(label)
+                Text(LocalizedStringKey(label))
                     .font(.system(size: 9))
                     .foregroundColor(.white.opacity(0.7))
             }

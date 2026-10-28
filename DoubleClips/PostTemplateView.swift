@@ -300,7 +300,7 @@ struct PostTemplateView: View {
     
     private func topBar(_ title: String, dark: Bool, back: @escaping () -> Void) -> some View {
         ZStack {
-            Text(title).font(.system(size: 17, weight: .bold))
+            Text(LocalizedStringKey(title)).font(.system(size: 17, weight: .bold))
             HStack {
                 Button(action: back) {
                     Image(systemName: "chevron.backward")
@@ -316,7 +316,7 @@ struct PostTemplateView: View {
     
     private func bigButton(_ title: String, filled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title)
+            Text(LocalizedStringKey(title))
                 .font(.system(size: 16, weight: .bold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)

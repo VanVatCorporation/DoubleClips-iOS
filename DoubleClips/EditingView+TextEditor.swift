@@ -217,7 +217,7 @@ extension EditingView {
         // MARK: Pieces
         
         private func section(_ title: String) -> some View {
-            Text(title).font(.system(size: 11, weight: .bold)).foregroundColor(Color.mdPrimary)
+            Text(LocalizedStringKey(title)).font(.system(size: 11, weight: .bold)).foregroundColor(Color.mdPrimary)
         }
         
         private var fontChips: some View {

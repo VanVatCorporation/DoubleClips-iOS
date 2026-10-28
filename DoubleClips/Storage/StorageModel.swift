@@ -16,6 +16,14 @@ final class StorageModel: ObservableObject {
         var quotaFailure = false
     }
 
+    struct DownloadProgress: Equatable {
+        let name: String
+        var loaded: Int64
+        /// 0 = the size isn't known (the bar is then indeterminate).
+        var total: Int64
+        var fraction: Double? { total > 0 ? min(max(Double(loaded) / Double(total), 0), 1) : nil }
+    }
+
     struct BackupState {
         /// `.warning`: the ZIP probably won't fit today's upload allowance; waiting for "Continue anyway" or "Cancel".
         enum Phase: Equatable { case zipping, uploading, warning(String), done, failed(String) }
@@ -36,6 +44,9 @@ final class StorageModel: ObservableObject {
     /// "Continue anyway" popup for an upload/download that probably won't fit today's allowance.
     @Published var warning: QuotaWarning?
     @Published var busyText: String?
+    /// The file being downloaded right now (drives the unmovable progress popup); nil = no download.
+    @Published private(set) var downloadProgress: DownloadProgress?
+    private var downloadWork: Task<URL, Error>?
     @Published private(set) var uploads: [UploadRow] = []
     @Published private(set) var backup: BackupState?
 
@@ -112,14 +123,32 @@ final class StorageModel: ObservableObject {
         }
     }
 
+    /// One download at a time: it shows the popup (bytes so far, a bar, Cancel) and blocks the screen until it ends.
     func download(_ node: DriveNode) async -> URL? {
-        busyText = "Downloading…"
-        defer { busyText = nil }
+        guard downloadProgress == nil else { return nil }
+        downloadProgress = DownloadProgress(name: node.name, loaded: 0, total: node.size)
+        defer { downloadProgress = nil; downloadWork = nil }
+        let client = oe
+        let work = Task { try await client.download(node) { [weak self] loaded, total in
+            Task { @MainActor in self?.updateDownload(loaded: loaded, total: total) }
+        } }
+        downloadWork = work
         do {
-            let url = try await oe.download(node)
+            let url = try await work.value
             await refreshQuota()                 // the download spent part of today's allowance
             return url
+        } catch is CancellationError {
+            return nil                           // the person pressed Cancel
         } catch { handle(error); return nil }
+    }
+
+    func cancelDownload() { downloadWork?.cancel() }
+
+    private func updateDownload(loaded: Int64, total: Int64) {
+        guard var current = downloadProgress else { return }
+        current.loaded = loaded
+        if total > 0 { current.total = total }
+        downloadProgress = current
     }
 
     /// Hands a downloaded project ZIP to the normal import (IncomingFileCenter -> HomeView -> ProjectImporter).
@@ -312,7 +341,7 @@ final class StorageModel: ObservableObject {
             return
         }
         if let drive = error as? DriveError, drive.isUnauthorized {
-            errorMessage = "Your session expired. Please sign in again from the Profile tab."
+            errorMessage = L("Your session expired. Please sign in again from the Profile tab.")
         } else if (error as? URLError)?.code == .cancelled {
             return
         } else {

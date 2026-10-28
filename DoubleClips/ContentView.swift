@@ -55,6 +55,8 @@ struct ContentView: View {
                 }
                 .tag(Tab.profile)
         }
+        // A download blocks the whole app (tab bar included) until it ends or is cancelled.
+        .overlay { DownloadPopup(model: storageModel) }
         // A project ZIP opened from Files is imported by HomeView: make sure it is on screen.
         .onChange(of: incoming.pendingZip) { _, newValue in
             if newValue != nil { selection = .home }
@@ -63,7 +65,7 @@ struct ContentView: View {
         // We use a simultaneous DragGesture so vertical scrolling inside
         // child views (ScrollView, List, etc.) is NOT blocked.
         .gesture(
-            isBlockingGestures ? nil : DragGesture(minimumDistance: 30, coordinateSpace: .local)
+            (isBlockingGestures || storageModel.downloadProgress != nil) ? nil : DragGesture(minimumDistance: 30, coordinateSpace: .local)
                 .onEnded { value in
                     // Only trigger on clearly horizontal swipes
                     // (horizontal translation must be > 2x the vertical)

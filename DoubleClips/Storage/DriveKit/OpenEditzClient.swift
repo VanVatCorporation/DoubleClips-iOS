@@ -67,9 +67,9 @@ public actor OpenEditzClient {
         return node
     }
 
-    public func download(_ node: DriveNode) async throws -> URL {
+    public func download(_ node: DriveNode, progress: (@Sendable (Int64, Int64) -> Void)? = nil) async throws -> URL {
         try requireInside(node)
-        return try await client.download(node)
+        return try await client.download(node, progress: progress)
     }
 
     public func rename(_ node: DriveNode, to name: String) async throws -> DriveNode {

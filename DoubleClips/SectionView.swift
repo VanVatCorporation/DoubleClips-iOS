@@ -11,7 +11,7 @@ struct SectionView<Content: View>: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: Dimens.spacingSm) {
-            Text(title)
+            Text(LocalizedStringKey(title))
                 .font(.mdTitleMedium) // Assuming similar style for section headers
                 .foregroundColor(.mdOnSurfaceVariant) // Typically slightly muted
                 .padding(.horizontal, Dimens.spacingBase)

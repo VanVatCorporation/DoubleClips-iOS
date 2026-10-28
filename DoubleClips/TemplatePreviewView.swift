@@ -399,7 +399,7 @@ struct ActionItem: View {
                     .foregroundColor(color)
                     .shadow(radius: 2)
                 
-                Text(label)
+                Text(LocalizedStringKey(label))
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundColor(.white)

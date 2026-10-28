@@ -604,7 +604,7 @@ struct SettingRow<Trailing: View>: View {
                 .font(.system(size: 17))
                 .foregroundColor(.mdPrimary)
                 .frame(width: 24)
-            Text(label)
+            Text(LocalizedStringKey(label))
                 .font(.system(size: 15))
             Spacer(minLength: 8)
             trailing

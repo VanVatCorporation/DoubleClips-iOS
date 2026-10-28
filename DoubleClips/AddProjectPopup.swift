@@ -123,7 +123,7 @@ private struct OptionCard: View {
                 .frame(width: Dimens.iconSizeXl, height: Dimens.iconSizeXl)
                 .foregroundColor(color)
             
-            Text(text)
+            Text(LocalizedStringKey(text))
                 .font(.mdTitleMedium)
                 .foregroundColor(.mdOnSurface)
                 .multilineTextAlignment(.center)

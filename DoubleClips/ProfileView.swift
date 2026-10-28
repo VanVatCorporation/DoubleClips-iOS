@@ -252,7 +252,7 @@ struct SettingsRow: View {
                 .foregroundColor(.primary)
                 .frame(width: 24)
             
-            Text(title)
+            Text(LocalizedStringKey(title))
                 .font(.system(size: 16))
                 .foregroundColor(.primary)
             

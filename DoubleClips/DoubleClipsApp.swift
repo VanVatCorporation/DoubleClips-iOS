@@ -10,6 +10,8 @@ import SwiftUI
 @main
 struct DoubleClipsApp: App {
     @AppStorage("theme_mode") private var themeMode: String = "system"
+    /// "system" or a language code (AppLanguage.swift): the whole UI follows it at once.
+    @AppStorage(AppLanguage.storageKey) private var appLanguage: String = AppLanguage.system
     @AppStorage("ads_popup") private var adsPopup: Bool = true
     @AppStorage("early_access_issues_notification") private var earlyAccessNotification: Bool = true
     
@@ -31,6 +33,7 @@ struct DoubleClipsApp: App {
         WindowGroup {
             ContentView()
                 .preferredColorScheme(colorScheme)
+                .environment(\.locale, AppLanguage.locale(for: appLanguage))
                 // "Open in DoubleClips" from Files / Mail / AirDrop: see IncomingFiles.swift
                 .onOpenURL { url in IncomingFileCenter.shared.receive(url) }
                 .onAppear {

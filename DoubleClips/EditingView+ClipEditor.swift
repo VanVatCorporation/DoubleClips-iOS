@@ -22,7 +22,7 @@ extension EditingView {
                 // An empty label takes no space (the In / Out animation rows use the field on its own beside a menu);
                 // before, it still reserved the 80 pt label column and pushed the box off the panel's right edge.
                 if !label.isEmpty {
-                    Text(label)
+                    Text(LocalizedStringKey(label))
                         .font(.system(size: 12))
                         .foregroundColor(.white.opacity(0.8))
                         .frame(width: 80, alignment: .leading)
@@ -68,7 +68,7 @@ extension EditingView {
         
         var body: some View {
             HStack {
-                Text(label)
+                Text(LocalizedStringKey(label))
                     .font(.system(size: 12))
                     .foregroundColor(.white.opacity(0.8))
                     .frame(width: 80, alignment: .leading)

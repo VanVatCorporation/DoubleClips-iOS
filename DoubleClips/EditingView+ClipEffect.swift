@@ -154,7 +154,7 @@ extension EditingView {
         }
         
         private var noneTile: some View {
-            tile(title: "None", author: "No effect", selected: current == nil) {
+            tile(title: L("None"), author: L("No effect"), selected: current == nil) {
                 ZStack {
                     Color(hex: "#26262B")
                     Image(systemName: "nosign").font(.system(size: 26)).foregroundColor(.white.opacity(0.55))
@@ -272,8 +272,8 @@ extension EditingView {
         }
         
         private var currentName: String {
-            guard let effect else { return "None" }
-            return catalogStyle?.title ?? "\(effect.style) (not installed)"
+            guard let effect else { return L("None") }
+            return catalogStyle?.title ?? Lf("%@ (not installed)", effect.style)
         }
         
         /// The shown length: the window's own, or what is left of the clip when it runs to the end.

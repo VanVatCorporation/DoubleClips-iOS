@@ -188,13 +188,22 @@ public final class DriveClient: @unchecked Sendable {
     // MARK: - Download
 
     /// Downloads a file into Caches/VanVatDrive/<id>/<name> (the extension matters for Quick Look) and returns its URL.
-    public func download(_ node: DriveNode) async throws -> URL {
+    /// `progress(loaded, total)` is called a few times a second while the bytes arrive (`total` is 0 when the server doesn't say).
+    /// Cancelling the calling Task stops the transfer and throws `CancellationError`.
+    public func download(_ node: DriveNode, progress: (@Sendable (Int64, Int64) -> Void)? = nil) async throws -> URL {
         let req = try makeRequest("GET", "/files/\(node.id)/content")
-        return try await downloadFile(req, id: node.id, name: node.name)
+        return try await downloadFile(req, id: node.id, name: node.name, progress: progress)
     }
 
-    func downloadFile(_ req: URLRequest, id: String, name: String) async throws -> URL {
-        let (tmp, response) = try await session.download(for: req)
+    func downloadFile(_ req: URLRequest, id: String, name: String,
+                      progress: (@Sendable (Int64, Int64) -> Void)? = nil) async throws -> URL {
+        let result: (URL, URLResponse)
+        if let progress {
+            result = try await ProgressDownload(progress: progress).run(req, configuration: session.configuration)
+        } else {
+            result = try await session.download(for: req)
+        }
+        let tmp = result.0, response = result.1
         try check(response, nil)
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("VanVatDrive", isDirectory: true).appendingPathComponent(id, isDirectory: true)

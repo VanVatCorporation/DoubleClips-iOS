@@ -6,6 +6,7 @@ struct SettingsView: View {
     // MARK: - App Storage (UserDefaults)
     // Keys match Android's shared_preferences keys
     @AppStorage("theme_mode") private var themeMode: String = "system"
+    @AppStorage(AppLanguage.storageKey) private var appLanguage: String = AppLanguage.system
     @AppStorage("ads_popup") private var adsPopup: Bool = true
     @AppStorage("early_access_issues_notification") private var earlyAccessIssuesNotification: Bool = true
 
@@ -26,6 +27,15 @@ struct SettingsView: View {
                     Text("System Default").tag("system")
                 }
                 .pickerStyle(.menu) // Or .navigationLink based on preference
+                
+                // Language: System Default first, then the languages by name (each in its own language).
+                Picker("Language", selection: $appLanguage) {
+                    Text("System Default").tag(AppLanguage.system)
+                    ForEach(AppLanguage.sortedForPicker) { language in
+                        Text(verbatim: language.nativeName).tag(language.code)
+                    }
+                }
+                .pickerStyle(.menu)
                 
                 // Ads Popup
                 Toggle("Ads popup", isOn: $adsPopup)

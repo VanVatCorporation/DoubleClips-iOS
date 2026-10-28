@@ -849,7 +849,7 @@ extension EditingView {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(RoundedRectangle(cornerRadius: 10)
                         .stroke(selected ? Color.mdPrimary : Color.white.opacity(0.12), lineWidth: selected ? 2.5 : 1))
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.system(size: 10, weight: selected ? .semibold : .regular))
                     .foregroundColor(selected ? .white : .white.opacity(0.7))
                     .lineLimit(1)

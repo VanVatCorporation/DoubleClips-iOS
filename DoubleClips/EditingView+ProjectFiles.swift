@@ -337,7 +337,7 @@ extension EditingView {
         }
         
         private func emptyState(_ text: String) -> some View {
-            Text(text)
+            Text(LocalizedStringKey(text))
                 .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.55))
                 .multilineTextAlignment(.center)
