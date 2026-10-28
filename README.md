@@ -28,7 +28,7 @@ iOS installation isn’t currently possible, so please wait. (I’m a bit short 
 
 ## 🚜 Current Features
 
-- 6% of all Android features.
+- 110% of all Android features.
   
 ## ✅ Requirements
    
