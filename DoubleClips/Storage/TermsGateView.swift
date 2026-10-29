@@ -23,10 +23,11 @@ struct TermsGateView: View {
     @State private var busy = false
     @State private var error: String?
 
-    private static let vi = Locale.preferredLanguages.first?.lowercased().hasPrefix("vi") == true
+    /// Follows the in-app language (Settings > Language), not just the phone's.
+    private static var vi: Bool { AppLanguage.currentCode == "vi" }
     private func tr(_ en: String, _ vi: String) -> String { Self.vi ? vi : en }
     private var versionsKey: String { status.documents.map { "\($0.key)@\($0.version)" }.joined(separator: "|") }
-    private var deviceLang: String { Locale.preferredLanguages.first?.split(separator: "-").first.map(String.init) ?? "en" }
+    private var deviceLang: String { AppLanguage.currentCode }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {

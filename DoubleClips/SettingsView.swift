@@ -51,9 +51,9 @@ struct SettingsView: View {
                 Link(destination: DoubleClipsDrive.client.legalPageURL(slug: "terms", lang: nil)) { Label("Terms of Service", systemImage: "doc.text") }
                 Link(destination: DoubleClipsDrive.client.legalPageURL(slug: "privacy", lang: nil)) { Label("Privacy Policy", systemImage: "hand.raised") }
             } header: { Text("VanVatDrive") } footer: {
-                Text(signedIn
+                Text(L(signedIn
                      ? "Shows small previews of your images in the Storage tab. Every preview downloads the image once, so it uses your daily download allowance."
-                     : "Sign in from the Profile tab to change this.")
+                     : "Sign in from the Profile tab to change this."))
             }
 
             // About / Info Section (Optional, but good for completeness)
@@ -75,7 +75,7 @@ struct SettingsView: View {
         }
         .alert("VanVatDrive", isPresented: Binding(get: { driveError != nil }, set: { if !$0 { driveError = nil } })) {
             Button("OK", role: .cancel) {}
-        } message: { Text(driveError ?? "") }
+        } message: { Text(L(driveError ?? "")) }
     }
 
     /// Flips immediately, rolls back if the server refuses.

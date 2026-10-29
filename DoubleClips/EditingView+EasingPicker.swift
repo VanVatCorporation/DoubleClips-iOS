@@ -129,7 +129,7 @@ extension EditingView {
                         .padding(4)
                         .background(Color.white.opacity(0.08))
                         .clipShape(RoundedRectangle(cornerRadius: 7))
-                    Text(EditingView.easingShortName(easing))
+                    Text(L(EditingView.easingShortName(easing)))
                         .font(.system(size: 11)).foregroundColor(.white.opacity(0.85))
                         .lineLimit(1)
                         .frame(maxWidth: 74, alignment: .leading)
@@ -173,7 +173,7 @@ extension EditingView {
                                 .padding(12)
                                 .background(Color.white.opacity(0.06))
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                            Text(EditingView.easingShortName(selected))
+                            Text(L(EditingView.easingShortName(selected)))
                                 .font(.system(size: 13, weight: .semibold)).foregroundColor(.white)
                             if selected == .none {
                                 Text("Holds the value until the next keyframe, then jumps.")
@@ -209,7 +209,7 @@ extension EditingView {
                                 .stroke(isSelected ? Color.mdPrimary : Color.white.opacity(0.12),
                                         lineWidth: isSelected ? 2.5 : 1)
                         )
-                    Text(EditingView.easingShortName(e))
+                    Text(L(EditingView.easingShortName(e)))
                         .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
                         .foregroundColor(isSelected ? .white : .white.opacity(0.7))
                         .lineLimit(1).minimumScaleFactor(0.7)

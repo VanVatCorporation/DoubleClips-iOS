@@ -167,11 +167,11 @@ struct PostTemplateView: View {
     /// What the template is made of, so the author knows what goes up.
     private var contentsSummary: some View {
         VStack(alignment: .leading, spacing: 10) {
-            summaryRow("rectangle.dashed", "\(draft.replaceableCount) clip\(draft.replaceableCount == 1 ? "" : "s") to replace",
+            summaryRow("rectangle.dashed", Lf(draft.replaceableCount == 1 ? "%lld clip to replace" : "%lld clips to replace", draft.replaceableCount),
                        tint: nil)
-            summaryRow("lock.fill", "\(draft.lockedCount) locked", tint: nil)
+            summaryRow("lock.fill", Lf("%lld locked", draft.lockedCount), tint: nil)
             summaryRow("clock", ExportSheetView.formatDuration(draft.duration), tint: nil)
-            summaryRow("doc.on.doc", "\(draft.contentFiles.count) file\(draft.contentFiles.count == 1 ? "" : "s") to upload"
+            summaryRow("doc.on.doc", Lf(draft.contentFiles.count == 1 ? "%lld file to upload" : "%lld files to upload", draft.contentFiles.count)
                        + (draft.contentBytes > 0 ? " · " + TimelineExporter.formatBytes(draft.contentBytes) : ""), tint: nil)
             ForEach(draft.warnings, id: \.self) { warning in
                 summaryRow("exclamationmark.triangle.fill", warning, tint: .orange)
@@ -183,7 +183,7 @@ struct PostTemplateView: View {
     private func summaryRow(_ icon: String, _ text: String, tint: Color?) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon).frame(width: 20).foregroundColor(tint ?? .secondary)
-            Text(text).foregroundColor(tint ?? .primary).fixedSize(horizontal: false, vertical: true)
+            Text(L(text)).foregroundColor(tint ?? .primary).fixedSize(horizontal: false, vertical: true)
         }
     }
     
@@ -219,7 +219,7 @@ struct PostTemplateView: View {
             .frame(height: 10)
             .padding(.horizontal, 32)
             
-            Text(statusText)
+            Text(L(statusText))
                 .font(.system(size: 15))
                 .foregroundColor(uploadFailed == nil ? .primary : .red)
                 .multilineTextAlignment(.center)
@@ -240,8 +240,8 @@ struct PostTemplateView: View {
     }
     
     private var statusText: String {
-        if let message = uploadFailed { return "Failed to upload: \(message)" }
-        return "Uploading... \(Int(uploader.progress * 100))%"
+        if let message = uploadFailed { return Lf("Failed to upload: %@", message) }
+        return Lf("Uploading... %lld%%", Int(uploader.progress * 100))
     }
     
     // MARK: 4. Completed

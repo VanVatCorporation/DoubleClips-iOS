@@ -77,8 +77,8 @@ struct ProjectData: Identifiable, Codable, Hashable {
         
         var errorDescription: String? {
             switch self {
-            case .emptyTitle: return "The project name can't be empty."
-            case .alreadyExists(let name): return "A project named \"\(name)\" already exists."
+            case .emptyTitle: return L("The project name can't be empty.")
+            case .alreadyExists(let name): return Lf("A project named \"%@\" already exists.", name)
             case .io(let message): return message
             }
         }

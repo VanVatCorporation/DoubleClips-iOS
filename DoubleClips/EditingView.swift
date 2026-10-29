@@ -77,7 +77,7 @@ struct EditingView: View {
     }
     
     /// How much smaller the long-press preview on the Home tab draws the editor: it is laid out at 1/scale of the card
-    /// size and then scaled down, so every track, label and thumbnail ends up at this fraction of its editor size.
+    /// size and then scaled down, so every track, label and thumbnail ends up at this fraction of its editor size (0.75 = a quarter smaller).
     private static let previewScale: CGFloat = 0.75
     
     var body: some View {
@@ -659,7 +659,7 @@ struct EditingView: View {
         .alert("Project recovered", isPresented: Binding(get: { loadNote != nil }, set: { if !$0 { loadNote = nil } })) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(loadNote ?? "")
+            Text(L(loadNote ?? ""))
         }
         .fullScreenCover(isPresented: $showExport, onDismiss: {
             // The Export Settings panel can change resolution / fps / stretch in project.settings:
@@ -678,7 +678,7 @@ struct EditingView: View {
                                                 set: { if !$0 { engine.notice = nil } })) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(engine.notice ?? "")
+            Text(L(engine.notice ?? ""))
         }
         .fileImporter(
             isPresented: $showFileImporter,

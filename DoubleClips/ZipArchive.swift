@@ -30,22 +30,22 @@ enum ZipError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notAZip:
-            return "This file isn't a valid ZIP archive."
+            return L("This file isn't a valid ZIP archive.")
         case .truncated:
-            return "The ZIP file is incomplete or damaged (it may not have finished downloading)."
+            return L("The ZIP file is incomplete or damaged (it may not have finished downloading).")
         case .encrypted(let name):
-            return "\"\(name)\" is password-protected, which isn't supported."
+            return Lf("\"%@\" is password-protected, which isn't supported.", name)
         case .unsupportedMethod(let name, let method):
-            return "\"\(name)\" uses an unsupported compression method (\(method))."
+            return Lf("\"%@\" uses an unsupported compression method (%@).", name, String(describing: method))
         case .corrupt(let detail):
             return "The ZIP file is damaged: \(detail)"
         case .unsafePath(let name):
             return "The ZIP contains an unsafe path (\"\(name)\") and was not imported."
         case .cancelled:
-            return "Import cancelled."
+            return L("Import cancelled.")
         case .notEnoughSpace(let needed, let available):
             let f = ByteCountFormatter()
-            return "Not enough free space: the project needs about \(f.string(fromByteCount: needed)), but only \(f.string(fromByteCount: available)) is available."
+            return Lf("Not enough free space: the project needs about %@, but only %@ is available.", f.string(fromByteCount: needed), f.string(fromByteCount: available))
         case .io(let message):
             return message
         }

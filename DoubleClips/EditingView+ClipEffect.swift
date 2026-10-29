@@ -183,10 +183,10 @@ extension EditingView {
                                     .padding(5)
                             }
                         }
-                    Text(title)
+                    Text(L(title))
                         .font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
                         .lineLimit(1).minimumScaleFactor(0.8)
-                    Text(author)
+                    Text(L(author))
                         .font(.system(size: 9)).foregroundColor(.white.opacity(0.5)).lineLimit(1)
                 }
             }

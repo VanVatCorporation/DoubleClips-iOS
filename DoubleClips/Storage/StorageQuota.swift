@@ -62,22 +62,22 @@ extension View {
             Button("Continue anyway", role: .destructive) { w.onConfirm() }
             Button("Cancel", role: .cancel) { w.onCancel() }
         } message: { w in
-            Text(w.message)
+            Text(L(w.message))
         }
     }
 }
 
 /// The warning wording of the web Drive.
 enum QuotaText {
-    static let uploadTitle = "Daily upload limit warning"
-    static let downloadTitle = "Daily download limit warning"
+    static var uploadTitle: String { L("Daily upload limit warning") }
+    static var downloadTitle: String { L("Daily download limit warning") }
 
     static func upload(size: Int64, free: Int64) -> String {
-        "You might not have enough daily upload quota left to upload this file (\(StorageModel.bytes(size)) selected, only \(StorageModel.bytes(free)) left today). The upload may stop once the limit is reached."
+        Lf("You might not have enough daily upload quota left to upload this file (%@ selected, only %@ left today). The upload may stop once the limit is reached.", StorageModel.bytes(size), StorageModel.bytes(free))
     }
 
     static func download(size: Int64, free: Int64) -> String {
-        "You might not have enough daily download quota left for this file (\(StorageModel.bytes(size)) requested, only \(StorageModel.bytes(free)) left today). The download may be cut off once the limit is reached."
+        Lf("You might not have enough daily download quota left for this file (%@ requested, only %@ left today). The download may be cut off once the limit is reached.", StorageModel.bytes(size), StorageModel.bytes(free))
     }
 
     static func credits(_ n: Double) -> String {
@@ -106,7 +106,7 @@ struct QuotaSummary: View {
             } label: {
                 HStack(alignment: .center, spacing: 8) {
                     QuotaBar(used: Double(me.usedBytes), total: Double(me.quotaBytes),
-                             label: "\(StorageModel.bytes(me.usedBytes)) of \(StorageModel.bytes(me.quotaBytes)) used")
+                             label: Lf("%@ of %@ used", StorageModel.bytes(me.usedBytes), StorageModel.bytes(me.quotaBytes)))
                     Image(systemName: "chevron.down")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -115,22 +115,22 @@ struct QuotaSummary: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(expanded ? "Hide other limits" : "Show other limits")
+            .accessibilityLabel(L(expanded ? "Hide other limits" : "Show other limits"))
 
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
                     if let plan = me.plan {
-                        Text("Plan: \(plan.name)").font(.footnote.weight(.semibold))
+                        Text(verbatim: Lf("Plan: %@", plan.name)).font(.footnote.weight(.semibold))
                     }
                     if let usage = me.usage {
-                        let reset = "Resets \(usage.resetsAt.formatted(date: .abbreviated, time: .shortened))"
+                        let reset = Lf("Resets %@", usage.resetsAt.formatted(date: .abbreviated, time: .shortened))
                         QuotaBar(used: Double(usage.uploadedBytes), total: Double(usage.uploadLimit),
-                                 label: "Today: ↑ \(StorageModel.bytes(usage.uploadedBytes)) / \(StorageModel.bytes(usage.uploadLimit))", caption: reset)
+                                 label: Lf("Today: ↑ %@ / %@", StorageModel.bytes(usage.uploadedBytes), StorageModel.bytes(usage.uploadLimit)), caption: reset)
                         QuotaBar(used: Double(usage.downloadedBytes), total: Double(usage.downloadLimit),
-                                 label: "Today: ↓ \(StorageModel.bytes(usage.downloadedBytes)) / \(StorageModel.bytes(usage.downloadLimit))", caption: reset)
+                                 label: Lf("Today: ↓ %@ / %@", StorageModel.bytes(usage.downloadedBytes), StorageModel.bytes(usage.downloadLimit)), caption: reset)
                         if let limit = usage.computeLimit {
                             QuotaBar(used: usage.computeUsed ?? 0, total: limit,
-                                     label: "Today: compute \(QuotaText.credits(usage.computeUsed ?? 0)) / \(QuotaText.credits(limit)) credits", caption: reset)
+                                     label: Lf("Today: compute %@ / %@ credits", QuotaText.credits(usage.computeUsed ?? 0), QuotaText.credits(limit)), caption: reset)
                         }
                     }
                     GetMoreResourcesButton().font(.footnote)

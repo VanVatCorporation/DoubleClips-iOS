@@ -482,7 +482,7 @@ extension EditingView {
                     }
                 }
                 
-                Text(String(format: "Active from %.2fs to %.2fs", clip.startTime, clip.startTime + clip.duration))
+                Text(Lf("Active from %.2fs to %.2fs", clip.startTime, clip.startTime + clip.duration))
                     .font(.system(size: 12, weight: .semibold)).foregroundColor(.white.opacity(0.8))
                 
                 if current == nil {
@@ -522,12 +522,12 @@ extension EditingView {
                                     .padding(5)
                             }
                         }
-                    Text(style.title)
+                    Text(L(style.title))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                    Text(style.author)
+                    Text(L(style.author))
                         .font(.system(size: 9))
                         .foregroundColor(.white.opacity(0.5))
                         .lineLimit(1)
@@ -540,7 +540,7 @@ extension EditingView {
             guard clip.trackIndex > 0 else { return "" }
             let upper = clip.trackIndex
             let covered = upper == 1 ? "T1" : "T1 to T\(upper)"
-            return "Affects everything on \(covered) while it is active. Clips on tracks below this one are drawn on top and stay untouched."
+            return Lf("Affects everything on %@ while it is active. Clips on tracks below this one are drawn on top and stay untouched.", covered)
         }
         
         // MARK: Editing

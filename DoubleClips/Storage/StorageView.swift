@@ -65,7 +65,7 @@ struct StorageView: View {
             .alert("Storage", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil; model.errorIsQuota = false } })) {
                 if model.errorIsQuota { Button("Get more resources") { openURL(Plans.url) } }
                 Button("OK", role: .cancel) {}
-            } message: { Text(model.errorMessage ?? "") }
+            } message: { Text(L(model.errorMessage ?? "")) }
             .confirmationDialog("Delete “\(deleteTarget?.name ?? "")” for good?",
                                 isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }),
                                 titleVisibility: .visible) {
@@ -116,7 +116,7 @@ struct StorageView: View {
                             case .running: Text("\(StorageModel.bytes(row.loaded)) of \(StorageModel.bytes(row.size))").font(.caption).foregroundStyle(.secondary)
                             case .done: Text("Uploaded").font(.caption).foregroundStyle(.green)
                             case .failed(let message):
-                                Text(message).font(.caption).foregroundStyle(.red)
+                                Text(L(message)).font(.caption).foregroundStyle(.red)
                                 if row.quotaFailure { GetMoreResourcesButton().font(.caption) }
                             }
                         }
@@ -197,7 +197,7 @@ struct StorageView: View {
     }
 
     private func busyOverlay(_ text: String) -> some View {
-        VStack(spacing: 10) { ProgressView(); Text(text).font(.footnote) }
+        VStack(spacing: 10) { ProgressView(); Text(L(text)).font(.footnote) }
             .padding(20)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
     }

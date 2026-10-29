@@ -49,7 +49,7 @@ final class ZipArchiveWriter {
         let fm = FileManager.default
         try? fm.removeItem(at: url)
         guard fm.createFile(atPath: url.path, contents: nil) else {
-            throw ZipError.io("Couldn't create the ZIP file.")
+            throw ZipError.io(L("Couldn't create the ZIP file."))
         }
         let h: FileHandle
         do { h = try FileHandle(forWritingTo: url) }
@@ -91,7 +91,7 @@ final class ZipArchiveWriter {
         let attributes = try? FileManager.default.attributesOfItem(atPath: source.path)
         let declaredSize = (attributes?[.size] as? NSNumber)?.uint64Value ?? 0
         guard declaredSize < ZipArchiveWriter.max32 else {
-            throw ZipError.io("\"\(source.lastPathComponent)\" is 4 GB or larger, which the ZIP format used here can't store.")
+            throw ZipError.io(Lf("\"%@\" is 4 GB or larger, which the ZIP format used here can't store.", source.lastPathComponent))
         }
         
         let input: FileHandle
@@ -127,7 +127,7 @@ final class ZipArchiveWriter {
             crc = CRC32.update(crc, data)
             rawSize += UInt64(data.count)
             guard rawSize < ZipArchiveWriter.max32 else {
-                throw ZipError.io("\"\(source.lastPathComponent)\" grew past 4 GB while it was being added.")
+                throw ZipError.io(Lf("\"%@\" grew past 4 GB while it was being added.", source.lastPathComponent))
             }
             progress(data.count)
         }
@@ -143,7 +143,7 @@ final class ZipArchiveWriter {
             let stream = UnsafeMutablePointer<compression_stream>.allocate(capacity: 1)
             defer { stream.deallocate() }
             guard compression_stream_init(stream, COMPRESSION_STREAM_ENCODE, COMPRESSION_ZLIB) != COMPRESSION_STATUS_ERROR else {
-                throw ZipError.io("Couldn't start compression.")
+                throw ZipError.io(L("Couldn't start compression."))
             }
             defer { compression_stream_destroy(stream) }
             
@@ -186,14 +186,14 @@ final class ZipArchiveWriter {
                 switch status {
                 case COMPRESSION_STATUS_OK: break
                 case COMPRESSION_STATUS_END: finished = true
-                default: throw ZipError.io("Couldn't compress \(source.lastPathComponent).")
+                default: throw ZipError.io(Lf("Couldn't compress %@.", source.lastPathComponent))
                 }
             }
         }
         
         let packedSize = position - dataStart
         guard packedSize < ZipArchiveWriter.max32 else {
-            throw ZipError.io("\"\(source.lastPathComponent)\" is too large to store.")
+            throw ZipError.io(Lf("\"%@\" is too large to store.", source.lastPathComponent))
         }
         
         // Patch crc32 / sizes into the local header (offset 14), then return to the end.

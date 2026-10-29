@@ -294,8 +294,8 @@ private struct StyleTile: View {
                         .background(Circle().fill(Color.white).padding(3)).padding(5)
                 }
             }
-            Text(title).font(.system(size: 12, weight: .semibold)).foregroundColor(.primary).lineLimit(1)
-            Text(subtitle).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+            Text(L(title)).font(.system(size: 12, weight: .semibold)).foregroundColor(.primary).lineLimit(1)
+            Text(L(subtitle)).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
         }
     }
 }

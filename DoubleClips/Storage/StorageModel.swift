@@ -168,7 +168,7 @@ final class StorageModel: ObservableObject {
             if size > freeBytes {
                 try? FileManager.default.removeItem(at: url)
                 errorIsQuota = true
-                errorMessage = "Not enough space for “\(url.lastPathComponent)”: \(Self.bytes(freeBytes)) left."
+                errorMessage = Lf("Not enough space for “%@”: %@ left.", url.lastPathComponent, Self.bytes(freeBytes))
             } else {
                 kept.append(url)
             }
@@ -259,7 +259,7 @@ final class StorageModel: ObservableObject {
                 await refreshQuota()
                 if size > freeBytes {
                     throw DriveError(status: 413, code: "quota_exceeded",
-                                     message: "The backup is \(Self.bytes(size)) but only \(Self.bytes(freeBytes)) of storage is left.")
+                                     message: Lf("The backup is %@ but only %@ of storage is left.", Self.bytes(size), Self.bytes(freeBytes)))
                 }
 
                 // The daily upload cap only warns: the user can still continue (the server has the final say).

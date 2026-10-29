@@ -6,7 +6,7 @@ import Combine
 //
 // Android: ACTION_GET_CONTENT (application/zip) -> unzip straight into projects/ -> reload.
 // Desktop: file chooser -> progress step -> find the new folder -> if it has project.properties
-//          done, otherwise an "Invalid Project File" step (re-initialize as new / discard).
+//          done, otherwise an L("Invalid Project File") step (re-initialize as new / discard).
 //
 // This is the desktop flow, hardened where Android/desktop are loose:
 //   - Extraction goes to a private staging folder first; nothing touches `projects/` until the
@@ -277,8 +277,8 @@ enum ProjectImportAlert: Identifiable {
     
     var title: String {
         switch self {
-        case .failed: return "Import failed"
-        case .noProject, .recoverable: return "Invalid Project File"
+        case .failed: return L("Import failed")
+        case .noProject, .recoverable: return L("Invalid Project File")
         }
     }
     
@@ -287,10 +287,10 @@ enum ProjectImportAlert: Identifiable {
         case .failed(let message):
             return message
         case .noProject:
-            return "This ZIP doesn't seem to be a DoubleClips project."
+            return L("This ZIP doesn't seem to be a DoubleClips project.")
         case .recoverable(let folders):
             let names = folders.prefix(3).map { "\"\($0.name)\"" }.joined(separator: ", ")
-            return "This ZIP doesn't seem to be a complete DoubleClips project: \(names) has project data but no project.properties. You can re-initialize it as a new project, or discard it."
+            return Lf("This ZIP doesn't seem to be a complete DoubleClips project: %@ has project data but no project.properties. You can re-initialize it as a new project, or discard it.", names)
         }
     }
 }
@@ -313,7 +313,7 @@ final class ProjectImportController: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             defer { if scoped { zipURL.stopAccessingSecurityScopedResource() } }
             
-            var result: Result<ProjectImporter.Outcome, Error> = .failure(ZipError.io("The file couldn't be read."))
+            var result: Result<ProjectImporter.Outcome, Error> = .failure(ZipError.io(L("The file couldn't be read.")))
             var coordinationError: NSError?
             // Coordinated read makes iCloud Drive download a not-yet-local file first.
             NSFileCoordinator().coordinate(readingItemAt: zipURL, options: [], error: &coordinationError) { readURL in
@@ -438,7 +438,7 @@ struct ProjectImportModifier: ViewModifier {
                         }
                     }
                 } message: { alert in
-                    Text(alert.message)
+                    Text(L(alert.message))
                 }
             )
     }

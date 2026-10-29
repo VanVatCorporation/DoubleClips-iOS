@@ -73,7 +73,7 @@ struct AnimationPackSheet: View {
                     message = PackMessage(title: "Couldn't import the pack", text: error.localizedDescription)
                 }
             }
-            .confirmationDialog(removing.map { "Remove \"\($0.name)\"?" } ?? "",
+            .confirmationDialog(removing.map { Lf("Remove \"%@\"?", $0.name) } ?? "",
                                 isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
                                 titleVisibility: .visible) {
                 Button("Remove", role: .destructive) {
@@ -85,7 +85,7 @@ struct AnimationPackSheet: View {
                 Text("Clips that use its animations keep them selected but will render without them until the pack is installed again.")
             }
             .alert(item: $message) { item in
-                Alert(title: Text(item.title), message: Text(item.text), dismissButton: .default(Text("OK")))
+                Alert(title: Text(L(item.title)), message: Text(L(item.text)), dismissButton: .default(Text("OK")))
             }
         }
     }
@@ -117,9 +117,9 @@ struct AnimationPackSheet: View {
     
     private static func detail(for pack: ClipAnimationPackInfo) -> String {
         let count = pack.animationCount
-        var detail = "\(count) \(count == 1 ? "animation" : "animations")"
-        if !pack.inIDs.isEmpty { detail += "  ·  in: " + pack.inIDs.joined(separator: ", ") }
-        if !pack.outIDs.isEmpty { detail += "  ·  out: " + pack.outIDs.joined(separator: ", ") }
+        var detail = Lf(count == 1 ? "%lld animation" : "%lld animations", count)
+        if !pack.inIDs.isEmpty { detail += "  ·  " + L("in:") + " " + pack.inIDs.joined(separator: ", ") }
+        if !pack.outIDs.isEmpty { detail += "  ·  " + L("out:") + " " + pack.outIDs.joined(separator: ", ") }
         return detail
     }
     
@@ -138,10 +138,10 @@ struct AnimationPackSheet: View {
                 onChanged()
                 let pack = result.pack
                 let verb = result.replacedVersion > 0
-                    ? "Updated from v\(result.replacedVersion) to v\(pack.version)"
-                    : "Installed"
+                    ? Lf("Updated from v%lld to v%lld", result.replacedVersion, pack.version)
+                    : L("Installed")
                 message = PackMessage(title: "\(verb): \(pack.name)",
-                                      text: "\(pack.animationCount) \(pack.animationCount == 1 ? "animation" : "animations") added to the In / Out pickers.")
+                                      text: Lf(pack.animationCount == 1 ? "%lld animation added to the In / Out pickers." : "%lld animations added to the In / Out pickers.", pack.animationCount))
             } catch {
                 message = PackMessage(title: "Couldn't install the pack", text: error.localizedDescription)
             }

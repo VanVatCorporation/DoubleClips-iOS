@@ -144,10 +144,10 @@ enum ProjectLibraryError: LocalizedError {
     
     var errorDescription: String? {
         switch self {
-        case .emptyName: return "The name can't be empty."
-        case .nameTaken(let name): return "There is already a file called \"\(name)\"."
-        case .missing(let name): return "\"\(name)\" is no longer in the project."
-        case .sameFile: return "That is the file already in the project."
+        case .emptyName: return L("The name can't be empty.")
+        case .nameTaken(let name): return Lf("There is already a file called \"%@\".", name)
+        case .missing(let name): return Lf("\"%@\" is no longer in the project.", name)
+        case .sameFile: return L("That is the file already in the project.")
         case .io(let message): return message
         }
     }

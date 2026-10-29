@@ -217,7 +217,7 @@ extension EditingView {
             ) {
                 Button("OK", role: .cancel) { }
             } message: {
-                Text(message ?? "")
+                Text(L(message ?? ""))
             })
             .background(Color.clear.confirmationDialog(
                 deleteTitle, isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -239,8 +239,8 @@ extension EditingView {
         
         private func header(counts: [String: Int], unused: [ProjectFileItem]) -> some View {
             let total = model.items.reduce(Int64(0)) { $0 + $1.bytes }
-            var summary = "\(model.items.count) files · \(ByteCountFormatter.string(fromByteCount: total, countStyle: .file))"
-            if !unused.isEmpty { summary += " · \(unused.count) unused" }
+            var summary = Lf(model.items.count == 1 ? "%lld file · %@" : "%lld files · %@", model.items.count, ByteCountFormatter.string(fromByteCount: total, countStyle: .file))
+            if !unused.isEmpty { summary += Lf(" · %lld unused", unused.count) }
             
             return HStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 1) {
@@ -264,7 +264,7 @@ extension EditingView {
                 
                 Menu {
                     Picker("Sort by", selection: $sort) {
-                        ForEach(FileSort.allCases) { option in Text(option.rawValue).tag(option) }
+                        ForEach(FileSort.allCases) { option in Text(L(option.rawValue)).tag(option) }
                     }
                 } label: { headerIcon("arrow.up.arrow.down") }
                 
@@ -299,7 +299,7 @@ extension EditingView {
                 HStack(spacing: 8) {
                     ForEach(FileFilter.allCases) { option in
                         Button { filter = option } label: {
-                            Text(option.rawValue)
+                            Text(L(option.rawValue))
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(filter == option ? .white : .white.opacity(0.7))
                                 .padding(.horizontal, 12)
@@ -412,7 +412,7 @@ extension EditingView {
         
         @ViewBuilder private var toastView: some View {
             if let text = toast {
-                Text(text)
+                Text(L(text))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 14)
@@ -430,7 +430,7 @@ extension EditingView {
                     Color.black.opacity(0.55)
                     VStack(spacing: 10) {
                         ProgressView().tint(.white)
-                        Text(text).font(.system(size: 12)).foregroundColor(.white)
+                        Text(L(text)).font(.system(size: 12)).foregroundColor(.white)
                     }
                 }
             }
@@ -463,7 +463,7 @@ extension EditingView {
         
         private func place(_ item: ProjectFileItem, info: MediaInfo) {
             guard info.kind != .other else {
-                message = "\"\(item.name)\" can't be read as media."
+                message = Lf("\"%@\" can't be read as media.", item.name)
                 return
             }
             let type: EditingView.ClipType = info.kind == .audio ? .audio : (info.kind == .image ? .image : .video)
@@ -508,7 +508,7 @@ extension EditingView {
                     timeline.recalculateDuration()
                     changed()
                 }))
-            showToast("Added to Track \(track.timelineIndex + 1)")
+            showToast(Lf("Added to Track %lld", track.timelineIndex + 1))
         }
         
         // MARK: Rename
@@ -537,7 +537,7 @@ extension EditingView {
                 commandManager.clearHistory()
                 model.reload()
                 onChanged()
-                showToast("Renamed to \(newName)")
+                showToast(Lf("Renamed to %@", newName))
             }
         }
         
@@ -545,9 +545,9 @@ extension EditingView {
         
         private var deleteTitle: String {
             switch pendingDelete {
-            case .one(let item): return "Delete \(item.name)?"
-            case .unused(let items): return "Delete \(items.count) unused file\(items.count == 1 ? "" : "s")?"
-            case nil: return "Delete?"
+            case .one(let item): return Lf("Delete %@?", item.name)
+            case .unused(let items): return Lf(items.count == 1 ? "Delete %lld unused file?" : "Delete %lld unused files?", items.count)
+            case nil: return L("Delete?")
             }
         }
         
@@ -556,11 +556,11 @@ extension EditingView {
             case .one(let item):
                 let used = counts[item.name] ?? 0
                 return used > 0
-                    ? "It is used by \(used) clip\(used == 1 ? "" : "s") on the timeline, which will be removed too. This can't be undone."
-                    : "This can't be undone."
+                    ? Lf(used == 1 ? "It is used by %lld clip on the timeline, which will be removed too. This can't be undone." : "It is used by %lld clips on the timeline, which will be removed too. This can't be undone.", used)
+                    : L("This can't be undone.")
             case .unused(let items):
                 let bytes = items.reduce(Int64(0)) { $0 + $1.bytes }
-                return "Frees \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)). No clip uses them. This can't be undone."
+                return Lf("Frees %@. No clip uses them. This can't be undone.", ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
             case nil:
                 return ""
             }
@@ -590,7 +590,7 @@ extension EditingView {
             if removedClips > 0 { onDeselect() }
             model.reload()
             onChanged()
-            showToast(names.count == 1 ? "Deleted \(names[0])" : "Deleted \(names.count) files")
+            showToast(names.count == 1 ? Lf("Deleted %@", names[0]) : Lf("Deleted %lld files", names.count))
         }
         
         // MARK: Import / replace
@@ -634,7 +634,7 @@ extension EditingView {
                 busyText = nil
                 model.reload()
                 if let failure { message = failure }
-                if imported > 0 { showToast("Imported \(imported) file\(imported == 1 ? "" : "s")") }
+                if imported > 0 { showToast(Lf(imported == 1 ? "Imported %lld file" : "Imported %lld files", imported)) }
             }
         }
         
@@ -672,7 +672,7 @@ extension EditingView {
                 let info = await MediaProbe.probe(url)
                 guard info.kind == old.kind else {
                     let kind = old.kind.title.lowercased()
-                    message = "A \(kind) clip can only be replaced by another \(kind) file."
+                    message = Lf("A %@ clip can only be replaced by another %@ file.", kind, kind)
                     return
                 }
                 
@@ -701,9 +701,9 @@ extension EditingView {
                 model.reload()
                 onChanged()
                 
-                var text = updated == 0 ? "Replaced \(old.name)"
-                    : "Replaced in \(updated) clip\(updated == 1 ? "" : "s")"
-                if shortened > 0 { text += " · \(shortened) shortened to fit" }
+                var text = updated == 0 ? Lf("Replaced %@", old.name)
+                    : Lf(updated == 1 ? "Replaced in %lld clip" : "Replaced in %lld clips", updated)
+                if shortened > 0 { text += Lf(" · %lld shortened to fit", shortened) }
                 showToast(text)
             }
         }
@@ -714,7 +714,7 @@ extension EditingView {
             do {
                 let name = try ProjectLibrary.createSolidColorImage(color, projectPath: projectPath)
                 model.reload()
-                showToast("Created \(name)")
+                showToast(Lf("Created %@", name))
             } catch {
                 message = error.localizedDescription
             }

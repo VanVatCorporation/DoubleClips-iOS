@@ -251,7 +251,7 @@ extension EditingView {
                                 .padding(3)
                         }
                     }
-                Text(style.title)
+                Text(L(style.title))
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.white.opacity(style.isDrawn ? 1 : 0.6))
                     .lineLimit(2)
@@ -278,11 +278,11 @@ extension EditingView {
                 Text("TIMING").font(.system(size: 11, weight: .bold)).foregroundColor(Color.mdPrimary)
                 Picker("Timing", selection: Binding(get: { transition.mode }, set: { setMode($0) })) {
                     ForEach([EditingView.TransitionClip.TransitionMode.endFirst, .overlap, .beginSecond], id: \.self) { mode in
-                        Text(mode.title).tag(mode)
+                        Text(L(mode.title)).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
-                Text(transition.mode.explanation)
+                Text(L(transition.mode.explanation))
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.6))
             }

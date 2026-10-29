@@ -134,7 +134,7 @@ final class TimelineExporter: ObservableObject {
         guard state != .exporting else { return }
         
         guard let videoComposition = built.videoComposition, built.composition.duration.seconds > 0 else {
-            failEarly("Nothing to export yet. Add a video, image or text clip to the timeline first.")
+            failEarly(L("Nothing to export yet. Add a video, image or text clip to the timeline first."))
             return
         }
         
@@ -148,8 +148,7 @@ final class TimelineExporter: ObservableObject {
         
         // Free space: the estimate plus a safety margin, so a full disk fails here, not at 90 %.
         if let available = Self.availableBytes(), available < Int64(Double(plan.estimatedBytes) * 1.3) + 50_000_000 {
-            failEarly("Not enough free storage. This export needs about "
-                      + Self.formatBytes(plan.estimatedBytes) + " of free space.")
+            failEarly(Lf("Not enough free storage. This export needs about %@ of free space.", Self.formatBytes(plan.estimatedBytes)))
             return
         }
         
@@ -176,7 +175,7 @@ final class TimelineExporter: ObservableObject {
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            activeControl.cancel(reason: "Export stopped because DoubleClips went to the background. Keep the app open while exporting and try again.")
+            activeControl.cancel(reason: L("Export stopped because DoubleClips went to the background. Keep the app open while exporting and try again."))
             self?.reader?.cancelReading()
         }
         
@@ -215,14 +214,14 @@ final class TimelineExporter: ObservableObject {
             let reader = try AVAssetReader(asset: composition)
             
             let videoTracks = composition.tracks(withMediaType: .video)
-            guard !videoTracks.isEmpty else { throw ExportError("The timeline has no video to render.") }
+            guard !videoTracks.isEmpty else { throw ExportError(L("The timeline has no video to render.")) }
             
             let videoOutput = AVAssetReaderVideoCompositionOutput(
                 videoTracks: videoTracks,
                 videoSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
             videoOutput.videoComposition = videoComposition
             videoOutput.alwaysCopiesSampleData = false
-            guard reader.canAdd(videoOutput) else { throw ExportError("The video track could not be read.") }
+            guard reader.canAdd(videoOutput) else { throw ExportError(L("The video track could not be read.")) }
             reader.add(videoOutput)
             
             var audioOutput: AVAssetReaderAudioMixOutput?
@@ -267,7 +266,7 @@ final class TimelineExporter: ObservableObject {
             ]
             let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
             videoInput.expectsMediaDataInRealTime = false
-            guard writer.canAdd(videoInput) else { throw ExportError("The video encoder rejected these settings.") }
+            guard writer.canAdd(videoInput) else { throw ExportError(L("The video encoder rejected these settings.")) }
             writer.add(videoInput)
             
             var audioInput: AVAssetWriterInput?
@@ -287,11 +286,11 @@ final class TimelineExporter: ObservableObject {
             }
             
             guard reader.startReading() else {
-                throw reader.error ?? ExportError("The timeline could not be read for export.")
+                throw reader.error ?? ExportError(L("The timeline could not be read for export."))
             }
             guard writer.startWriting() else {
                 reader.cancelReading()
-                throw writer.error ?? ExportError("The output file could not be created.")
+                throw writer.error ?? ExportError(L("The output file could not be created."))
             }
             writer.startSession(atSourceTime: .zero)
             log("Encoder ready, rendering…")
@@ -492,7 +491,7 @@ final class TimelineExporter: ObservableObject {
     }
     
     private static func describe(_ error: Error?) -> String {
-        guard let error else { return "Export failed for an unknown reason." }
+        guard let error else { return L("Export failed for an unknown reason.") }
         let ns = error as NSError
         // Surface the underlying AVFoundation reason when there is one: "Cannot Encode" alone helps nobody.
         if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {

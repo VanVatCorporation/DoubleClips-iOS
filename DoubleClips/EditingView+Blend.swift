@@ -123,7 +123,7 @@ extension EditingView {
                 .overlay(RoundedRectangle(cornerRadius: 10)
                     .stroke(selected ? Color.mdPrimary : Color.white.opacity(0.15), lineWidth: selected ? 2.5 : 1))
                 
-                Text(mode.title)
+                Text(L(mode.title))
                     .font(.system(size: 10, weight: selected ? .semibold : .regular))
                     .foregroundColor(selected ? .white : .white.opacity(0.7))
                     .lineLimit(1)

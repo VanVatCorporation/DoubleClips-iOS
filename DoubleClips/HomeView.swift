@@ -285,7 +285,7 @@ struct HomeView: View {
                isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(errorMessage ?? "")
+            Text(L(errorMessage ?? ""))
         }
     }
         } // NavigationStack

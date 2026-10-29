@@ -29,7 +29,8 @@ struct TemplateMasonryGrid: View {
                         ForEach(0..<2, id: \.self) { parity in
                             LazyVStack(spacing: spacing) {
                                 ForEach(column(parity)) { template in
-                                    TemplateElementView(template: states.applied(template), itemWidth: itemWidth)
+                                    TemplateElementView(template: states.applied(template), itemWidth: itemWidth,
+                                                        onOpen: { onSelect(template) })
                                         .onTapGesture { onSelect(template) }
                                         .onAppear { onAppearItem(template) }
                                 }

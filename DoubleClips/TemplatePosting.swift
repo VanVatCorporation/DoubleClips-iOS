@@ -90,9 +90,9 @@ enum TemplatePackager {
         
         let info = TemplateTimelineInfo.make(from: timeline)
         guard !info.slots.isEmpty else {
-            throw PackageError(message: "Nothing in this project can be replaced. Turn off \"Lock media for template\" on at least one video or image clip.")
+            throw PackageError(message: L("Nothing in this project can be replaced. Turn off \"Lock media for template\" on at least one video or image clip."))
         }
-        guard timeline.duration > 0 else { throw PackageError(message: "The timeline is empty.") }
+        guard timeline.duration > 0 else { throw PackageError(message: L("The timeline is empty.")) }
         
         // 1. preview.mp4 (Android renames export.mp4 to preview.mp4)
         let previewVideo = projectURL.appendingPathComponent(Constants.DEFAULT_PREVIEW_CLIP_FILENAME)
@@ -123,7 +123,7 @@ enum TemplatePackager {
                 return files.first { $0.url.path == source.path }?.name
             }
             guard fm.fileExists(atPath: source.path) else {
-                warnings.append("\(originalName) is missing, so it was left out.")
+                warnings.append(Lf("%@ is missing, so it was left out.", originalName))
                 return nil
             }
             var name = safeName(originalName)
@@ -132,7 +132,7 @@ enum TemplatePackager {
                 name = "\((safeName(originalName) as NSString).deletingPathExtension) (\(counter)).\((originalName as NSString).pathExtension)"
                 counter += 1
             }
-            if name != originalName { warnings.append("\(originalName) was renamed to \(name) for the upload.") }
+            if name != originalName { warnings.append(Lf("%@ was renamed to %@ for the upload.", originalName, name)) }
             files.append(PostFile(url: source, name: name))
             return name
         }

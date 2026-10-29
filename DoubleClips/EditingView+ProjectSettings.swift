@@ -288,7 +288,7 @@ struct ProjectSettingsSheet: View {
     
     private func numberField(_ placeholder: String, text: Binding<String>, field: Field,
                              decimal: Bool = false) -> some View {
-        TextField(placeholder, text: text)
+        TextField(LocalizedStringKey(placeholder), text: text)
             .keyboardType(decimal ? .decimalPad : .numberPad)
             .multilineTextAlignment(.center)
             .focused($focused, equals: field)

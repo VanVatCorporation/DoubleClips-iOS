@@ -766,7 +766,7 @@ extension EditingView {
                             HStack(spacing: 5) {
                                 MaskIconShape(shape: m.shape).fill(Color.white.opacity(0.9)).frame(width: 16, height: 16)
                                 Text("\(i + 1)").font(.system(size: 12, weight: .semibold))
-                                if i > 0 { Text(m.mode.title).font(.system(size: 10)).opacity(0.7) }
+                                if i > 0 { Text(L(m.mode.title)).font(.system(size: 10)).opacity(0.7) }
                             }
                             .foregroundColor(.white)
                             .padding(.horizontal, 10).padding(.vertical, 7)
@@ -811,7 +811,7 @@ extension EditingView {
                     replaceSelected(m, keepKeys: true)
                 }
             )) {
-                ForEach(ClipMask.Mode.allCases, id: \.self) { Text($0.title).tag($0) }
+                ForEach(ClipMask.Mode.allCases, id: \.self) { Text(L($0.title)).tag($0) }
             }
             .pickerStyle(.segmented)
         }
@@ -877,7 +877,7 @@ extension EditingView {
                 ForEach(tabs(mask), id: \.rawValue) { t in
                     Button { tab = t } label: {
                         VStack(spacing: 5) {
-                            Text(t.rawValue)
+                            Text(L(t.rawValue))
                                 .font(.system(size: 14, weight: t == active ? .semibold : .regular))
                                 .foregroundColor(t == active ? .white : .white.opacity(0.5))
                             Rectangle()
@@ -904,7 +904,7 @@ extension EditingView {
         
         private func row(_ param: MaskParam, _ mask: ClipMask) -> some View {
             HStack(spacing: 6) {
-                Text(param.title(for: mask.shape))
+                Text(L(param.title(for: mask.shape)))
                     .font(.system(size: 12)).foregroundColor(.white.opacity(0.8))
                     .frame(width: 64, alignment: .leading)
                 RulerSlider(

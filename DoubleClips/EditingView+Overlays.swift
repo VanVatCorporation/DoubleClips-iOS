@@ -28,7 +28,7 @@ extension EditingView {
         var body: some View {
             VStack(spacing: 0) {
                 HStack {
-                    Text(title(for: type))
+                    Text(L(title(for: type)))
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)
                     Spacer()

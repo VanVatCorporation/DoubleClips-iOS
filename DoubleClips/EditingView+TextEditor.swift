@@ -56,7 +56,7 @@ extension EditingView {
                 
                 section("STYLE")
                 HStack {
-                    Text(currentStyleName)
+                    Text(L(currentStyleName))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
@@ -287,7 +287,7 @@ extension EditingView {
         }
         
         private func colorRow(_ label: String, get: @escaping () -> String, set: @escaping (String) -> Void) -> some View {
-            ColorPicker(label, selection: Binding(
+            ColorPicker(LocalizedStringKey(label), selection: Binding(
                 get: { Color(uiColor: HexColor.ui(get())) },
                 set: { newColor in
                     set(HexColor.string(UIColor(newColor)))
@@ -385,7 +385,7 @@ extension EditingView {
                     }
                 } label: {
                     HStack {
-                        Text(currentName).font(.system(size: 13)).foregroundColor(.white).lineLimit(1)
+                        Text(L(currentName)).font(.system(size: 13)).foregroundColor(.white).lineLimit(1)
                         Spacer(minLength: 4)
                         Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundColor(.white.opacity(0.6))
                     }

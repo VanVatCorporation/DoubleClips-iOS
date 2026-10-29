@@ -105,7 +105,7 @@ extension EditingView {
     private struct SectionTitle: View {
         let text: String
         var body: some View {
-            Text(text.uppercased())
+            Text(L(text).uppercased())
                 .font(.system(size: 11, weight: .bold))
                 .foregroundColor(Color.mdPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -394,7 +394,7 @@ extension EditingView {
         }
         
         private func toggle(_ label: String, _ current: Bool, _ apply: @escaping (EditingView.Clip, Bool) -> Void) -> some View {
-            Toggle(label, isOn: Binding(
+            Toggle(LocalizedStringKey(label), isOn: Binding(
                 get: { current },
                 set: { newValue in
                     let target = clip
@@ -440,7 +440,7 @@ extension EditingView {
                     }
                 } label: {
                     HStack {
-                        Text(currentName)
+                        Text(L(currentName))
                             .font(.system(size: 13))
                             .foregroundColor(.white)
                             .lineLimit(1)

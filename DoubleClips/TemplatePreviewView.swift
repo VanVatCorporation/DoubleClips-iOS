@@ -343,12 +343,12 @@ struct TemplatePreviewItemView: View {
                 // In Android it just shows "Please login to like this template"
             }
         } message: {
-            Text(loginMessage)
+            Text(L(loginMessage))
         }
         .alert("Couldn't update", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(actionError ?? "")
+            Text(L(actionError ?? ""))
         }
     }
     

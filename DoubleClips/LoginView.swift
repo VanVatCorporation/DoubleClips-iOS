@@ -104,7 +104,7 @@ struct LoginView: View {
                     
                     // Error Message
                     if let errorMessage = errorMessage {
-                        Text(errorMessage)
+                        Text(L(errorMessage))
                             .font(.system(size: 14))
                             .foregroundColor(.red)
                             .padding(.vertical, 8)

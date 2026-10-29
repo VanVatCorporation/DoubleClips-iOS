@@ -304,7 +304,7 @@ final class TemplateExportModel: ObservableObject {
         
         if isVideo {
             guard let movie = try await item.loadTransferable(type: PickedMovie.self) else {
-                throw ExportError("The video could not be read.")
+                throw ExportError(L("The video could not be read."))
             }
             let ext = movie.url.pathExtension.isEmpty ? "mov" : movie.url.pathExtension.lowercased()
             let destination = URL(fileURLWithPath: IOHelper.combinePath(directory, "\(index)-\(unique).\(ext)"))
@@ -323,7 +323,7 @@ final class TemplateExportModel: ObservableObject {
             slot.thumbnail = await Self.videoThumbnail(asset)
         } else {
             guard let data = try await item.loadTransferable(type: Data.self) else {
-                throw ExportError("The image could not be read.")
+                throw ExportError(L("The image could not be read."))
             }
             let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "png"
             let destination = URL(fileURLWithPath: IOHelper.combinePath(directory, "\(index)-\(unique).\(ext)"))
@@ -482,7 +482,7 @@ struct TemplateExportView: View {
                 model.settings = edited
                 model.log(String(format: "Settings: %d×%d @ %d fps, %d Mbps%@",
                                  edited.videoWidth, edited.videoHeight, edited.frameRate, edited.bitrate,
-                                 edited.isStretchToFull ? ", stretch to fit" : ""))
+                                 edited.isStretchToFull ? L(", stretch to fit") : ""))
             }
             .presentationDetents([.medium, .large])
         }
@@ -504,7 +504,7 @@ struct TemplateExportView: View {
                                                         set: { if !$0 { alertMessage = nil } })) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(alertMessage ?? "")
+            Text(L(alertMessage ?? ""))
         }
         .fullScreenCover(item: $rendered, onDismiss: {
             if let directory = renderDirectory { TemplateRenderer.cleanup(directory) }
@@ -524,7 +524,7 @@ struct TemplateExportView: View {
     
     private func loadTimeline() async {
         guard !template.templateTimelineLink.isEmpty else {
-            model.timelineProblem = "This template is old: it has no timeline, and only FFmpeg could render it."
+            model.timelineProblem = L("This template is old: it has no timeline, and only FFmpeg could render it.")
             return
         }
         do {
@@ -538,10 +538,10 @@ struct TemplateExportView: View {
     
     private func startRender() async {
         if let problem = model.timelineProblem { alertMessage = problem; return }
-        guard model.info != nil else { alertMessage = "The template's timeline is still loading. Try again in a moment."; return }
+        guard model.info != nil else { alertMessage = L("The template's timeline is still loading. Try again in a moment."); return }
         let missing = model.slots.indices.filter { !model.slots[$0].isFilled }.map { $0 + 1 }
         guard missing.isEmpty else {
-            alertMessage = "Fill every clip first. Empty: " + missing.map(String.init).joined(separator: ", ") + "."
+            alertMessage = L("Fill every clip first. Empty: ") + missing.map(String.init).joined(separator: ", ") + "."
             return
         }
         model.isPreparing = true
@@ -574,7 +574,7 @@ struct TemplateExportView: View {
             }
             
             Spacer()
-            Text(template.templateTitle.isEmpty ? "Use template" : template.templateTitle)
+            Text(template.templateTitle.isEmpty ? L("Use template") : template.templateTitle)
                 .font(.system(size: 15, weight: .bold))
                 .lineLimit(1)
             Spacer()
@@ -861,7 +861,7 @@ struct TemplateExportView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(model.logText.isEmpty ? "Log output will appear here." : model.logText)
+                            Text(model.logText.isEmpty ? L("Log output will appear here.") : model.logText)
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundColor(model.logText.isEmpty ? .secondary : .primary)
                                 .textSelection(.enabled)
@@ -953,7 +953,7 @@ struct TemplateClipPropertiesSheet: View {
                                 .foregroundColor(.secondary)
                             Text(slot.kind == .video
                                  ? String(format: "%.1fs", max(0, upper - lower))
-                                 : "Still image")
+                                 : L("Still image"))
                                 .font(.system(size: 14))
                                 .foregroundColor(.secondary)
                         }
@@ -975,8 +975,8 @@ struct TemplateClipPropertiesSheet: View {
                             }
                             .padding(16)
                         } else {
-                            Text(slot.kind == .video ? "This video's length couldn't be read, so it can't be trimmed."
-                                                     : "Images have nothing to trim.")
+                            Text(L(slot.kind == .video ? "This video's length couldn't be read, so it can't be trimmed."
+                                                     : "Images have nothing to trim."))
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                                 .padding(16)

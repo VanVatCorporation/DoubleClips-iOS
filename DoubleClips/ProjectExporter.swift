@@ -63,14 +63,14 @@ enum ProjectExporter {
         let projectURL = URL(fileURLWithPath: project.projectPath, isDirectory: true)
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: projectURL.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw ZipError.io("The project folder no longer exists.")
+            throw ZipError.io(L("The project folder no longer exists."))
         }
         let rootName = projectURL.lastPathComponent
         
         // Plan: every file that goes in, and how many bytes that is.
         var planned: [PlannedFile] = []
         try collect(directory: projectURL, relative: [], root: rootName, into: &planned, cancellation: cancellation)
-        guard !planned.isEmpty else { throw ZipError.io("The project folder is empty.") }
+        guard !planned.isEmpty else { throw ZipError.io(L("The project folder is empty.")) }
         let totalBytes = planned.reduce(Int64(0)) { $0 + $1.size }
         
         cleanOldFiles()
@@ -279,7 +279,7 @@ struct ProjectShareModifier: ViewModifier {
                 ) {
                     Button("OK", role: .cancel) { }
                 } message: {
-                    Text(controller.errorMessage ?? "")
+                    Text(L(controller.errorMessage ?? ""))
                 }
             )
     }

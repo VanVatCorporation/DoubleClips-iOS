@@ -46,7 +46,7 @@ struct EarlyAccessPopup: View {
                                 .foregroundColor(.secondary)
                         }
                     } else {
-                        Text(issues)
+                        Text(L(issues))
                             .font(.system(size: 14))
                             .foregroundColor(.secondary)
                     }
@@ -107,7 +107,7 @@ struct EarlyAccessPopup: View {
     private func fetchIssues() {
         isLoading = true
         guard let url = URL(string: "https://app.vanvatcorp.com/doubleclips/api/fetch-issues") else {
-            issues = "Failed to get issues from server."
+            issues = L("Failed to get issues from server.")
             isLoading = false
             return
         }
@@ -117,13 +117,13 @@ struct EarlyAccessPopup: View {
                 isLoading = false
                 
                 if let error = error {
-                    issues = "Failed to get issues from server."
+                    issues = L("Failed to get issues from server.")
                     return
                 }
                 
                 guard let data = data,
                       let issueArray = try? JSONDecoder().decode([String].self, from: data) else {
-                    issues = "Failed to get issues from server."
+                    issues = L("Failed to get issues from server.")
                     return
                 }
                 

@@ -3,6 +3,8 @@ import SwiftUI
 struct TemplateElementView: View {
     let template: TemplateData
     let itemWidth: CGFloat // Passed from parent
+    /// Opens the template (the same as tapping the card); offered in the long-press menu.
+    var onOpen: (() -> Void)? = nil
     
     var body: some View {
         VStack(spacing: 0) {
@@ -84,6 +86,14 @@ struct TemplateElementView: View {
                 .stroke(Color.mdOutlineVariant, lineWidth: 0.5)
         )
         // Removed external padding to let Grid handle spacing
+        // Long press: the video (muted), title, author and the like / bookmark / use counts float up, like a project on Home.
+        .contextMenu {
+            if let onOpen {
+                Button(action: onOpen) { Label("Open", systemImage: "play.rectangle") }
+            }
+        } preview: {
+            TemplateHoldPreview(template: template)
+        }
     }
     
     // Helper to format large numbers (e.g. 1.2k)

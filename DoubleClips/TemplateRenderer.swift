@@ -43,9 +43,9 @@ enum TemplateRenderer {
         // 1. A fresh timeline (never the one the screen shows: this one gets edited).
         log("Loading the template's timeline…")
         let info = try await TemplateTimelineLoader.load(for: template)
-        guard let timeline = info.timeline else { throw RenderError("This template has no timeline.") }
+        guard let timeline = info.timeline else { throw RenderError(L("This template has no timeline.")) }
         guard info.slots.count == slots.count else {
-            throw RenderError("The template changed: it now has \(info.slots.count) replaceable clips, not \(slots.count). Reopen it.")
+            throw RenderError(Lf("The template changed: it now has %lld replaceable clips, not %lld. Reopen it.", info.slots.count, slots.count))
         }
         
         let directory = fm.temporaryDirectory.appendingPathComponent(Constants.TEMPLATE_RENDER_FOLDER_PREFIX + UUID().uuidString,
@@ -79,7 +79,7 @@ enum TemplateRenderer {
             for (i, slotInfo) in info.slots.enumerated() {
                 let slot = slots[i]
                 guard slot.isFilled, let clip = clips.first(where: { $0.id == slotInfo.id }) else {
-                    throw RenderError("Clip \(i + 1) is empty.")
+                    throw RenderError(Lf("Clip %lld is empty.", i + 1))
                 }
                 let source = URL(fileURLWithPath: slot.path)
                 let ext = source.pathExtension.isEmpty ? (slot.kind == .video ? "mov" : "png") : source.pathExtension.lowercased()
@@ -186,7 +186,7 @@ enum TemplateRenderer {
             try fm.copyItem(at: cached, to: destination)
         }
         if !failed.isEmpty {
-            throw RenderError("The template's files couldn't be downloaded: " + failed.joined(separator: ", "))
+            throw RenderError(L("The template's files couldn't be downloaded: ") + failed.joined(separator: ", "))
         }
     }
     

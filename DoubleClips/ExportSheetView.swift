@@ -64,7 +64,7 @@ struct ExportSheetView: View {
                     if exportingForTemplate || preparingTemplate {
                         HStack(spacing: 10) {
                             ProgressView()
-                            Text(exportingForTemplate ? "Rendering the template preview…" : "Packaging the template…")
+                            Text(L(exportingForTemplate ? "Rendering the template preview…" : "Packaging the template…"))
                                 .font(.subheadline.weight(.medium))
                         }
                     }
@@ -111,7 +111,7 @@ struct ExportSheetView: View {
                                                                       set: { if !$0 { templateError = nil } })) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(templateError ?? "")
+            Text(L(templateError ?? ""))
         }
     }
     
@@ -155,7 +155,7 @@ struct ExportSheetView: View {
             }
             
             Button(action: { isExporting ? exporter.cancel() : startExport() }) {
-                Text(isExporting ? "CANCEL" : "EXPORT")
+                Text(L(isExporting ? "CANCEL" : "EXPORT"))
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 14)
@@ -235,7 +235,7 @@ struct ExportSheetView: View {
                     Label("Export failed", systemImage: "exclamationmark.triangle.fill")
                         .font(.headline)
                         .foregroundColor(.red)
-                    Text(message)
+                    Text(L(message))
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -276,7 +276,7 @@ struct ExportSheetView: View {
                 .padding(.vertical, 12)
         case .failed(let message):
             VStack(alignment: .leading, spacing: 8) {
-                Text(message)
+                Text(L(message))
                     .font(.subheadline)
                     .foregroundColor(.red)
                 Button("Try Photos again") { saveToPhotos(url) }
@@ -323,7 +323,7 @@ struct ExportSheetView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(exporter.logText.isEmpty ? "Log output will appear here." : exporter.logText)
+                    Text(exporter.logText.isEmpty ? L("Log output will appear here.") : exporter.logText)
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(exporter.logText.isEmpty ? .secondary : .primary)
                         .textSelection(.enabled)
@@ -575,7 +575,7 @@ struct ExportSection<Content: View>: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased())
+            Text(L(title).uppercased())
                 .font(.caption.weight(.semibold))
                 .foregroundColor(.secondary)
                 .padding(.leading, 16)
@@ -696,7 +696,7 @@ enum ExportDestination {
     static func saveToPhotos(_ url: URL) async throws {
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         guard status == .authorized || status == .limited else {
-            throw ExportError("DoubleClips isn't allowed to add to Photos. Turn it on in Settings → DoubleClips → Photos, or use Share / Save to Files.")
+            throw ExportError(L("DoubleClips isn't allowed to add to Photos. Turn it on in Settings → DoubleClips → Photos, or use Share / Save to Files."))
         }
         try await PHPhotoLibrary.shared().performChanges {
             let request = PHAssetCreationRequest.forAsset()
