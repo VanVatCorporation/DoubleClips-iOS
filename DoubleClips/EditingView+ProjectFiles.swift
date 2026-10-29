@@ -239,7 +239,7 @@ extension EditingView {
         
         private func header(counts: [String: Int], unused: [ProjectFileItem]) -> some View {
             let total = model.items.reduce(Int64(0)) { $0 + $1.bytes }
-            var summary = Lf(model.items.count == 1 ? "%lld file · %@" : "%lld files · %@", model.items.count, ByteCountFormatter.string(fromByteCount: total, countStyle: .file))
+            var summary = Lf(model.items.count == 1 ? "%lld file · %@" : "%lld files · %@", model.items.count, ByteCountFormatter.string(fromByteCount: total, countStyle: .binary))
             if !unused.isEmpty { summary += Lf(" · %lld unused", unused.count) }
             
             return HStack(spacing: 16) {
@@ -383,7 +383,7 @@ extension EditingView {
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file))
+                Text(ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .binary))
                     .font(.system(size: 9))
                     .foregroundColor(.white.opacity(0.5))
             }
@@ -560,7 +560,7 @@ extension EditingView {
                     : L("This can't be undone.")
             case .unused(let items):
                 let bytes = items.reduce(Int64(0)) { $0 + $1.bytes }
-                return Lf("Frees %@. No clip uses them. This can't be undone.", ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
+                return Lf("Frees %@. No clip uses them. This can't be undone.", ByteCountFormatter.string(fromByteCount: bytes, countStyle: .binary))
             case nil:
                 return ""
             }

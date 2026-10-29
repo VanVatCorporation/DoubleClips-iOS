@@ -487,7 +487,7 @@ final class TimelineExporter: ObservableObject {
     }
     
     static func formatBytes(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .binary)
     }
     
     private static func describe(_ error: Error?) -> String {

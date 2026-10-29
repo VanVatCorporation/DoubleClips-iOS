@@ -350,7 +350,8 @@ final class StorageModel: ObservableObject {
         }
     }
 
-    static func bytes(_ n: Int64) -> String { ByteCountFormatter.string(fromByteCount: n, countStyle: .file) }
+    /// Sizes the way the web Drive shows them: powers of 1024 (2147483648 bytes = "2 GB"), not the system's decimal ".file" style (2.15 GB).
+    static func bytes(_ n: Int64) -> String { ByteCountFormatter.string(fromByteCount: n, countStyle: .binary) }
 
     private static func stamp() -> String {
         let f = DateFormatter()
