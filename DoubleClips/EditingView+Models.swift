@@ -143,6 +143,9 @@ extension EditingView {
         @Published var templateGroup: String?
         /// iOS addition (EditingView+Blend.swift): how the clip mixes with what is drawn below it.
         @Published var blendMode: ClipBlendMode = .normal
+        /// The "Background" panel's chroma keys (EditingView+ChromaKey.swift): colours made transparent so what is behind the clip shows
+        /// through. Same `chromaKeys` JSON as desktop (up to 6 keys; each key's four sliders can be keyframed). Empty = none.
+        @Published var chromaKeys: [ChromaKey] = []
         /// An effect for THIS clip only (EditingView+ClipEffect.swift), same JSON as Android's `Clip.clipEffect`: `offset` is seconds after the
         /// clip's start, `duration` the window's length (0 = until the clip's end), `params.intensity` the strength. nil = none.
         @Published var clipEffect: EffectTemplate?
@@ -184,6 +187,7 @@ extension EditingView {
             case templateGroup
             case blendMode
             case clipEffect
+            case chromaKeys
         }
         
         init(clipName: String, startTime: Float, duration: Float, trackIndex: Int, type: ClipType, isClipHasAudio: Bool, width: Int, height: Int) {
@@ -254,6 +258,8 @@ extension EditingView {
             self.blendMode = (try? container.decodeIfPresent(ClipBlendMode.self, forKey: .blendMode)) ?? .normal
             // An effect that can't be read must never cost the clip.
             self.clipEffect = (try? container.decodeIfPresent(EffectTemplate.self, forKey: .clipEffect)) ?? nil
+            // Keys that can't be read must never cost the clip either.
+            self.chromaKeys = Array(((try? container.decodeIfPresent([ChromaKey].self, forKey: .chromaKeys)) ?? []).prefix(ChromaKey.maxKeys))
         }
         
         func encode(to encoder: Encoder) throws {
@@ -292,6 +298,7 @@ extension EditingView {
             try container.encodeIfPresent(templateGroup, forKey: .templateGroup)
             if blendMode != .normal { try container.encode(blendMode, forKey: .blendMode) }
             try container.encodeIfPresent(clipEffect, forKey: .clipEffect)
+            if !chromaKeys.isEmpty { try container.encode(chromaKeys, forKey: .chromaKeys) }
         }
     }
     
@@ -314,10 +321,21 @@ extension EditingView {
         /// iOS addition: the strength of an effect clip, so it can be keyframed like any other property. An effect clip's STATIC strength
         /// stays in `effect.params["intensity"]`; this field only carries the value inside keyframes.
         var valueStrength: Float = 1
+        /// What the chroma-key sliders (EditingView+ChromaKey.swift) were in a keyframe: 6 keys x 4 sliders, key-major
+        /// (intensity, shadow, feather, clean up edge), each 0...100. Desktop's `valueChroma`. Only keyframes carry it, so it stays
+        /// nil (and out of the JSON) everywhere else: a key's plain values live in the clip's `chromaKeys`.
+        var valueChroma: [Float]?
         
-        /// Same order/cases as Android's VideoProperties.ValueType.
+        /// Same order/cases as Android's VideoProperties.ValueType. The chroma cases come last and are held only by a keyframe
+        /// that lists them (an old "all properties" keyframe must never start animating a key); the names are desktop's.
         enum ValueType: String, Codable, CaseIterable {
             case posX, posY, rot, rotInRadians, scaleX, scaleY, pivotX, pivotY, opacity, speed, volume, hue, saturation, brightness, temperature, strength
+            case chromaIntensity0, chromaShadow0, chromaFeather0, chromaCleanUp0
+            case chromaIntensity1, chromaShadow1, chromaFeather1, chromaCleanUp1
+            case chromaIntensity2, chromaShadow2, chromaFeather2, chromaCleanUp2
+            case chromaIntensity3, chromaShadow3, chromaFeather3, chromaCleanUp3
+            case chromaIntensity4, chromaShadow4, chromaFeather4, chromaCleanUp4
+            case chromaIntensity5, chromaShadow5, chromaFeather5, chromaCleanUp5
         }
         
         init() {}
@@ -341,6 +359,7 @@ extension EditingView {
             valueBrightness = try c.decodeIfPresent(Float.self, forKey: .valueBrightness) ?? 0
             valueTemperature = try c.decodeIfPresent(Float.self, forKey: .valueTemperature) ?? 6500
             valueStrength = try c.decodeIfPresent(Float.self, forKey: .valueStrength) ?? 1
+            valueChroma = try? c.decodeIfPresent([Float].self, forKey: .valueChroma)
         }
     }
     

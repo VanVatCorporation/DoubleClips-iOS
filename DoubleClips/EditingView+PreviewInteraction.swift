@@ -331,6 +331,8 @@ extension EditingView {
         
         /// Mask editing (EditingView+Mask.swift): while on, every gesture drives the selected clip's mask.
         @ObservedObject private var maskEdit = MaskEditState.shared
+        /// The Background panel's eyedropper (EditingView+Background.swift): while it waits, a tap takes a colour instead of selecting.
+        @ObservedObject private var chromaEdit = ChromaEditState.shared
         @StateObject private var maskSession = MaskEditSession()
         
         var body: some View {
@@ -344,10 +346,12 @@ extension EditingView {
                 ZStack(alignment: .bottom) {
                     PreviewGestureSurface(
                         onTap: { point in
+                            if chromaEdit.isPicking { pickChromaColor(at: point, canvas: canvas, fit: fit, origin: origin); return }
                             if maskEdit.isEditing { return }
                             if let hit = hits(at: point, canvas: canvas, fit: fit, origin: origin).first { onSelect(hit) }
                         },
                         onBegin: { point, twoFinger in
+                            if chromaEdit.isPicking { return }      // the eyedropper only listens for taps
                             // Mask editing: the gesture belongs to the mask of the selected clip.
                             if maskEdit.isEditing,
                                let clip = maskTarget(),
@@ -420,6 +424,18 @@ extension EditingView {
                     guides(canvas: canvas, fit: fit, origin: origin)
                         .allowsHitTesting(false)
                     
+                    if chromaEdit.isPicking {
+                        Text(L("Tap the colour to remove"))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(Color.black.opacity(0.65))
+                            .cornerRadius(14)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                            .padding(.top, 8)
+                            .allowsHitTesting(false)
+                    }
+                    
                     if let info = session.infoText {
                         Text(info)
                             .font(.system(size: 11, design: .monospaced))
@@ -436,6 +452,16 @@ extension EditingView {
         }
         
         // MARK: Helpers
+        
+        /// The eyedropper: the spot tapped on the preview, as fractions of the target clip's own box, goes to the Background panel.
+        private func pickChromaColor(at point: CGPoint, canvas: CGSize, fit: CGFloat, origin: CGPoint) {
+            guard let id = chromaEdit.targetClipID,
+                  let clip = timeline.tracks.flatMap({ $0.clips }).first(where: { $0.id == id }),
+                  let quad = clip.previewQuad(at: playhead, canvas: canvas, stretchToFull: settings.isStretchToFull,
+                                              live: LiveOverrides.shared.state(for: clip.id)) else { return }
+            let canvasPoint = CGPoint(x: (point.x - origin.x) / fit, y: (point.y - origin.y) / fit)
+            if let uv = ChromaSampler.boxPoint(of: canvasPoint, in: quad) { chromaEdit.onSample?(uv) }
+        }
         
         /// The selected clip when it can carry a mask and is on screen at the playhead: a picture clip or an effect clip.
         private func maskTarget() -> Clip? {

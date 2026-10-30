@@ -60,6 +60,8 @@ extension EditingView {
         /// iOS addition: clip mask (EditingView+Mask.swift), applied in the clip's own box.
         var masks: [ClipMask] = []
         var blendMode: ClipBlendMode = .normal
+        /// The clip's chroma keys (EditingView+ChromaKey.swift): applied to its own picture first. Empty = none.
+        var chromaKeys: [ChromaKey] = []
         /// The clip's own effect (EditingView+ClipEffect.swift): filters this clip's picture alone. nil = none.
         var ownEffect: OwnEffect?
     }
@@ -274,6 +276,10 @@ extension EditingView {
                                                                      clipStartTime: layer.startTime, at: time)
             // A mask gesture in progress overrides the snapshot's mask the same way.
             let masks = (live?.masks ?? layer.masks).map { $0.resolved(atLocal: time - layer.startTime) }
+            // The chroma keys at this frame (a slider drag in flight overrides the snapshot, like the masks above).
+            let chromaKeys = live?.chromaKeys ?? layer.chromaKeys
+            let chroma = chromaKeys.isEmpty ? [] : ChromaKey.resolve(chromaKeys, keyframes: live?.keyframes ?? layer.keyframes,
+                                                                    clipStartTime: layer.startTime, at: time)
             
             switch layer.kind {
             case .text(let spec):
@@ -296,12 +302,14 @@ extension EditingView {
                 guard let buffer = request.sourceFrame(byTrackID: trackID) else { return nil }
                 let upright = Self.upright(CIImage(cvPixelBuffer: buffer), preferredTransform)
                 return place(upright, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull,
-                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), masks: masks)
+                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), masks: masks,
+                             chroma: chroma, sourceHasAlpha: false)
                 
             case .image(let url):
                 guard let source = Self.cachedImage(url) else { return nil }
                 return place(source, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull,
-                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), masks: masks)
+                             anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), masks: masks,
+                             chroma: chroma, sourceHasAlpha: true)
                 
             case .effect:
                 return nil      // handled where the layers are composited
@@ -402,7 +410,8 @@ extension EditingView {
         /// then the pivot-based scale/rotate/translate from OpenGLEdit.buildClipMvp.
         private func place(_ source: CIImage, layer: RenderLayer, props: VideoProperties,
                            canvas: CGSize, stretchToFull: Bool, anim: ClipAnimationFrame,
-                           origin: CGPoint = .zero, masks: [EditingView.ClipMask] = []) -> CIImage? {
+                           origin: CGPoint = .zero, masks: [EditingView.ClipMask] = [],
+                           chroma: [EditingView.ChromaKey.Resolved] = [], sourceHasAlpha: Bool = false) -> CIImage? {
             let srcW = source.extent.width, srcH = source.extent.height
             guard srcW > 0, srcH > 0 else { return nil }
             
@@ -413,7 +422,9 @@ extension EditingView {
             let scaledH = baseH * CGFloat(props.valueScaleY * anim.scale)
             guard scaledW > 0, scaledH > 0 else { return nil }
             
-            var colored = Self.colorAdjusted(source, props, anim: anim)
+            // Chroma keys act on the clip's own picture, before its colour grade, masks and transform (EditingView+ChromaKey.swift).
+            let keyed = chroma.isEmpty ? source : Self.applyChromaKeys(chroma, to: source, hasAlpha: sourceHasAlpha)
+            var colored = Self.colorAdjusted(keyed, props, anim: anim)
             // Top-centre squish (warp.* channels) happens on the clip's own box, before scale/rotate.
             if anim.hasWarp { colored = Self.warped(colored, anim: anim) }
             

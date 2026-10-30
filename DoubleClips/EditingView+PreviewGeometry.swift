@@ -17,6 +17,8 @@ extension EditingView {
         var masks: [ClipMask]? = nil
         /// Set while the Effect section's strength slider is dragged (EditingView+ClipEffect.swift); nil = use the clip's own effect.
         var ownEffect: OwnEffect? = nil
+        /// Set while a slider / colour of the Background panel is being changed (EditingView+Background.swift); nil = use the clip's own keys.
+        var chromaKeys: [ChromaKey]? = nil
     }
     
     /// Thread-safe side channel: the main thread writes while a gesture is in flight, the

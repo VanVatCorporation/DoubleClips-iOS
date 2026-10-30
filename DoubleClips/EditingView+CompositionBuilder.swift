@@ -89,7 +89,7 @@ extension EditingView {
                                     baseProperties: clip.videoProperties, keyframes: clip.keyframes,
                                     inAnimation: clip.inAnimation, outAnimation: clip.outAnimation,
                                     duration: clip.duration, masks: clip.masks, blendMode: clip.blendMode,
-                                    ownEffect: clip.ownEffect)
+                                    chromaKeys: clip.chromaKeys, ownEffect: clip.ownEffect)
                     }
                     
                     switch clip.type {

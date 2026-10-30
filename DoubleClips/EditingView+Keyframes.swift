@@ -39,6 +39,10 @@ extension EditingView.VideoProperties {
         case .brightness: return valueBrightness
         case .temperature: return valueTemperature
         case .strength: return valueStrength
+        default:
+            // The chroma-key sliders (EditingView+ChromaKey.swift).
+            guard let slot = type.chromaSlot else { return 0 }
+            return valueChroma.flatMap { slot < $0.count ? $0[slot] : nil } ?? 0
         }
     }
     
@@ -60,6 +64,13 @@ extension EditingView.VideoProperties {
         case .brightness: valueBrightness = v
         case .temperature: valueTemperature = v
         case .strength: valueStrength = v
+        default:
+            guard let slot = type.chromaSlot else { return }
+            if valueChroma == nil {
+                if v == 0 { return }    // nothing to keep: stays nil, and out of the JSON
+                valueChroma = [Float](repeating: 0, count: EditingView.ChromaKey.maxKeys * EditingView.ChromaKey.paramCount)
+            }
+            if slot < valueChroma!.count { valueChroma![slot] = v }
         }
     }
 }
@@ -204,7 +215,10 @@ extension EditingView.AnimatedProperty {
     func resolved(base: EditingView.VideoProperties, clipStartTime: Float, at playheadTime: Float) -> EditingView.VideoProperties {
         guard !keyframes.isEmpty else { return base }
         var out = base
-        for type in EditingView.VideoProperties.ValueType.allCases where type != .rotInRadians {
+        // The chroma sliders only take part when some keyframe holds one (most clips never do): that keeps the 24 extra
+        // channels off the path every preview frame takes.
+        let anyChroma = keyframes.contains { $0.channels?.contains { $0.isChroma } == true }
+        for type in EditingView.VideoProperties.ValueType.allCases where type != .rotInRadians && (anyChroma || !type.isChroma) {
             out.setValue(value(for: type, base: base, clipStartTime: clipStartTime, at: playheadTime), type)
         }
         return out
@@ -242,6 +256,7 @@ extension EditingView.Clip {
         c.masks = masks
         c.templateGroup = templateGroup
         c.blendMode = blendMode
+        c.chromaKeys = chromaKeys
         c.clipEffect = clipEffect
         c.textContent = textContent
         c.fontSize = fontSize

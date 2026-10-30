@@ -567,3 +567,20 @@
 
 /* Template card long-press menu */
 "Open" = "Mở";
+
+/* Background panel (chroma keys) */
+"Background" = "Nền";
+"Chroma key" = "Khóa màu";
+"Add key" = "Thêm khóa";
+"Key %d" = "Khóa %d";
+"Pick" = "Chọn màu";
+"Intensity" = "Cường độ";
+"Shadow" = "Bóng";
+"Feather edge" = "Viền mềm";
+"Clean up edge" = "Làm sạch viền";
+"Remove Background" = "Xóa nền";
+"Add a chroma key, then pick the colour to remove (use the eyedropper on the preview). Add more keys to remove more colours." = "Thêm một khóa màu, rồi chọn màu cần xóa (dùng ống hút trên bản xem trước). Thêm nhiều khóa để xóa nhiều màu.";
+"Tap the colour to remove in the preview." = "Chạm vào màu cần xóa trên bản xem trước.";
+"Tap the colour to remove" = "Chạm vào màu cần xóa";
+"The keys filter the clip's own picture before its colour grade and masks." = "Các khóa lọc hình của clip trước khi chỉnh màu và áp mặt nạ.";
+"The cut-out is not drawn on iOS yet; the switch is stored in the clip." = "iOS chưa vẽ phần tách nền; công tắc chỉ được lưu trong clip.";

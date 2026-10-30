@@ -529,17 +529,25 @@ extension EditingView {
             let removed = afterKeys.keyframes.remove(at: index)
             // A property that loses its last keyframe stays at the value that keyframe gave it.
             var afterProps = beforeProps
+            // A chroma slider's plain value lives in the clip's chroma key (EditingView+ChromaKey.swift), not in the properties.
+            let beforeChroma = clip.chromaKeys
+            var afterChroma = beforeChroma
             for type in removed.channelList where !afterKeys.isAnimated(type) {
-                afterProps.setValue(removed.value.value(type), type)
+                if let key = type.chromaKey, let param = type.chromaParam, afterChroma.indices.contains(key) {
+                    afterChroma[key].set(param, removed.value.value(type))
+                } else {
+                    afterProps.setValue(removed.value.value(type), type)
+                }
             }
             clip.keyframes = afterKeys
             clip.videoProperties = afterProps
+            clip.chromaKeys = afterChroma
             if removed.animates(.speed) { clip.refitDuration() }
             let afterDuration = clip.duration
             let target = clip
             commandManager.execute(GenericCommand(description: "Remove keyframe: \(clip.clipName)",
-                undo: { target.keyframes = beforeKeys; target.videoProperties = beforeProps; target.duration = beforeDuration; onChanged() },
-                redo: { target.keyframes = afterKeys; target.videoProperties = afterProps; target.duration = afterDuration; onChanged() }))
+                undo: { target.keyframes = beforeKeys; target.videoProperties = beforeProps; target.chromaKeys = beforeChroma; target.duration = beforeDuration; onChanged() },
+                redo: { target.keyframes = afterKeys; target.videoProperties = afterProps; target.chromaKeys = afterChroma; target.duration = afterDuration; onChanged() }))
             onChanged()
         }
         
