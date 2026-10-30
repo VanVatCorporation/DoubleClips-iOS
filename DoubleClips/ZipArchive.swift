@@ -45,6 +45,7 @@ enum ZipError: LocalizedError {
             return L("Import cancelled.")
         case .notEnoughSpace(let needed, let available):
             let f = ByteCountFormatter()
+            f.countStyle = .binary
             return Lf("Not enough free space: the project needs about %@, but only %@ is available.", f.string(fromByteCount: needed), f.string(fromByteCount: available))
         case .io(let message):
             return message
