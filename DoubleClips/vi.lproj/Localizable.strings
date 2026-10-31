@@ -603,3 +603,9 @@
 "No clip uses the same media as another. Use Custom group to put clips together yourself." = "Không có clip nào dùng chung phương tiện với clip khác. Hãy dùng Nhóm tùy chỉnh để tự gộp các clip.";
 "Clips that use the same media share one slot. People pick that media once, then can still change single clips. That makes %lld slot to fill first instead of %lld." = "Các clip dùng chung một phương tiện sẽ chung một ô. Mọi người chọn phương tiện đó một lần, sau đó vẫn có thể đổi từng clip. Như vậy chỉ cần điền trước %lld ô thay vì %lld.";
 "Clips that use the same media share one slot. People pick that media once, then can still change single clips. That makes %lld slots to fill first instead of %lld." = "Các clip dùng chung một phương tiện sẽ chung một ô. Mọi người chọn phương tiện đó một lần, sau đó vẫn có thể đổi từng clip. Như vậy chỉ cần điền trước %lld ô thay vì %lld.";
+
+/* Template search */
+"Show all searches" = "Hiển thị tất cả tìm kiếm";
+"Show less" = "Thu gọn";
+"You may like" = "Có thể bạn sẽ thích";
+"Trending" = "Đang thịnh hành";

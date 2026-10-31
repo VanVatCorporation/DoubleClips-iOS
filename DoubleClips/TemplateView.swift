@@ -3,7 +3,9 @@ import SwiftUI
 struct TemplateView: View {
     /// The feed (or the search results): loaded a page at a time as the user scrolls, by the server's ranking.
     @StateObject private var pager = TemplatePager()
-    @State private var searchText: String = ""
+    /// Index of the hot search showing in the bar (rotates every ~3 s).
+    @State private var hotIndex = 0
+    @ObservedObject private var hints = TemplateSearchHints.shared
     
     @State private var navigationPath = NavigationPath()
     
@@ -25,35 +27,13 @@ struct TemplateView: View {
                         .padding(.bottom, 8)
                     
                     // ── Search Bar ────────────────────────────────────────────
-                    // Matches: MaterialCardView with cardCornerRadius="24dp",
-                    // cardBackgroundColor="colorSurfaceContainerHigh", SearchView inside
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 16))
-                        
-                        TextField("Search templates...", text: $searchText)
-                            .foregroundColor(.primary)
-                            .textFieldStyle(PlainTextFieldStyle())
-                        
-                        if !searchText.isEmpty {
-                            Button(action: { searchText = "" }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary)
-                            }
-                        }
+                    // Hot searches take turns inside the bar; tapping opens the search screen.
+                    TemplateSearchBar(terms: hotTerms, index: $hotIndex) {
+                        navigationPath.append(TemplateSearchRoute(placeholder: currentHotTerm))
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color.mdSurfaceContainerHigh)
-                    .clipShape(Capsule()) // cardCornerRadius="24dp" → Capsule
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.mdOutlineVariant, lineWidth: 0.5)
-                    )
-                    .padding(.horizontal, 16)
                     .padding(.bottom, 16)
-                    
+
                     // ── Template List ─────────────────────────────────────────
                     // Matches: SwipeRefreshLayout + StaggeredGridLayoutManager(2 cols), now an endless feed
                     TemplateMasonryGrid(templates: pager.items,
@@ -64,21 +44,18 @@ struct TemplateView: View {
                         .refreshable { await pager.restart() }   // a new feed session
                 }
             }
-            .task(id: searchText) {
-                // Runs on first appearance (the feed) and again whenever the text changes. Typing cancels the previous run,
-                // so waiting a moment here is the debounce. Coming back from a preview changes nothing: no reload.
-                let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-                let wanted: TemplateFeedSource = query.isEmpty ? .feed : .search(query)
-                if pager.didStart && pager.source == wanted && !pager.viewerChanged { return }
-                if pager.didStart && !query.isEmpty {
-                    try? await Task.sleep(nanoseconds: 400_000_000)
-                    if Task.isCancelled { return }
-                }
-                await pager.start(wanted)
+            .task {
+                if !pager.didStart { await pager.start(.feed) }
             }
+            .task { await hints.refresh() }
             .onAppear {
                 // Signed in / out in the Profile tab: the likes in this list belong to the previous account.
                 if pager.viewerChanged { Task { await pager.restart() } }
+            }
+            .navigationDestination(for: TemplateSearchRoute.self) { route in
+                TemplateSearchView(placeholder: route.placeholder,
+                                   fallbackTitles: pager.items.map(\.templateTitle),
+                                   path: $navigationPath)
             }
             .navigationDestination(for: TemplateData.self) { template in
                 if let index = pager.items.firstIndex(where: { $0.id == template.id }) {
@@ -86,6 +63,19 @@ struct TemplateView: View {
                 }
             }
         }
+    }
+}
+
+extension TemplateView {
+    /// What the bar rotates through: the server's hot searches, else the titles of the first templates in the feed.
+    fileprivate var hotTerms: [String] {
+        let hot = hints.trending.map(\.text)
+        return hot.isEmpty ? Array(pager.items.prefix(8).map(\.templateTitle).filter { !$0.isEmpty }) : hot
+    }
+
+    fileprivate var currentHotTerm: String {
+        let terms = hotTerms
+        return terms.isEmpty ? "" : terms[hotIndex % terms.count]
     }
 }
 
