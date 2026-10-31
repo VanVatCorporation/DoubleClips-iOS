@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 // MARK: - Motion panel (toolbar "Motion", ported from the desktop's Motion tab)
 //

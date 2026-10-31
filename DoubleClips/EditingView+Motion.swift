@@ -311,6 +311,11 @@ final class MotionFlowEngine {
         guard width > 0, height > 0, CVPixelBufferGetWidth(b) == width, CVPixelBufferGetHeight(b) == height,
               let state = state(for: clipID, width: width, height: height) else { return plain() }
 
+        // The made picture must carry the SAME colour tags as the decoded frames (primaries, transfer function, matrix, profile): Core
+        // Image converts a tagged buffer and an untagged one differently, so without this the made frames and the plain ones (alpha
+        // near 0 or 1) came out a little different in brightness, and a slowed clip flickered between the two.
+        Self.copyColorTags(from: a, to: state.outBuffer)
+
         if state.cutPair != pairIndex {
             state.cutPair = pairIndex
             state.cut = MotionMath.isSceneCut(a, b)
@@ -364,6 +369,19 @@ final class MotionFlowEngine {
             return plain()
         }
         return .picture(CIImage(cvPixelBuffer: state.outBuffer))
+    }
+
+    private static let colorKeys: [CFString] = [kCVImageBufferColorPrimariesKey, kCVImageBufferTransferFunctionKey,
+                                                kCVImageBufferYCbCrMatrixKey, kCVImageBufferICCProfileKey, kCVImageBufferGammaLevelKey]
+
+    private static func copyColorTags(from source: CVPixelBuffer, to target: CVPixelBuffer) {
+        for key in colorKeys {
+            if let value = CVBufferCopyAttachment(source, key, nil) {
+                CVBufferSetAttachment(target, key, value, .shouldPropagate)
+            } else {
+                CVBufferRemoveAttachment(target, key)
+            }
+        }
     }
 
     // MARK: The passes
