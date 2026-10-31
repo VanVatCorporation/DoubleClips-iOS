@@ -64,6 +64,8 @@ extension EditingView {
         var chromaKeys: [ChromaKey] = []
         /// The clip's own effect (EditingView+ClipEffect.swift): filters this clip's picture alone. nil = none.
         var ownEffect: OwnEffect?
+        /// The Motion panel (EditingView+Motion.swift): optical flow / motion blur of a video clip. nil = none.
+        var motion: MotionLayerInfo?
     }
     
     /// A transition between two clips of one track (EditingView+TransitionPlan.swift): both sides are
@@ -104,6 +106,9 @@ extension EditingView {
                 if case .video(let id, _) = layer.kind, seen.insert(id).inserted {
                     ids.append(NSNumber(value: id))
                 }
+                if let next = layer.motion?.nextTrackID, next != kCMPersistentTrackID_Invalid, seen.insert(next).inserted {
+                    ids.append(NSNumber(value: next))
+                }
             }
             for entry in entries {
                 switch entry {
@@ -131,6 +136,8 @@ extension EditingView {
         private let ciContext = CIContext(options: [.cacheIntermediates: false])
         private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         private static let mediaCache = NSCache<NSString, CIImage>()
+        /// Optical flow / motion blur (EditingView+Motion.swift); nil when this GPU can't build the kernels. Render queue only.
+        private lazy var motionEngine: MotionFlowEngine? = MotionFlowEngine()
         
         func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {}
         
@@ -300,7 +307,11 @@ extension EditingView {
                 
             case .video(let trackID, let preferredTransform):
                 guard let buffer = request.sourceFrame(byTrackID: trackID) else { return nil }
-                let upright = Self.upright(CIImage(cvPixelBuffer: buffer), preferredTransform)
+                // Optical flow / motion blur make the picture from this frame and the one after it.
+                let motionPicture = layer.motion.flatMap {
+                    motionImage(layer, motion: $0, props: props, current: buffer, request: request, time: time)
+                }
+                let upright = Self.upright(motionPicture ?? CIImage(cvPixelBuffer: buffer), preferredTransform)
                 return place(upright, layer: layer, props: props, canvas: canvas, stretchToFull: stretchToFull,
                              anim: Self.animationFrame(layer, at: time).merged(with: extraAnim), masks: masks,
                              chroma: chroma, sourceHasAlpha: false)
@@ -313,6 +324,41 @@ extension EditingView {
                 
             case .effect:
                 return nil      // handled where the layers are composited
+            }
+        }
+        
+        // MARK: Motion (EditingView+Motion.swift)
+        
+        /// The clip's picture with optical flow and / or motion blur, or nil to draw the decoded frame as it is. The builder put the
+        /// footage on a second track one frame later: `current` is frame N (a quarter frame early, see `lookAhead`), the second track gives N + 1.
+        private func motionImage(_ layer: RenderLayer, motion: MotionLayerInfo, props: VideoProperties, current: CVPixelBuffer,
+                                 request: AVAsynchronousVideoCompositionRequest, time: Float) -> CIImage? {
+            guard let engine = motionEngine, motion.sourceFPS > 0, motion.nextTrackID != kCMPersistentTrackID_Invalid,
+                  let next = request.sourceFrame(byTrackID: motion.nextTrackID) else { return nil }
+            let elapsed = Double(time - layer.startTime)
+            guard elapsed >= 0 else { return nil }          // a transition's pre-roll: no footage of its own
+            let fps = motion.sourceFPS
+            func sourceSeconds(_ e: Double) -> Double { motion.trim + motion.timeMap.sourceOffset(atLocal: e) }
+            // The frame the first track hands over, and where (between it and the next) the picture falls. With optical flow the time is
+            // snapped to the grid of its own frame rate first (ffmpeg's minterpolate=fps=N does the same).
+            let delivered = Int(((sourceSeconds(elapsed) + motion.lookAhead) * fps + 1e-6).rounded(.down))
+            let snapped = motion.flowFPS.map { MotionMath.snapToGrid(elapsed, fps: Double($0)) } ?? elapsed
+            let alpha = min(max(sourceSeconds(snapped) * fps - Double(delivered), 0), 1)
+            
+            var blur: MotionFlowEngine.Blur?
+            if motion.blurOn {
+                let length = min(max(props.valueMotionBlur / 100, 0), 1)
+                if length > 0 {        // Blur 0: nothing to smear
+                    blur = MotionFlowEngine.Blur(length: length, blend: min(max(props.valueMotionBlend / 100, 0), 1),
+                                                 direction: motion.direction, passes: motion.passes)
+                }
+            }
+            if motion.flowFPS == nil && blur == nil { return nil }
+            switch engine.render(clipID: layer.clipID, pairIndex: delivered, a: current, b: next, alpha: alpha,
+                                 interpolate: motion.flowFPS != nil, blur: blur) {
+            case .first: return nil
+            case .second: return CIImage(cvPixelBuffer: next)
+            case .picture(let image): return image
             }
         }
         

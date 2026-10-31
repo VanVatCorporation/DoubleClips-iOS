@@ -39,6 +39,8 @@ extension EditingView.VideoProperties {
         case .brightness: return valueBrightness
         case .temperature: return valueTemperature
         case .strength: return valueStrength
+        case .motionBlur: return valueMotionBlur
+        case .motionBlend: return valueMotionBlend
         default:
             // The chroma-key sliders (EditingView+ChromaKey.swift).
             guard let slot = type.chromaSlot else { return 0 }
@@ -64,6 +66,8 @@ extension EditingView.VideoProperties {
         case .brightness: valueBrightness = v
         case .temperature: valueTemperature = v
         case .strength: valueStrength = v
+        case .motionBlur: valueMotionBlur = v
+        case .motionBlend: valueMotionBlend = v
         default:
             guard let slot = type.chromaSlot else { return }
             if valueChroma == nil {
@@ -257,6 +261,8 @@ extension EditingView.Clip {
         c.templateGroup = templateGroup
         c.blendMode = blendMode
         c.chromaKeys = chromaKeys
+        c.opticalFlow = opticalFlow
+        c.motionBlur = motionBlur
         c.clipEffect = clipEffect
         c.textContent = textContent
         c.fontSize = fontSize

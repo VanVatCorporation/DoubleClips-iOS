@@ -23,7 +23,7 @@ extension EditingView.VideoProperties {
     /// The properties an "all properties" keyframe (`channels == nil`: what Android / desktop write) holds. `rotInRadians` is only Rot in
     /// radians; `strength` (an effect clip's strength, iOS only) and the chroma-key sliders are held only by a keyframe that lists them explicitly, so an old-style
     /// keyframe never pins one to its default.
-    static let channels: [ValueType] = ValueType.allCases.filter { $0 != .rotInRadians && $0 != .strength && !$0.isChroma }
+    static let channels: [ValueType] = ValueType.allCases.filter { $0 != .rotInRadians && $0 != .strength && !$0.isMotion && !$0.isChroma }
     
     private static let channelKeyPaths: [(ValueType, WritableKeyPath<EditingView.VideoProperties, Float>)] = [
         (.posX, \.valuePosX), (.posY, \.valuePosY), (.rot, \.valueRot),
@@ -32,7 +32,8 @@ extension EditingView.VideoProperties {
         (.opacity, \.valueOpacity), (.speed, \.valueSpeed), (.volume, \.valueVolume),
         (.hue, \.valueHue), (.saturation, \.valueSaturation),
         (.brightness, \.valueBrightness), (.temperature, \.valueTemperature),
-        (.strength, \.valueStrength)
+        (.strength, \.valueStrength),
+        (.motionBlur, \.valueMotionBlur), (.motionBlend, \.valueMotionBlend)
     ]
     
     static func channel(for keyPath: WritableKeyPath<EditingView.VideoProperties, Float>) -> ValueType? {
@@ -56,6 +57,8 @@ extension EditingView.VideoProperties {
         case .brightness: return "Brightness"
         case .temperature: return "Temperature"
         case .strength: return "Strength"
+        case .motionBlur: return "Motion blur"
+        case .motionBlend: return "Motion blend"
         default:
             // "Key 2 Intensity" (EditingView+ChromaKey.swift)
             guard let key = type.chromaKey, let param = type.chromaParam else { return "" }
@@ -69,7 +72,7 @@ extension EditingView.Keyframe {
     /// Does this keyframe hold `type`? (Old keyframes, `channels == nil`, hold everything.)
     func animates(_ type: EditingView.VideoProperties.ValueType) -> Bool {
         // `strength` and the chroma sliders are held only by a keyframe that lists them.
-        channels?.contains(type) ?? (type != .strength && !type.isChroma)
+        channels?.contains(type) ?? (type != .strength && !type.isMotion && !type.isChroma)
     }
     
     var channelList: [EditingView.VideoProperties.ValueType] {

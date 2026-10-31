@@ -110,12 +110,13 @@ extension EditingView {
                         let pieceScale: CMTimeScale = 24000
                         
                         /// Put the clip's footage into `track`: one scaled edit for a constant speed, short scaled pieces for a curve.
-                        func insertFootage(of source: AVAssetTrack, into track: AVMutableCompositionTrack) -> Bool {
-                            let cap = min(source.timeRange.end.seconds, sourceLimit ?? .infinity)
+                        /// `shift` moves the source range later (the Motion panel's second track, see below); a shifted copy may use footage past the trim.
+                        func insertFootage(of source: AVAssetTrack, into track: AVMutableCompositionTrack, shift: Double = 0) -> Bool {
+                            let cap = shift == 0 ? min(source.timeRange.end.seconds, sourceLimit ?? .infinity) : source.timeRange.end.seconds
                             var inserted = false
                             for piece in timeMap.pieces(duration: windowSeconds) {
-                                let s0 = trimStart + piece.s0
-                                let s1 = min(trimStart + piece.s1, cap)
+                                let s0 = trimStart + piece.s0 + shift
+                                let s1 = min(trimStart + piece.s1 + shift, cap)
                                 guard s1 - s0 > 0.0005 else { break }
                                 let ratio = piece.s1 > piece.s0 ? (piece.b - piece.a) / (piece.s1 - piece.s0) : 1
                                 let at = CMTime(seconds: Double(clip.startTime) + piece.a, preferredTimescale: pieceScale)
@@ -128,7 +129,7 @@ extension EditingView {
                                     track.scaleTimeRange(CMTimeRange(start: at, duration: range.duration),
                                                          toDuration: CMTime(seconds: timelineLength, preferredTimescale: pieceScale))
                                 }
-                                if s1 < trimStart + piece.s1 - 0.0005 { break }     // the source ran out inside this piece
+                                if s1 < trimStart + piece.s1 + shift - 0.0005 { break }     // the source ran out inside this piece
                             }
                             return inserted
                         }
@@ -143,6 +144,13 @@ extension EditingView {
                             let preHold = max(0, preRoll - preReal)
                             let postReal = atSpeed1 ? min(postRoll, max(0, sourceEnd - (trim + length))) : 0
                             let postHold = max(0, postRoll - postReal)
+                            
+                            // Optical flow / motion blur: the picture is made from frame N and frame N + 1, so the footage goes on a SECOND track
+                            // one source frame later; AVFoundation then hands both frames to the compositor (decoding, seeking, speed ramps and
+                            // export included). Both tracks are shifted a quarter frame ahead, so a time that rounds a hair early never delivers
+                            // the frame before the one the maths expects (MotionMath.lookAheadFrames).
+                            let motionFPS = (clip.hasOpticalFlow || clip.hasMotionBlur) ? Double(sourceTrack.nominalFrameRate) : 0
+                            let lookAhead = motionFPS > 0 ? MotionMath.lookAheadFrames / motionFPS : 0
                             
                             let firstNeeded = cm(clip.startTime - Float(preRoll))
                             if let target = lane(freeFrom: firstNeeded) {
@@ -166,9 +174,23 @@ extension EditingView {
                                                                     at: cm(clip.startTime - Float(preReal)))
                                 }
                                 
-                                if insertFootage(of: sourceTrack, into: target) {
-                                    let layer = snapshot(.video(trackID: target.trackID,
+                                if insertFootage(of: sourceTrack, into: target, shift: lookAhead) {
+                                    var layer = snapshot(.video(trackID: target.trackID,
                                                                 preferredTransform: sourceTrack.preferredTransform))
+                                    if motionFPS > 0 {
+                                        // `target` is busy now, so this is another lane.
+                                        var nextID = kCMPersistentTrackID_Invalid
+                                        if let second = lane(freeFrom: firstNeeded),
+                                           insertFootage(of: sourceTrack, into: second, shift: lookAhead + 1 / motionFPS) {
+                                            nextID = second.trackID
+                                        }
+                                        layer.motion = MotionLayerInfo(nextTrackID: nextID, sourceFPS: motionFPS, lookAhead: lookAhead,
+                                                                       trim: trimStart, timeMap: timeMap,
+                                                                       flowFPS: clip.hasOpticalFlow ? clip.opticalFlow?.effectiveFPS : nil,
+                                                                       blurOn: clip.hasMotionBlur,
+                                                                       direction: clip.motionBlur?.directionValue.rawValue ?? 0,
+                                                                       passes: clip.motionBlur?.effectivePasses ?? 1)
+                                    }
                                     layers.append((layer, shown, drawOrder))
                                     layerByClip[clip.id] = layer
                                     drawOrder += 1

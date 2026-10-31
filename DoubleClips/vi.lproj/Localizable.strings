@@ -609,3 +609,17 @@
 "Show less" = "Thu gọn";
 "You may like" = "Có thể bạn sẽ thích";
 "Trending" = "Đang thịnh hành";
+/* Motion panel */
+"Motion" = "Chuyển động";
+"Optical flow" = "Luồng quang học";
+"Motion blur" = "Làm mờ chuyển động";
+"Frame rate (fps)" = "Tốc độ khung hình (fps)";
+"Direction" = "Hướng";
+"Both" = "Cả hai";
+"Backward" = "Phía sau";
+"Speed (times)" = "Tốc độ (số lần)";
+"Makes smooth in-between frames when the clip is slowed down, by following how things move." = "Tạo các khung hình trung gian mượt khi clip bị làm chậm, bằng cách theo dõi chuyển động của vật thể.";
+"Frames are made by following how things move between two source frames. Slow the clip down to see it." = "Khung hình được tạo bằng cách theo dõi chuyển động giữa hai khung hình gốc. Hãy làm chậm clip để thấy hiệu quả.";
+"The project plays at %d fps, so frames above that rate are not shown. Raise the project's frame rate in the project settings." = "Dự án phát ở %d fps nên các khung hình vượt tốc độ này sẽ không được hiển thị. Hãy tăng tốc độ khung hình trong cài đặt dự án.";
+"Streaks moving things along their path, using the same flow between frames. It works on this clip only." = "Kéo vệt các vật đang chuyển động theo quỹ đạo của chúng, dùng cùng luồng chuyển động giữa các khung hình. Chỉ áp dụng cho clip này.";
+"Speed is how many times the blur is applied: more times, more obvious streaks." = "Tốc độ là số lần áp dụng độ mờ: càng nhiều lần, vệt càng rõ.";

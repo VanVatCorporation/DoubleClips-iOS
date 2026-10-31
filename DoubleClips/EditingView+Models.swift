@@ -146,6 +146,9 @@ extension EditingView {
         /// The "Background" panel's chroma keys (EditingView+ChromaKey.swift): colours made transparent so what is behind the clip shows
         /// through. Same `chromaKeys` JSON as desktop (up to 6 keys; each key's four sliders can be keyframed). Empty = none.
         @Published var chromaKeys: [ChromaKey] = []
+        /// The Motion panel (EditingView+Motion.swift): frame interpolation and motion blur, same JSON as desktop. nil = off.
+        @Published var opticalFlow: ClipOpticalFlow?
+        @Published var motionBlur: ClipMotionBlur?
         /// An effect for THIS clip only (EditingView+ClipEffect.swift), same JSON as Android's `Clip.clipEffect`: `offset` is seconds after the
         /// clip's start, `duration` the window's length (0 = until the clip's end), `params.intensity` the strength. nil = none.
         @Published var clipEffect: EffectTemplate?
@@ -188,6 +191,8 @@ extension EditingView {
             case blendMode
             case clipEffect
             case chromaKeys
+            case opticalFlow
+            case motionBlur
         }
         
         init(clipName: String, startTime: Float, duration: Float, trackIndex: Int, type: ClipType, isClipHasAudio: Bool, width: Int, height: Int) {
@@ -260,6 +265,9 @@ extension EditingView {
             self.clipEffect = (try? container.decodeIfPresent(EffectTemplate.self, forKey: .clipEffect)) ?? nil
             // Keys that can't be read must never cost the clip either.
             self.chromaKeys = Array(((try? container.decodeIfPresent([ChromaKey].self, forKey: .chromaKeys)) ?? []).prefix(ChromaKey.maxKeys))
+            // Motion settings that can't be read must never cost the clip.
+            self.opticalFlow = (try? container.decodeIfPresent(ClipOpticalFlow.self, forKey: .opticalFlow)) ?? nil
+            self.motionBlur = (try? container.decodeIfPresent(ClipMotionBlur.self, forKey: .motionBlur)) ?? nil
         }
         
         func encode(to encoder: Encoder) throws {
@@ -299,6 +307,8 @@ extension EditingView {
             if blendMode != .normal { try container.encode(blendMode, forKey: .blendMode) }
             try container.encodeIfPresent(clipEffect, forKey: .clipEffect)
             if !chromaKeys.isEmpty { try container.encode(chromaKeys, forKey: .chromaKeys) }
+            try container.encodeIfPresent(opticalFlow, forKey: .opticalFlow)
+            try container.encodeIfPresent(motionBlur, forKey: .motionBlur)
         }
     }
     
@@ -321,6 +331,9 @@ extension EditingView {
         /// iOS addition: the strength of an effect clip, so it can be keyframed like any other property. An effect clip's STATIC strength
         /// stays in `effect.params["intensity"]`; this field only carries the value inside keyframes.
         var valueStrength: Float = 1
+        /// The Motion panel's Blur / Blend sliders (0...100), plain or keyframed (channels "motionBlur" / "motionBlend"; desktop's names).
+        var valueMotionBlur: Float = 100
+        var valueMotionBlend: Float = 0
         /// What the chroma-key sliders (EditingView+ChromaKey.swift) were in a keyframe: 6 keys x 4 sliders, key-major
         /// (intensity, shadow, feather, clean up edge), each 0...100. Desktop's `valueChroma`. Only keyframes carry it, so it stays
         /// nil (and out of the JSON) everywhere else: a key's plain values live in the clip's `chromaKeys`.
@@ -329,7 +342,7 @@ extension EditingView {
         /// Same order/cases as Android's VideoProperties.ValueType. The chroma cases come last and are held only by a keyframe
         /// that lists them (an old "all properties" keyframe must never start animating a key); the names are desktop's.
         enum ValueType: String, Codable, CaseIterable {
-            case posX, posY, rot, rotInRadians, scaleX, scaleY, pivotX, pivotY, opacity, speed, volume, hue, saturation, brightness, temperature, strength
+            case posX, posY, rot, rotInRadians, scaleX, scaleY, pivotX, pivotY, opacity, speed, volume, hue, saturation, brightness, temperature, strength, motionBlur, motionBlend
             case chromaIntensity0, chromaShadow0, chromaFeather0, chromaCleanUp0
             case chromaIntensity1, chromaShadow1, chromaFeather1, chromaCleanUp1
             case chromaIntensity2, chromaShadow2, chromaFeather2, chromaCleanUp2
@@ -359,6 +372,8 @@ extension EditingView {
             valueBrightness = try c.decodeIfPresent(Float.self, forKey: .valueBrightness) ?? 0
             valueTemperature = try c.decodeIfPresent(Float.self, forKey: .valueTemperature) ?? 6500
             valueStrength = try c.decodeIfPresent(Float.self, forKey: .valueStrength) ?? 1
+            valueMotionBlur = try c.decodeIfPresent(Float.self, forKey: .valueMotionBlur) ?? 100
+            valueMotionBlend = try c.decodeIfPresent(Float.self, forKey: .valueMotionBlend) ?? 0
             valueChroma = try? c.decodeIfPresent([Float].self, forKey: .valueChroma)
         }
     }

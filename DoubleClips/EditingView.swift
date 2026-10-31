@@ -530,6 +530,7 @@ struct EditingView: View {
                                         onMask: { openMaskEditor() },
                                         onBlend: { openBlendEditor() },
                                         onBackground: { openBackgroundEditor() },
+                                        onMotion: { openMotionEditor() },
                                         onMultiToggle: { toggleMultiSelect() },
                                         onKeyframe: { addKeyframeToSelectedClip() },
                                         onAllKeyframe: { applyKeyframesToAllClips(selectedOnly: false) },
@@ -1048,6 +1049,15 @@ struct EditingView: View {
         // The panel's ruler drags re-render the paused preview through this hook (as the mask panel does).
         MaskEditState.shared.refresh = { [weak engine] in engine?.refreshFrame() }
         withAnimation { activeOverlay = .background }
+    }
+    
+    /// Toolbar "Motion": optical flow and motion blur of the selected video clip (EditingView+MotionPanel.swift).
+    private func openMotionEditor() {
+        guard let clip = selectedClip, clip.type == .video else { return }
+        engine.pause()
+        // The panel's ruler drags re-render the paused preview through this hook (as the mask panel does).
+        MaskEditState.shared.refresh = { [weak engine] in engine?.refreshFrame() }
+        withAnimation { activeOverlay = .motion }
     }
     
     private func openClipEditor() {
@@ -1883,6 +1893,7 @@ private struct ClipToolbarView: View {
     var onMask: () -> Void = {}
     var onBlend: () -> Void = {}
     var onBackground: () -> Void = {}
+    var onMotion: () -> Void = {}
     var onMultiToggle: () -> Void = {}
     var onKeyframe: () -> Void = {}
     var onAllKeyframe: () -> Void = {}
@@ -1897,6 +1908,7 @@ private struct ClipToolbarView: View {
                 ToolbarButton(icon: "theatermasks", label: "Mask") { onMask() }
                 ToolbarButton(icon: "square.stack.3d.up", label: "Blend") { onBlend() }
                 ToolbarButton(icon: "person.and.background.dotted", label: "Background") { onBackground() }
+                ToolbarButton(icon: "wind", label: "Motion") { onMotion() }
                 ToolbarButton(icon: "diamond", label: "Keyframe") { onKeyframe() }
                 ToolbarButton(icon: "list.bullet", label: "Multi") { onMultiToggle() }
                 ToolbarButton(icon: "arrow.triangle.merge", label: "AllKey") { onAllKeyframe() }
