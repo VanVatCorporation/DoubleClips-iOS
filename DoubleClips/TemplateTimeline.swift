@@ -264,16 +264,11 @@ enum TemplateTimelineLoader {
 
 enum TemplateGrouping {
     
-    /// Gives the replaceable clips of a timeline that share one source (the same file, so the pieces of one split
-    /// video, or one photo used many times) a common `templateGroup` id: "g1", "g2"... in order of first appearance.
-    /// A clip whose source is used once stays alone. Run on a COPY of the timeline: the project is left untouched.
-    /// Returns how many groups were made.
-    @discardableResult
-    static func assign(to timeline: EditingView.Timeline) -> Int {
+    /// The replaceable clips of a timeline in slot order: time first, then the top row first (the order people see them numbered).
+    static func ordered(_ timeline: EditingView.Timeline) -> [(clip: EditingView.Clip, row: Int)] {
         let tracks = timeline.tracks
             .sorted { $0.timelineIndex < $1.timelineIndex }
             .filter { !$0.clips.isEmpty }
-        // Same order as the slots (time, then top row first), so ids follow the numbering people see.
         var list: [(clip: EditingView.Clip, row: Int)] = []
         for (row, track) in tracks.enumerated() {
             for clip in track.clips where TemplateClipRole.role(of: clip) == .replaceable {
@@ -283,19 +278,47 @@ enum TemplateGrouping {
         list.sort { a, b in
             a.clip.startTime != b.clip.startTime ? a.clip.startTime < b.clip.startTime : a.row < b.row
         }
+        return list
+    }
+    
+    /// The automatic grouping: clips that share one source (the same file, so the pieces of one split video, or one photo used
+    /// many times) get the same key. A clip whose source is used once is left out. Keys are only labels: `apply` makes the ids.
+    static func autoAssignment(for timeline: EditingView.Timeline) -> [UUID: String] {
         func key(_ clip: EditingView.Clip) -> String {
             (clip.type == .image ? "image|" : "video|") + clip.clipName
         }
+        let list = ordered(timeline)
         var counts: [String: Int] = [:]
         for item in list { counts[key(item.clip), default: 0] += 1 }
+        var result: [UUID: String] = [:]
+        for item in list where counts[key(item.clip), default: 0] > 1 { result[item.clip.id] = key(item.clip) }
+        return result
+    }
+    
+    /// Writes `templateGroup` ids on the replaceable clips of `timeline` from `assignment` (clip id -> any label; clips with the same label
+    /// are one group, a clip that isn't in it stands alone). A label used by a single clip makes no group. The ids are "g1", "g2"...
+    /// in order of first appearance. Run on a COPY of the timeline: the project is left untouched.
+    /// Returns how many groups there are and how many clips are in one.
+    @discardableResult
+    static func apply(_ assignment: [UUID: String], to timeline: EditingView.Timeline) -> (groups: Int, clips: Int) {
+        let list = ordered(timeline)
+        var counts: [String: Int] = [:]
+        for item in list { if let k = assignment[item.clip.id] { counts[k, default: 0] += 1 } }
         var ids: [String: String] = [:]
         var next = 1
+        var grouped = 0
         for item in list {
-            let k = key(item.clip)
-            guard counts[k, default: 0] > 1 else { item.clip.templateGroup = nil; continue }
+            guard let k = assignment[item.clip.id], counts[k, default: 0] > 1 else { item.clip.templateGroup = nil; continue }
             if ids[k] == nil { ids[k] = "g\(next)"; next += 1 }
             item.clip.templateGroup = ids[k]
+            grouped += 1
         }
-        return ids.count
+        return (ids.count, grouped)
+    }
+    
+    /// The automatic grouping applied to `timeline`. Returns how many groups were made.
+    @discardableResult
+    static func assign(to timeline: EditingView.Timeline) -> Int {
+        apply(autoAssignment(for: timeline), to: timeline).groups
     }
 }

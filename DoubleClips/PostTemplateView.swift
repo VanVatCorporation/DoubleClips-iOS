@@ -24,8 +24,19 @@ struct PostTemplateView: View {
     @State private var templateId = ""
     /// "Group the same clip": on by default, like CapCut's template maker.
     @State private var groupSameClips = true
+    /// The grouping the author made in the Custom Group editor (clip id -> group label); nil = the automatic one.
+    @State private var customGroups: [UUID: String]?
+    /// The timeline JSON and numbers for `customGroups`.
+    @State private var customResult: PostTemplateDraft.GroupResult?
+    @State private var showCustomGroups = false
     @FocusState private var focused: Field?
     private enum Field { case title, description }
+    
+    /// What the grouping gives right now: the author's own when they edited it, else the automatic one.
+    private var grouping: (json: String, groupCount: Int, slotCount: Int) {
+        if let customResult { return (customResult.json, customResult.groupCount, customResult.slotCount) }
+        return (draft.groupedTimelineJSON, draft.groupCount, draft.groupedSlotCount)
+    }
     
     private var thumbnail: UIImage? {
         draft.previewImage.flatMap { UIImage(contentsOfFile: $0.path) }
@@ -48,6 +59,17 @@ struct PostTemplateView: View {
             .id(step)
         }
         .clipped()
+        .sheet(isPresented: $showCustomGroups) {
+            TemplateCustomGroupView(draft: draft, initial: customGroups) { assignment, isAutomatic in
+                if isAutomatic {
+                    customGroups = nil
+                    customResult = nil
+                } else if let made = draft.regroup?(assignment) {
+                    customGroups = assignment
+                    customResult = made
+                }
+            }
+        }
         .onAppear { player.activate(draft.previewVideo) }
         .onDisappear { player.deactivate() }
         .onChange(of: uploader.state) { state in
@@ -137,31 +159,65 @@ struct PostTemplateView: View {
         }
     }
     
-    /// "Group the same clip": clips that use one source share a slot (and a coloured dot) when someone uses the template.
+    /// "Group the same clip": clips that use one source share a slot (and a coloured dot) when someone uses the template. "Custom group"
+    /// below it lets the author change the groups by hand; it is greyed out while the switch is off.
     private var groupSwitch: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let result = grouping
+        let canGroup = draft.replaceableCount > 1
+        return VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: Binding(
-                get: { groupSameClips && draft.groupCount > 0 },
+                get: { groupSameClips && canGroup },
                 set: { groupSameClips = $0 }
             )) {
                 Text("Group the same clip").font(.system(size: 16, weight: .semibold))
             }
             .tint(Color.mdPrimary)
-            .disabled(draft.groupCount == 0)
+            .disabled(!canGroup)
             
             Group {
-                if draft.groupCount == 0 {
-                    Text("No clip in this template uses the same media as another, so there is nothing to group.")
-                } else if groupSameClips {
-                    Text("Clips that use the same media share one slot. People pick that media once, then can still change single clips. That makes \(draft.groupedSlotCount) slot\(draft.groupedSlotCount == 1 ? "" : "s") to fill first instead of \(draft.replaceableCount).")
-                } else {
+                if !canGroup {
+                    Text("Only one clip can be replaced, so there is nothing to group.")
+                } else if !groupSameClips {
                     Text("Every clip is its own slot: \(draft.replaceableCount) to fill one by one.")
+                } else if result.groupCount == 0 {
+                    Text("No clip uses the same media as another. Use Custom group to put clips together yourself.")
+                } else {
+                    Text(Lf(result.slotCount == 1
+                            ? "Clips that use the same media share one slot. People pick that media once, then can still change single clips. That makes %lld slot to fill first instead of %lld."
+                            : "Clips that use the same media share one slot. People pick that media once, then can still change single clips. That makes %lld slots to fill first instead of %lld.",
+                            Int64(result.slotCount), Int64(draft.replaceableCount)))
                 }
             }
             .font(.system(size: 12))
             .foregroundColor(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+            
+            customGroupButton(enabled: groupSameClips && canGroup, result: result)
         }
+    }
+    
+    /// Opens the editor. Always drawn, greyed out and not tappable while the switch is off.
+    private func customGroupButton(enabled: Bool, result: (json: String, groupCount: Int, slotCount: Int)) -> some View {
+        Button { showCustomGroups = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "square.grid.2x2").font(.system(size: 18)).frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Custom group").font(.system(size: 15, weight: .semibold))
+                    Text(customGroups == nil
+                         ? L("Automatic")
+                         : Lf(result.groupCount == 1 ? "Edited by you · %lld group" : "Edited by you · %lld groups", Int64(result.groupCount)))
+                        .font(.system(size: 12)).foregroundColor(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
+            }
+            .padding(12)
+            .background(Color.secondary.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.4)
     }
     
     /// What the template is made of, so the author knows what goes up.
@@ -285,7 +341,7 @@ struct PostTemplateView: View {
             ("accountPassword", Constants.TEMPLATE_POST_PASSWORD_PLACEHOLDER),
             ("templateTitle", finalTitle),
             ("templateDescription", finalDescription),
-            ("templateTimelineJson", groupSameClips && draft.groupCount > 0 ? draft.groupedTimelineJSON : draft.timelineJSON),
+            ("templateTimelineJson", groupSameClips && grouping.groupCount > 0 ? grouping.json : draft.timelineJSON),
             ("templateTotalClips", String(draft.replaceableCount))
         ]
         var files: [(field: String, file: PostFile)] = draft.contentFiles.map { ("videoFiles", $0) }

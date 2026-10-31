@@ -584,3 +584,22 @@
 "Tap the colour to remove" = "Chạm vào màu cần xóa";
 "The keys filter the clip's own picture before its colour grade and masks." = "Các khóa lọc hình của clip trước khi chỉnh màu và áp mặt nạ.";
 "The cut-out is not drawn on iOS yet; the switch is stored in the clip." = "iOS chưa vẽ phần tách nền; công tắc chỉ được lưu trong clip.";
+
+/* Custom group (template export) */
+"Custom group" = "Nhóm tùy chỉnh";
+"Automatic" = "Tự động";
+"Edited by you · %lld group" = "Bạn đã chỉnh · %lld nhóm";
+"Edited by you · %lld groups" = "Bạn đã chỉnh · %lld nhóm";
+"Tap clips to select them, then group them. Clips in one group take the same media when someone uses the template." = "Chạm vào các clip để chọn, rồi gộp chúng thành nhóm. Các clip trong một nhóm dùng chung một phương tiện khi có người dùng mẫu.";
+"Group %lld · %lld clips" = "Nhóm %lld · %lld clip";
+"%lld selected" = "Đã chọn %lld";
+"Nothing selected" = "Chưa chọn clip nào";
+"Clear selection" = "Bỏ chọn";
+"Reset to automatic" = "Đặt lại về tự động";
+"Group" = "Nhóm";
+"Add to group" = "Thêm vào nhóm";
+"Ungroup" = "Bỏ nhóm";
+"Only one clip can be replaced, so there is nothing to group." = "Chỉ có một clip có thể thay thế, nên không có gì để nhóm.";
+"No clip uses the same media as another. Use Custom group to put clips together yourself." = "Không có clip nào dùng chung phương tiện với clip khác. Hãy dùng Nhóm tùy chỉnh để tự gộp các clip.";
+"Clips that use the same media share one slot. People pick that media once, then can still change single clips. That makes %lld slot to fill first instead of %lld." = "Các clip dùng chung một phương tiện sẽ chung một ô. Mọi người chọn phương tiện đó một lần, sau đó vẫn có thể đổi từng clip. Như vậy chỉ cần điền trước %lld ô thay vì %lld.";
+"Clips that use the same media share one slot. People pick that media once, then can still change single clips. That makes %lld slots to fill first instead of %lld." = "Các clip dùng chung một phương tiện sẽ chung một ô. Mọi người chọn phương tiện đó một lần, sau đó vẫn có thể đổi từng clip. Như vậy chỉ cần điền trước %lld ô thay vì %lld.";

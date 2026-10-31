@@ -38,6 +38,33 @@ struct PostTemplateDraft: Identifiable {
     /// (every group counts once, every clip that stands alone counts once).
     var groupCount: Int = 0
     var groupedSlotCount: Int = 0
+    
+    /// One replaceable clip as the Custom Group editor shows it.
+    struct CustomGroupClip: Identifiable {
+        let id: UUID
+        /// 1-based, the number the clip has as a slot.
+        let number: Int
+        let start: Double
+        let duration: Double
+        let isImage: Bool
+        /// The clip's media on this device and the second of it the template's clip starts at (for its thumbnail).
+        let mediaURL: URL
+        let mediaTime: Double
+        /// The group the automatic grouping gave it ("g1"...), nil = it stands alone.
+        let autoGroup: String?
+    }
+    
+    /// A timeline JSON for a grouping the author made by hand, with the numbers the details screen shows.
+    struct GroupResult {
+        var json: String
+        var groupCount: Int
+        var slotCount: Int
+    }
+    
+    /// The replaceable clips in slot order, for the Custom Group editor.
+    var groupClips: [CustomGroupClip] = []
+    /// Builds the timeline JSON for a grouping the author made (clip id -> group label, absent = alone); nil when it can't be encoded.
+    var regroup: (([UUID: String]) -> GroupResult?)?
     var replaceableCount: Int
     var lockedCount: Int
     var duration: Double
@@ -181,17 +208,27 @@ enum TemplatePackager {
         }
         let json = try encodeDocument(exported)
         
-        // The grouped variant ("Group the same clip" on the details screen): on another copy, so the plain one stays plain.
+        // The grouped variant ("Group the same clip" on the details screen): on another copy, so the plain one stays plain. The copy
+        // is kept: the Custom Group editor regroups it by hand.
         var groupedJSON = json
-        var groupCount = 0
-        var groupedClips = 0
-        do {
-            let copy = try JSONDecoder().decode(EditingView.Timeline.self, from: JSONEncoder().encode(exported))
-            groupCount = TemplateGrouping.assign(to: copy)
-            if groupCount > 0 {
-                groupedClips = copy.tracks.flatMap { $0.clips }.filter { $0.templateGroup != nil }.count
-                groupedJSON = try encodeDocument(copy)
-            }
+        let groupingCopy = try JSONDecoder().decode(EditingView.Timeline.self, from: JSONEncoder().encode(exported))
+        let groupCount = TemplateGrouping.assign(to: groupingCopy)
+        let ordered = TemplateGrouping.ordered(groupingCopy)
+        let groupedClips = ordered.filter { $0.clip.templateGroup != nil }.count
+        if groupCount > 0 { groupedJSON = try encodeDocument(groupingCopy) }
+        let clipsDirectory = projectURL.appendingPathComponent(Constants.DEFAULT_CLIP_DIRECTORY)
+        let groupClips = ordered.enumerated().map { offset, item in
+            PostTemplateDraft.CustomGroupClip(
+                id: item.clip.id, number: offset + 1, start: Double(item.clip.startTime), duration: Double(item.clip.duration),
+                isImage: item.clip.type == .image,
+                mediaURL: clipsDirectory.appendingPathComponent(item.clip.clipName),
+                mediaTime: Double(item.clip.startClipTrim), autoGroup: item.clip.templateGroup)
+        }
+        let slotTotal = info.slots.count
+        let regroup: ([UUID: String]) -> PostTemplateDraft.GroupResult? = { assignment in
+            let made = TemplateGrouping.apply(assignment, to: groupingCopy)
+            guard let customJSON = try? encodeDocument(groupingCopy) else { return nil }
+            return PostTemplateDraft.GroupResult(json: customJSON, groupCount: made.groups, slotCount: slotTotal - made.clips + made.groups)
         }
         
         return PostTemplateDraft(
@@ -203,6 +240,8 @@ enum TemplatePackager {
             groupedTimelineJSON: groupedJSON,
             groupCount: groupCount,
             groupedSlotCount: info.slots.count - groupedClips + groupCount,
+            groupClips: groupClips,
+            regroup: regroup,
             replaceableCount: info.slots.count,
             lockedCount: lockedCount,
             duration: Double(timeline.duration),
