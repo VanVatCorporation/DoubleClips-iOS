@@ -219,7 +219,7 @@ enum ReverseProcessor {
                 input.markAsFinished()
                 group.leave()
             }
-            input.requestMediaDataWhenReady(on: DispatchQueue(label: queue)) {
+            input.requestMediaDataWhenReady(on: DispatchQueue(label: queue, qos: .default)) {
                 while input.isReadyForMoreMediaData && !finished.get() {
                     if isCancelled() || failure.get() != nil { end(); return }
                     do {
@@ -572,7 +572,7 @@ extension EditingView {
                 return
             }
             _ = context
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            DispatchQueue.global(qos: .default).async { [weak self] in      // same class as the writer's own queues (no priority inversion)
                 do {
                     let length = AVURLAsset(url: sourceURL).duration.seconds
                     guard length.isFinite, length > 0.1 else { throw ReverseProcessor.Failure(L("This clip is too short to reverse.")) }
@@ -580,6 +580,15 @@ extension EditingView {
                                              progress: { p in DispatchQueue.main.async { tracker.update(job, progress: p) } },
                                              isCancelled: { job.isCancelled })
                     if job.isCancelled { throw ReverseProcessor.Failure("Cancelled") }
+                    // The copy must hold a video as long as the source: a copy that can't be used is reported, never kept (a clip
+                    // pointing at it would draw nothing).
+                    let made = AVURLAsset(url: partialURL)
+                    let madeLength = made.duration.seconds
+                    print("[Reverse] \(source): source \(length)s, copy \(madeLength)s, video track: \(made.tracks(withMediaType: .video).first != nil)")
+                    guard made.tracks(withMediaType: .video).first != nil, madeLength.isFinite,
+                          abs(madeLength - length) <= max(1.0, length * 0.05) else {
+                        throw ReverseProcessor.Failure(L("The reversed copy came out wrong."))
+                    }
                     try? FileManager.default.removeItem(at: finalURL)
                     try FileManager.default.moveItem(at: partialURL, to: finalURL)
                     DispatchQueue.main.async { self?.finished(job, source: source, name: name) }

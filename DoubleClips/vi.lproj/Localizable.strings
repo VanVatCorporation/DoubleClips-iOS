@@ -626,3 +626,4 @@
 "%@ applied" = "Đã áp dụng %@";
 "The clip's file is missing." = "Không tìm thấy tệp của clip.";
 "This clip is too short to reverse." = "Clip quá ngắn để đảo ngược.";
+"The reversed copy came out wrong." = "Bản sao đảo ngược bị lỗi.";

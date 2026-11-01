@@ -100,10 +100,20 @@ extension EditingView {
                         if clip.type == .video, clip.isReverse, let copyName = clip.reversedCopy {
                             let copyURL = projectDir.appendingPathComponent(Constants.DEFAULT_CLIP_DIRECTORY).appendingPathComponent(copyName)
                             if FileManager.default.fileExists(atPath: copyURL.path) {
-                                let copyLength = AVURLAsset(url: copyURL).duration.seconds
-                                let originalLength = clip.originalDuration > 0 ? Double(clip.originalDuration) : AVURLAsset(url: clipURL).duration.seconds
-                                if copyLength.isFinite, copyLength > 0, originalLength.isFinite, originalLength > 0 {
+                                let copyAsset = AVURLAsset(url: copyURL)
+                                let copyLength = copyAsset.duration.seconds
+                                // the file's real length (the trims are measured on it); the stored one only if it can't be read
+                                let fileLength = AVURLAsset(url: clipURL).duration.seconds
+                                let originalLength = fileLength.isFinite && fileLength > 0 ? fileLength : Double(clip.originalDuration)
+                                let copyStart = copyLength - (originalLength - Double(clip.endClipTrim))     // where the used part begins in the copy
+                                let copyEnd = copyLength - Double(clip.startClipTrim)                        // ... and ends
+                                // A copy that doesn't fit the clip is not used (the clip would draw nothing): it plays forward instead.
+                                if copyAsset.tracks(withMediaType: .video).first != nil, copyLength.isFinite, copyLength > 0,
+                                   originalLength.isFinite, copyStart > -0.1, copyEnd > copyStart, copyEnd <= copyLength + 0.1 {
                                     reversedCopy = (copyURL, copyLength, originalLength)
+                                    print("[Reverse] \(clip.clipName): playing \(copyName) from \(max(0, copyStart))s to \(copyEnd)s (copy \(copyLength)s, file \(originalLength)s)")
+                                } else {
+                                    print("[Reverse] \(clip.clipName): the copy does not fit (copy \(copyLength)s, file \(originalLength)s, used \(copyStart)...\(copyEnd)), playing forward")
                                 }
                             }
                         }
@@ -114,7 +124,7 @@ extension EditingView {
                         let timeMap = clip.timeMap
                         let atSpeed1 = timeMap.isIdentity
                         // reversed: the clip starts at the original's used end (originalLength - endClipTrim), which is F - that in the copy
-                        let trimStart = reversedCopy.map { $0.copyLength - ($0.originalLength - Double(clip.endClipTrim)) } ?? Double(clip.startClipTrim)
+                        let trimStart = reversedCopy.map { max(0, $0.copyLength - ($0.originalLength - Double(clip.endClipTrim))) } ?? Double(clip.startClipTrim)
                         let windowSeconds = Double(clip.duration)
                         let sourceLimit: Double? = reversedCopy.map { atSpeed1 ? nil : $0.copyLength - Double(clip.startClipTrim) }
                             ?? ((!atSpeed1 && clip.originalDuration > 0) ? Double(clip.originalDuration - clip.endClipTrim) : nil)
