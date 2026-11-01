@@ -644,8 +644,11 @@ struct EditingView: View {
             setupSpecificEdit()
             setupToolbars()
             handleEditZoneInteraction()
-            ReverseManager.shared.configure(projectPath: project.projectPath, timeline: timeline, commandManager: commandManager,
-                                            onChanged: { rebuildPreview() })
+            if !isPreview {
+                ReverseManager.shared.configure(projectPath: project.projectPath, timeline: timeline, commandManager: commandManager,
+                                                onChanged: { rebuildPreview() })
+                ReverseManager.shared.syncAll()      // flagged clips without their reversed copy get it made
+            }
             if hasLoadedProject, !timeline.tracks.isEmpty, !isPreview { rebuildPreview(markDirty: false) }   // the Home preview has no canvas
         }
         .onDisappear {

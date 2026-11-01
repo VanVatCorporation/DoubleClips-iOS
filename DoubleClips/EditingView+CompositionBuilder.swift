@@ -94,16 +94,30 @@ extension EditingView {
                     
                     switch clip.type {
                     case .video, .audio:
-                        let asset = AVAsset(url: clipURL)
+                        // A reversed clip (isReverse) plays the reversed copy of its source (EditingView+Reverse.swift) once it exists: time t of the
+                        // original is time F - t of the copy (F = the copy's length), so the trims keep their meaning on the original's timeline.
+                        var reversedCopy: (url: URL, copyLength: Double, originalLength: Double)?
+                        if clip.type == .video, clip.isReverse, let copyName = clip.reversedCopy {
+                            let copyURL = projectDir.appendingPathComponent(Constants.DEFAULT_CLIP_DIRECTORY).appendingPathComponent(copyName)
+                            if FileManager.default.fileExists(atPath: copyURL.path) {
+                                let copyLength = AVURLAsset(url: copyURL).duration.seconds
+                                let originalLength = clip.originalDuration > 0 ? Double(clip.originalDuration) : AVURLAsset(url: clipURL).duration.seconds
+                                if copyLength.isFinite, copyLength > 0, originalLength.isFinite, originalLength > 0 {
+                                    reversedCopy = (copyURL, copyLength, originalLength)
+                                }
+                            }
+                        }
+                        let asset = AVAsset(url: reversedCopy?.url ?? clipURL)
                         // The source from startClipTrim on plays at the clip's speed (a curve when speed is keyframed) inside the clip's
                         // window. Speed 1 is the old behaviour (Android trims [startClipTrim, startClipTrim + duration]); a clip that has
                         // speed edits runs out of source when the trim says so (`sourceLimit`).
                         let timeMap = clip.timeMap
                         let atSpeed1 = timeMap.isIdentity
-                        let trimStart = Double(clip.startClipTrim)
+                        // reversed: the clip starts at the original's used end (originalLength - endClipTrim), which is F - that in the copy
+                        let trimStart = reversedCopy.map { $0.copyLength - ($0.originalLength - Double(clip.endClipTrim)) } ?? Double(clip.startClipTrim)
                         let windowSeconds = Double(clip.duration)
-                        let sourceLimit: Double? = (!atSpeed1 && clip.originalDuration > 0)
-                            ? Double(clip.originalDuration - clip.endClipTrim) : nil
+                        let sourceLimit: Double? = reversedCopy.map { atSpeed1 ? nil : $0.copyLength - Double(clip.startClipTrim) }
+                            ?? ((!atSpeed1 && clip.originalDuration > 0) ? Double(clip.originalDuration - clip.endClipTrim) : nil)
                         /// Source seconds the whole window uses (the clip's "length" in the pre/post-roll maths below).
                         let sourceSpan = atSpeed1 ? windowSeconds
                             : max(0, min(timeMap.sourceOffset(atLocal: windowSeconds), (sourceLimit ?? .infinity) - trimStart))

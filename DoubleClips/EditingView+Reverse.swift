@@ -6,27 +6,27 @@ import Combine
 
 // MARK: - Reverse (CapCut style)
 //
-// Pressing Reverse on a video clip pre-processes a REVERSED COPY of the part of the footage the clip uses (video and audio), saves it in
-// the project's Clips folder (so it shows in Project Files and travels with the project) and swaps the clip onto it:
+// `Clip.isReverse` is THE mark, the same flag the desktop's Reverse toggle sets and the future Template pipeline reads: the clip keeps its
+// original `clipName` and trims. What is new is a CACHE: pressing Reverse pre-processes a reversed copy of the WHOLE source file (video and
+// audio, like CapCut: cutting the clip short doesn't make it quicker), saved in the project's Clips folder as
 //
-//      before                          after
-//      clipName  = IMG_1.MOV           clipName  = IMG_1-reversed-a1b2c3.mov
-//      trims     = s / e               trims     = 0 / 0         (the copy holds just the used part)
-//      originalDuration = D            originalDuration = its length
-//      reverseSource = nil             reverseSource = { IMG_1.MOV, s, e, D }
+//      <clipName>.reversed.mp4          e.g.  IMG_6880.MOV.reversed.mp4
 //
-// Pressing it again is instant: the clip goes back to the original (its trims mapped back, so a trim made on the reversed clip
-// comes back reversed) and the reversed copy is deleted unless another clip still uses it. Pressing it a third time pre-processes again.
-// Undo / redo do the same things (an undo of "Un-reverse" has to process the copy again, as CapCut does).
+// so it shows in Project Files, travels with the project and is shared by every clip (split, duplicate) that uses the same file. The
+// builder plays the cache instead of the original when `isReverse` is on and the copy exists (time t of the original is time F - t of
+// the copy), so trims, splits and speed ramps all keep working on the original's timeline. `reversedCopy` remembers the copy's name.
 //
-// While it works, the progress shows in three places, like CapCut: a badge on the preview canvas ("Applying 1 feature(s)..." with a list,
-// then a green "applied" for a moment), "Processing 52.6%" in the clip's properties, and "Applying Reverse... 52.6%" on the clip in the timeline.
+// Pressing Reverse again is instant: the flag goes off and the copy is deleted unless another flagged clip still needs it. A third press
+// processes again. A clip that arrives flagged (from desktop, Android or a template) with no copy is processed when the editor opens.
+// Desktop and Android can use the same name for the same cache.
 //
-// isReverse stays false on purpose: the desktop and Android read it as "reverse at export time", and the file is already reversed.
+// While it works the progress shows in three places, like CapCut: a badge on the preview canvas ("Applying 1 feature(s)..." with a list,
+// then a green "applied" for a moment), "Processing 52.6%" in the clip's properties, and "Applying Reverse... 52.6%" on the clip.
 
 extension EditingView {
 
-    /// Where a reversed clip came from: what `clipName`, the trims and `originalDuration` were before it was swapped.
+    /// LEGACY (first version of Reverse swapped the clip onto a reversed copy of its used part): read only, to bring those clips back to the
+    /// original footage with `isReverse` on (see ReverseManager.migrateLegacy). Never written any more.
     struct ReverseSource: Codable, Equatable {
         var clipName: String
         var startClipTrim: Float
@@ -51,14 +51,15 @@ final class ProcessingTracker: ObservableObject {
 
     final class Job: Identifiable {
         let id = UUID()
-        let clipID: UUID
-        let clipName: String
+        /// The source file being processed (every clip that uses it shows the progress).
+        let source: String
         let feature: String
+        var clipName: String { source }
         fileprivate(set) var progress: Double = 0
         let cancelFlag = CancelFlag()
         var isCancelled: Bool { cancelFlag.isSet }
-        fileprivate init(clipID: UUID, clipName: String, feature: String) {
-            self.clipID = clipID; self.clipName = clipName; self.feature = feature
+        fileprivate init(source: String, feature: String) {
+            self.source = source; self.feature = feature
         }
         var percentText: String { String(format: "%.1f%%", progress * 100) }
     }
@@ -70,15 +71,15 @@ final class ProcessingTracker: ObservableObject {
     private var lastDone: (feature: String, at: Date)?
     private var lastFailed: (text: String, at: Date)?
 
-    func begin(clipID: UUID, clipName: String, feature: String) -> Job {
-        let job = Job(clipID: clipID, clipName: clipName, feature: feature)
-        running.removeAll { $0.clipID == clipID && $0.feature == feature }
+    func begin(source: String, feature: String) -> Job {
+        let job = Job(source: source, feature: feature)
+        running.removeAll { $0.source == source && $0.feature == feature }
         running.append(job)
         return job
     }
 
-    func job(for clipID: UUID, feature: String? = nil) -> Job? {
-        running.first { $0.clipID == clipID && (feature == nil || $0.feature == feature) }
+    func job(source: String, feature: String? = nil) -> Job? {
+        running.first { $0.source == source && (feature == nil || $0.feature == feature) }
     }
 
     func update(_ job: Job, progress: Double) {
@@ -100,7 +101,7 @@ final class ProcessingTracker: ObservableObject {
         expireLater(Self.failedVisible)
     }
 
-    /// The user cancelled (or the clip went away): the worker is told to stop and the job is forgotten.
+    /// The user cancelled (or nothing needs the result any more): the worker is told to stop and the job is forgotten.
     func cancel(_ job: Job) {
         job.cancelFlag.set()
         running.removeAll { $0 === job }
@@ -138,7 +139,7 @@ enum ReverseProcessor {
         func set(_ v: T) { lock.lock(); value = v; lock.unlock() }
     }
 
-    /// Writes `output` (a QuickTime movie): the source from second `start` for `length` seconds, played backwards. Blocking: run it
+    /// Writes `output` (an MP4, so desktop and Android can play it too): the source from second `start` for `length` seconds, played backwards. Blocking: run it
     /// off the main thread. `progress` is 0 ... 1; `isCancelled` is asked often.
     static func run(source: URL, start: Double, length: Double, withAudio: Bool, output: URL,
                     progress: @escaping (Double) -> Void, isCancelled: @escaping () -> Bool) throws {
@@ -164,7 +165,7 @@ enum ReverseProcessor {
 
         // 3. The writer.
         try? FileManager.default.removeItem(at: output)
-        let writer = try AVAssetWriter(outputURL: output, fileType: .mov)
+        let writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
         let size = video.naturalSize
         let width = max(2, Int(size.width.rounded()) & ~1), height = max(2, Int(size.height.rounded()) & ~1)
         let big = width > 4096 || height > 4096
@@ -465,6 +466,9 @@ extension EditingView {
         static let shared = ReverseManager()
         static let feature = "Reverse"
 
+        /// The reversed copy of a source file: the whole file backwards, in the Clips folder. Same name on every platform.
+        static func cacheName(for source: String) -> String { source + ".reversed.mp4" }
+
         struct Context {
             let projectPath: String
             let timeline: Timeline
@@ -479,109 +483,28 @@ extension EditingView {
             context = Context(projectPath: projectPath, timeline: timeline, commandManager: commandManager, onChanged: onChanged)
         }
 
-        func isReversed(_ clip: Clip) -> Bool { clip.reverseSource != nil }
-
-        /// The Reverse button / switch. Working: cancels. Reversed: back to the original at once. Else: starts processing.
-        func toggle(_ clip: Clip) {
-            guard let context, clip.type == .video else { return }
-            let tracker = ProcessingTracker.shared
-            if let job = tracker.job(for: clip.id, feature: Self.feature) {
-                tracker.cancel(job)
-                return
-            }
-            if isReversed(clip) {
-                context.commandManager.execute(GenericCommand(
-                    description: "Un-reverse: \(clip.clipName)",
-                    undo: { [weak self] in self?.reverse(clip) },
-                    redo: { [weak self] in self?.unreverse(clip) }))
-            } else {
-                context.commandManager.execute(GenericCommand(
-                    description: "Reverse: \(clip.clipName)",
-                    undo: { [weak self] in self?.unreverse(clip) },
-                    redo: { [weak self] in self?.reverse(clip) }))
-            }
+        private var folder: URL? {
+            context.map { URL(fileURLWithPath: $0.projectPath).appendingPathComponent(Constants.DEFAULT_CLIP_DIRECTORY) }
         }
 
-        // MARK: reverse
-
-        private func reverse(_ clip: Clip) {
-            guard let context, clip.type == .video, clip.reverseSource == nil else { return }
-            let tracker = ProcessingTracker.shared
-            if tracker.job(for: clip.id, feature: Self.feature) != nil { return }
-
-            let folder = URL(fileURLWithPath: context.projectPath).appendingPathComponent(Constants.DEFAULT_CLIP_DIRECTORY)
-            let sourceURL = clip.mediaURL(projectPath: context.projectPath)
-            let originalName = clip.clipName
-            let newName = "\((originalName as NSString).deletingPathExtension)-reversed-\(UUID().uuidString.prefix(6).lowercased()).mov"
-            let finalURL = folder.appendingPathComponent(newName)
-            let partialURL = folder.appendingPathComponent(newName + ".partial")
-            let start = Double(clip.startClipTrim), end = Double(clip.endClipTrim)
-            let withAudio = clip.isClipHasAudio
-
-            let job = tracker.begin(clipID: clip.id, clipName: originalName, feature: Self.feature)
-            guard FileManager.default.fileExists(atPath: sourceURL.path) else {
-                tracker.fail(job, L("The clip's file is missing."))
-                return
-            }
-
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                var failure: String?
-                do {
-                    let total = AVURLAsset(url: sourceURL).duration.seconds
-                    let length = total - start - end
-                    guard total.isFinite, length > 0.1 else { throw ReverseProcessor.Failure(L("This clip is too short to reverse.")) }
-                    try ReverseProcessor.run(source: sourceURL, start: start, length: length, withAudio: withAudio, output: partialURL,
-                                             progress: { p in DispatchQueue.main.async { tracker.update(job, progress: p) } },
-                                             isCancelled: { job.isCancelled })
-                    if job.isCancelled { throw ReverseProcessor.Failure("Cancelled") }
-                    try? FileManager.default.removeItem(at: finalURL)
-                    try FileManager.default.moveItem(at: partialURL, to: finalURL)
-                    DispatchQueue.main.async { self?.finishReverse(clip, job: job, originalName: originalName, newName: newName, length: length) }
-                } catch {
-                    try? FileManager.default.removeItem(at: partialURL)
-                    failure = (error as? ReverseProcessor.Failure)?.message ?? error.localizedDescription
-                    let cancelled = job.isCancelled
-                    DispatchQueue.main.async { if !cancelled { tracker.fail(job, failure ?? "") } }
-                }
-            }
+        private func videoClips() -> [Clip] {
+            context?.timeline.tracks.flatMap { $0.clips }.filter { $0.type == .video } ?? []
         }
 
-        private func finishReverse(_ clip: Clip, job: ProcessingTracker.Job, originalName: String, newName: String, length: Double) {
-            guard let context else { return }
-            let tracker = ProcessingTracker.shared
-            let url = URL(fileURLWithPath: context.projectPath).appendingPathComponent(Constants.DEFAULT_CLIP_DIRECTORY).appendingPathComponent(newName)
-            // The user may have cancelled, deleted the clip or changed its footage while this ran: then the copy is not wanted.
-            let stillThere = context.timeline.tracks.contains { track in track.clips.contains { $0 === clip } }
-            guard !job.isCancelled, stillThere, clip.reverseSource == nil, clip.clipName == originalName else {
-                try? FileManager.default.removeItem(at: url)
-                tracker.cancel(job)
-                return
-            }
-            clip.reverseSource = ReverseSource(clipName: clip.clipName, startClipTrim: clip.startClipTrim,
-                                               endClipTrim: clip.endClipTrim, originalDuration: clip.originalDuration)
-            clip.clipName = newName
-            clip.startClipTrim = 0
-            clip.endClipTrim = 0
-            clip.originalDuration = Float(length)
-            clip.isReverse = false          // the file itself is reversed now (see the header)
-            tracker.finish(job)
-            context.onChanged()
+        // MARK: opening the editor
+
+        /// Brings the project up to date: clips made by the first version of Reverse go back to their original footage with the flag on,
+        /// and every flagged clip gets its copy (found by its name, or processed when it is missing).
+        func syncAll() {
+            guard context != nil else { return }
+            for clip in videoClips() where clip.reverseSource != nil { migrateLegacy(clip) }
+            for clip in videoClips() where clip.isReverse { ensureCache(for: clip, userInitiated: false) }
         }
 
-        // MARK: un-reverse
-
-        /// Instant: back onto the original footage, the reversed copy deleted unless another clip still uses it. While it is still
-        /// being made this cancels instead.
-        private func unreverse(_ clip: Clip) {
-            guard let context else { return }
-            let tracker = ProcessingTracker.shared
-            if let job = tracker.job(for: clip.id, feature: Self.feature) {
-                tracker.cancel(job)
-                return
-            }
+        private func migrateLegacy(_ clip: Clip) {
             guard let source = clip.reverseSource else { return }
-            let reversedName = clip.clipName
-            // A trim made on the reversed clip comes back mirrored: its start is the original's end.
+            let oldCopy = clip.clipName
+            // a trim made on that reversed clip comes back mirrored: its start is the original's end
             let start = source.startClipTrim + clip.endClipTrim
             let end = source.endClipTrim + clip.startClipTrim
             clip.clipName = source.clipName
@@ -589,13 +512,118 @@ extension EditingView {
             clip.endClipTrim = end
             clip.originalDuration = source.originalDuration
             clip.reverseSource = nil
-            context.onChanged()
-
-            let used = context.timeline.tracks.contains { track in track.clips.contains { $0.clipName == reversedName } }
-            if !used {
-                let url = URL(fileURLWithPath: context.projectPath).appendingPathComponent(Constants.DEFAULT_CLIP_DIRECTORY).appendingPathComponent(reversedName)
-                try? FileManager.default.removeItem(at: url)
+            clip.isReverse = true
+            clip.reversedCopy = nil
+            if let folder, !videoClips().contains(where: { $0.clipName == oldCopy }) {
+                try? FileManager.default.removeItem(at: folder.appendingPathComponent(oldCopy))
             }
+        }
+
+        // MARK: the button
+
+        /// The Reverse button / switch: one undo step that flips the flag (and makes or deletes the copy).
+        func toggle(_ clip: Clip) {
+            guard let context, clip.type == .video else { return }
+            let turnOn = !clip.isReverse
+            context.commandManager.execute(GenericCommand(
+                description: "\(turnOn ? "Reverse" : "Un-reverse"): \(clip.clipName)",
+                undo: { [weak self] in self?.setReversed(clip, !turnOn) },
+                redo: { [weak self] in self?.setReversed(clip, turnOn) }))
+        }
+
+        private func setReversed(_ clip: Clip, _ on: Bool) {
+            guard let context, clip.type == .video, clip.isReverse != on else { return }
+            if on {
+                clip.isReverse = true
+                ensureCache(for: clip, userInitiated: true)
+            } else {
+                let source = clip.clipName
+                clip.isReverse = false
+                clip.reversedCopy = nil
+                releaseCache(source: source)       // instant: the copy goes unless another flagged clip needs it
+            }
+            context.onChanged()
+        }
+
+        // MARK: the copy
+
+        private func ensureCache(for clip: Clip, userInitiated: Bool) {
+            guard let folder else { return }
+            let source = clip.clipName
+            let name = Self.cacheName(for: source)
+            if FileManager.default.fileExists(atPath: folder.appendingPathComponent(name).path) {
+                for c in videoClips() where c.isReverse && c.clipName == source && c.reversedCopy != name { c.reversedCopy = name }
+                return
+            }
+            if clip.reversedCopy != nil { clip.reversedCopy = nil }          // it was deleted from Project Files
+            if ProcessingTracker.shared.job(source: source, feature: Self.feature) != nil { return }   // running: attached when it finishes
+            startJob(source: source, name: name, userInitiated: userInitiated)
+        }
+
+        private func startJob(source: String, name: String, userInitiated: Bool) {
+            guard let context, let folder else { return }
+            let tracker = ProcessingTracker.shared
+            let sourceURL = folder.appendingPathComponent(source)
+            let finalURL = folder.appendingPathComponent(name)
+            let partialURL = folder.appendingPathComponent(name + ".partial")
+            let job = tracker.begin(source: source, feature: Self.feature)
+            guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+                failed(job, source: source, reason: L("The clip's file is missing."), userInitiated: userInitiated)
+                return
+            }
+            _ = context
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                do {
+                    let length = AVURLAsset(url: sourceURL).duration.seconds
+                    guard length.isFinite, length > 0.1 else { throw ReverseProcessor.Failure(L("This clip is too short to reverse.")) }
+                    try ReverseProcessor.run(source: sourceURL, start: 0, length: length, withAudio: true, output: partialURL,
+                                             progress: { p in DispatchQueue.main.async { tracker.update(job, progress: p) } },
+                                             isCancelled: { job.isCancelled })
+                    if job.isCancelled { throw ReverseProcessor.Failure("Cancelled") }
+                    try? FileManager.default.removeItem(at: finalURL)
+                    try FileManager.default.moveItem(at: partialURL, to: finalURL)
+                    DispatchQueue.main.async { self?.finished(job, source: source, name: name) }
+                } catch {
+                    try? FileManager.default.removeItem(at: partialURL)
+                    let reason = (error as? ReverseProcessor.Failure)?.message ?? error.localizedDescription
+                    DispatchQueue.main.async {
+                        if !job.isCancelled { self?.failed(job, source: source, reason: reason, userInitiated: userInitiated) }
+                    }
+                }
+            }
+        }
+
+        private func finished(_ job: ProcessingTracker.Job, source: String, name: String) {
+            guard let context, let folder else { return }
+            let tracker = ProcessingTracker.shared
+            let flagged = videoClips().filter { $0.isReverse && $0.clipName == source }
+            // nobody needs it any more (un-reversed while it was made, or the clips are gone): not kept
+            guard !job.isCancelled, !flagged.isEmpty else {
+                try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+                tracker.cancel(job)
+                return
+            }
+            for clip in flagged { clip.reversedCopy = name }
+            tracker.finish(job)
+            context.onChanged()
+        }
+
+        private func failed(_ job: ProcessingTracker.Job, source: String, reason: String, userInitiated: Bool) {
+            ProcessingTracker.shared.fail(job, reason)
+            guard userInitiated, let context else { return }
+            // pressed Reverse and it can't be done: the switch goes back off (a clip that CAME flagged keeps its flag)
+            for clip in videoClips() where clip.isReverse && clip.clipName == source { clip.isReverse = false; clip.reversedCopy = nil }
+            context.onChanged()
+        }
+
+        /// The copy of `source` is not needed by any flagged clip (any more): stop making it, or delete it.
+        private func releaseCache(source: String) {
+            guard let folder else { return }
+            if videoClips().contains(where: { $0.isReverse && $0.clipName == source }) { return }
+            if let job = ProcessingTracker.shared.job(source: source, feature: Self.feature) { ProcessingTracker.shared.cancel(job) }
+            let name = Self.cacheName(for: source)
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(name + ".partial"))
         }
     }
 }
@@ -655,10 +683,10 @@ extension EditingView {
         @ObservedObject private var tracker = ProcessingTracker.shared
 
         var body: some View {
-            let job = tracker.job(for: clip.id, feature: ReverseManager.feature)
+            let job = clip.isReverse ? tracker.job(source: clip.clipName, feature: ReverseManager.feature) : nil
             HStack {
                 Toggle(L("Reverse"), isOn: Binding(
-                    get: { job != nil || clip.reverseSource != nil },
+                    get: { clip.isReverse },
                     set: { _ in ReverseManager.shared.toggle(clip) }))
                     .font(.system(size: 13)).foregroundColor(.white).tint(Color.mdPrimary)
                 if let job {
@@ -673,7 +701,7 @@ extension EditingView {
 extension EditingView.Clip {
     /// The label a timeline clip shows: its name, or "Applying Reverse... 52.6%" while a feature is being processed.
     var timelineLabel: String {
-        if let job = ProcessingTracker.shared.job(for: id) { return "\(L("Applying")) \(L(job.feature))… \(job.percentText)" }
+        if isReverse, let job = ProcessingTracker.shared.job(source: clipName) { return "\(L("Applying")) \(L(job.feature))… \(job.percentText)" }
         return clipName
     }
 }

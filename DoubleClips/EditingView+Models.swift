@@ -151,6 +151,8 @@ extension EditingView {
         @Published var motionBlur: ClipMotionBlur?
         /// Set while this clip plays a REVERSED COPY of its footage (EditingView+Reverse.swift): what it was before. nil = not reversed.
         @Published var reverseSource: ReverseSource?
+        /// Name (in Clips) of the reversed copy of this clip's whole source while `isReverse` is on and the copy exists; iOS plays it.
+        @Published var reversedCopy: String?
         /// An effect for THIS clip only (EditingView+ClipEffect.swift), same JSON as Android's `Clip.clipEffect`: `offset` is seconds after the
         /// clip's start, `duration` the window's length (0 = until the clip's end), `params.intensity` the strength. nil = none.
         @Published var clipEffect: EffectTemplate?
@@ -196,6 +198,7 @@ extension EditingView {
             case opticalFlow
             case motionBlur
             case reverseSource
+            case reversedCopy
         }
         
         init(clipName: String, startTime: Float, duration: Float, trackIndex: Int, type: ClipType, isClipHasAudio: Bool, width: Int, height: Int) {
@@ -272,6 +275,7 @@ extension EditingView {
             self.opticalFlow = (try? container.decodeIfPresent(ClipOpticalFlow.self, forKey: .opticalFlow)) ?? nil
             self.motionBlur = (try? container.decodeIfPresent(ClipMotionBlur.self, forKey: .motionBlur)) ?? nil
             self.reverseSource = (try? container.decodeIfPresent(ReverseSource.self, forKey: .reverseSource)) ?? nil
+            self.reversedCopy = (try? container.decodeIfPresent(String.self, forKey: .reversedCopy)) ?? nil
         }
         
         func encode(to encoder: Encoder) throws {
@@ -314,6 +318,7 @@ extension EditingView {
             try container.encodeIfPresent(opticalFlow, forKey: .opticalFlow)
             try container.encodeIfPresent(motionBlur, forKey: .motionBlur)
             try container.encodeIfPresent(reverseSource, forKey: .reverseSource)
+            try container.encodeIfPresent(reversedCopy, forKey: .reversedCopy)
         }
     }
     
