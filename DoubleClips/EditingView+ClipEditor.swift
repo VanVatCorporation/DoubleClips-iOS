@@ -183,7 +183,8 @@ extension EditingView {
                     slider("Volume", \.valueVolume, 0...2, reset: 1)
                     toggle("Mute audio", clip.isMute) { $0.isMute = $1 }
                     if clip.type == .video {
-                        toggle("Reverse", clip.isReverse) { $0.isReverse = $1 }
+                        // pre-processes a reversed copy of the footage (EditingView+Reverse.swift); shows "Processing 52.6%"
+                        EditingView.ReverseRow(clip: clip)
                     }
                 }
                 

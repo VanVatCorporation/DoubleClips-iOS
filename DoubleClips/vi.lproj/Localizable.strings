@@ -604,11 +604,6 @@
 "Clips that use the same media share one slot. People pick that media once, then can still change single clips. That makes %lld slot to fill first instead of %lld." = "Các clip dùng chung một phương tiện sẽ chung một ô. Mọi người chọn phương tiện đó một lần, sau đó vẫn có thể đổi từng clip. Như vậy chỉ cần điền trước %lld ô thay vì %lld.";
 "Clips that use the same media share one slot. People pick that media once, then can still change single clips. That makes %lld slots to fill first instead of %lld." = "Các clip dùng chung một phương tiện sẽ chung một ô. Mọi người chọn phương tiện đó một lần, sau đó vẫn có thể đổi từng clip. Như vậy chỉ cần điền trước %lld ô thay vì %lld.";
 
-/* Template search */
-"Show all searches" = "Hiển thị tất cả tìm kiếm";
-"Show less" = "Thu gọn";
-"You may like" = "Có thể bạn sẽ thích";
-"Trending" = "Đang thịnh hành";
 /* Motion panel */
 "Motion" = "Chuyển động";
 "Optical flow" = "Luồng quang học";
@@ -623,3 +618,11 @@
 "The project plays at %d fps, so frames above that rate are not shown. Raise the project's frame rate in the project settings." = "Dự án phát ở %d fps nên các khung hình vượt tốc độ này sẽ không được hiển thị. Hãy tăng tốc độ khung hình trong cài đặt dự án.";
 "Streaks moving things along their path, using the same flow between frames. It works on this clip only." = "Kéo vệt các vật đang chuyển động theo quỹ đạo của chúng, dùng cùng luồng chuyển động giữa các khung hình. Chỉ áp dụng cho clip này.";
 "Speed is how many times the blur is applied: more times, more obvious streaks." = "Tốc độ là số lần áp dụng độ mờ: càng nhiều lần, vệt càng rõ.";
+
+/* Reverse */
+"Applying %d feature(s)…" = "Đang áp dụng %d tính năng…";
+"Applying" = "Đang áp dụng";
+"Processing %@" = "Đang xử lý %@";
+"%@ applied" = "Đã áp dụng %@";
+"The clip's file is missing." = "Không tìm thấy tệp của clip.";
+"This clip is too short to reverse." = "Clip quá ngắn để đảo ngược.";

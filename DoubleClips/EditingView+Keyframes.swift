@@ -263,6 +263,7 @@ extension EditingView.Clip {
         c.chromaKeys = chromaKeys
         c.opticalFlow = opticalFlow
         c.motionBlur = motionBlur
+        c.reverseSource = reverseSource
         c.clipEffect = clipEffect
         c.textContent = textContent
         c.fontSize = fontSize

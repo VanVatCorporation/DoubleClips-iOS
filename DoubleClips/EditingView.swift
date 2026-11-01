@@ -158,6 +158,8 @@ struct EditingView: View {
                             }
                         }
                     )
+                    // CapCut's "Applying 1 feature..." badge and the green "applied" message (EditingView+Reverse.swift)
+                    .overlay(alignment: .topLeading) { ProcessingBadge().padding(10) }
                     
                     VStack {
                         if !isPreview {
@@ -531,6 +533,7 @@ struct EditingView: View {
                                         onBlend: { openBlendEditor() },
                                         onBackground: { openBackgroundEditor() },
                                         onMotion: { openMotionEditor() },
+                                        onReverse: { reverseSelectedClip() },
                                         onMultiToggle: { toggleMultiSelect() },
                                         onKeyframe: { addKeyframeToSelectedClip() },
                                         onAllKeyframe: { applyKeyframesToAllClips(selectedOnly: false) },
@@ -641,6 +644,8 @@ struct EditingView: View {
             setupSpecificEdit()
             setupToolbars()
             handleEditZoneInteraction()
+            ReverseManager.shared.configure(projectPath: project.projectPath, timeline: timeline, commandManager: commandManager,
+                                            onChanged: { rebuildPreview() })
             if hasLoadedProject, !timeline.tracks.isEmpty, !isPreview { rebuildPreview(markDirty: false) }   // the Home preview has no canvas
         }
         .onDisappear {
@@ -1049,6 +1054,14 @@ struct EditingView: View {
         // The panel's ruler drags re-render the paused preview through this hook (as the mask panel does).
         MaskEditState.shared.refresh = { [weak engine] in engine?.refreshFrame() }
         withAnimation { activeOverlay = .background }
+    }
+    
+    /// Toolbar "Reverse" (EditingView+Reverse.swift): makes a reversed copy of the selected video clip's footage and plays it; pressed
+    /// again it goes back to the original at once and deletes the copy.
+    private func reverseSelectedClip() {
+        guard let clip = selectedClip, clip.type == .video else { return }
+        engine.pause()
+        ReverseManager.shared.toggle(clip)
     }
     
     /// Toolbar "Motion": optical flow and motion blur of the selected video clip (EditingView+MotionPanel.swift).
@@ -1610,6 +1623,8 @@ private struct TrackRowView: View {
 /// A single clip block on the timeline
 private struct ClipBlockView: View {
     @ObservedObject var clip: EditingView.Clip
+    /// "Applying Reverse... 52.6%" in the label while a feature is processed.
+    @ObservedObject private var processing = ProcessingTracker.shared
     /// Needed for whole-clip move: snapping against sibling clips, and reassigning
     /// tracks on drop. Equivalent of Android's access to the shared `timeline` field
     /// from inside `handleClipInteraction`.
@@ -1717,7 +1732,7 @@ private struct ClipBlockView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             
             // Over thumbnails/waveforms the label sits top-left on a soft shadow so it stays readable.
-            Text(clip.clipName)
+            Text(clip.timelineLabel)
                 .font(.system(size: 10, weight: hasMediaVisual ? .semibold : .regular))
                 .foregroundColor(.white)
                 .shadow(color: .black.opacity(hasMediaVisual || isTinted ? 0.85 : 0), radius: 2)
@@ -1894,6 +1909,7 @@ private struct ClipToolbarView: View {
     var onBlend: () -> Void = {}
     var onBackground: () -> Void = {}
     var onMotion: () -> Void = {}
+    var onReverse: () -> Void = {}
     var onMultiToggle: () -> Void = {}
     var onKeyframe: () -> Void = {}
     var onAllKeyframe: () -> Void = {}
@@ -1909,6 +1925,7 @@ private struct ClipToolbarView: View {
                 ToolbarButton(icon: "square.stack.3d.up", label: "Blend") { onBlend() }
                 ToolbarButton(icon: "person.and.background.dotted", label: "Background") { onBackground() }
                 ToolbarButton(icon: "wind", label: "Motion") { onMotion() }
+                ToolbarButton(icon: "backward.fill", label: "Reverse") { onReverse() }
                 ToolbarButton(icon: "diamond", label: "Keyframe") { onKeyframe() }
                 ToolbarButton(icon: "list.bullet", label: "Multi") { onMultiToggle() }
                 ToolbarButton(icon: "arrow.triangle.merge", label: "AllKey") { onAllKeyframe() }

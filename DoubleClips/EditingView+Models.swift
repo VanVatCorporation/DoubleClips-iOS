@@ -149,6 +149,8 @@ extension EditingView {
         /// The Motion panel (EditingView+Motion.swift): frame interpolation and motion blur, same JSON as desktop. nil = off.
         @Published var opticalFlow: ClipOpticalFlow?
         @Published var motionBlur: ClipMotionBlur?
+        /// Set while this clip plays a REVERSED COPY of its footage (EditingView+Reverse.swift): what it was before. nil = not reversed.
+        @Published var reverseSource: ReverseSource?
         /// An effect for THIS clip only (EditingView+ClipEffect.swift), same JSON as Android's `Clip.clipEffect`: `offset` is seconds after the
         /// clip's start, `duration` the window's length (0 = until the clip's end), `params.intensity` the strength. nil = none.
         @Published var clipEffect: EffectTemplate?
@@ -193,6 +195,7 @@ extension EditingView {
             case chromaKeys
             case opticalFlow
             case motionBlur
+            case reverseSource
         }
         
         init(clipName: String, startTime: Float, duration: Float, trackIndex: Int, type: ClipType, isClipHasAudio: Bool, width: Int, height: Int) {
@@ -268,6 +271,7 @@ extension EditingView {
             // Motion settings that can't be read must never cost the clip.
             self.opticalFlow = (try? container.decodeIfPresent(ClipOpticalFlow.self, forKey: .opticalFlow)) ?? nil
             self.motionBlur = (try? container.decodeIfPresent(ClipMotionBlur.self, forKey: .motionBlur)) ?? nil
+            self.reverseSource = (try? container.decodeIfPresent(ReverseSource.self, forKey: .reverseSource)) ?? nil
         }
         
         func encode(to encoder: Encoder) throws {
@@ -309,6 +313,7 @@ extension EditingView {
             if !chromaKeys.isEmpty { try container.encode(chromaKeys, forKey: .chromaKeys) }
             try container.encodeIfPresent(opticalFlow, forKey: .opticalFlow)
             try container.encodeIfPresent(motionBlur, forKey: .motionBlur)
+            try container.encodeIfPresent(reverseSource, forKey: .reverseSource)
         }
     }
     
