@@ -132,6 +132,29 @@ struct AssetsClient {
         return Page(items: r.items, next: r.nextCursor)
     }
 
+    // MARK: Search: hot searches and suggestions (public), logging a search (signed in)
+
+    /// The ranked hot searches ("Trending"), best first.
+    func trending(limit: Int = 10) async throws -> [TrendingSearch] {
+        struct Row: Decodable { let query: String; let count: Int?; let hot: Bool? }
+        struct R: Decodable { let items: [Row] }
+        let r = try await send(R.self, "GET", "/public/assets/search/trending", query: ["limit": String(limit)], auth: false)
+        return r.items.map { TrendingSearch(text: $0.query, count: $0.count, isHot: $0.hot ?? false) }
+    }
+
+    /// Autocomplete for what is typed; an empty string asks for "You may like".
+    func suggest(_ typed: String, limit: Int = 10) async throws -> [String] {
+        struct R: Decodable { let items: [String] }
+        return try await send(R.self, "GET", "/public/assets/search/suggest", query: ["q": typed, "limit": String(limit)], auth: false).items
+    }
+
+    /// A search the person submitted, so "Trending" can rank it. Only signed-in searches count (one person can't push a term up).
+    func logSearch(_ query: String) async {
+        guard DoubleClipsDrive.sessionToken() != nil else { return }
+        struct B: Encodable { let query: String }
+        _ = try? await send(Ok.self, "POST", "/assets/search/log", body: B(query: query))
+    }
+
     // MARK: Download (login needed; charged to my daily allowance)
 
     func download(_ asset: CommunityAsset, progress: (@Sendable (Int64, Int64) -> Void)? = nil) async throws -> URL {

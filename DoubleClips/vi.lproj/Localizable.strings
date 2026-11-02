@@ -716,3 +716,8 @@
 "This isn't an effect file." = "Đây không phải tệp hiệu ứng.";
 "An effect with this id already exists." = "Đã có hiệu ứng với mã này.";
 "This kind is installed in the app, not added to a project." = "Loại này được cài vào ứng dụng, không thêm vào dự án.";
+
+/* Assets search + editor */
+"Search assets..." = "Tìm tài nguyên...";
+"No assets found" = "Không tìm thấy tài nguyên";
+"Add to this project" = "Thêm vào dự án này";

@@ -16,6 +16,8 @@ final class AssetDownload: ObservableObject {
 
 struct AssetDetailView: View {
     let asset: CommunityAsset
+    /// Opened from the editor: media and fonts go straight into THIS project (no project picker).
+    var target: ProjectData?
     var onBlocked: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
@@ -112,7 +114,7 @@ struct AssetDetailView: View {
         switch asset.kindValue {
         case .effect: return "Install effect"
         case .pack: return "Install animation pack"
-        case .font, .video, .image, .audio: return "Add to a project…"
+        case .font, .video, .image, .audio: return target == nil ? "Add to a project…" : "Add to this project"
         }
     }
 
@@ -174,7 +176,7 @@ struct AssetDetailView: View {
                 let name = try AssetLibrary.installPack(from: file)
                 notice = "“\(name)” is installed. Its animations are in the animation pickers."
             case .font, .video, .image, .audio:
-                showProjects = true
+                if let target { addToProject(file, target) } else { showProjects = true }
             }
         } catch {
             errorText = error.localizedDescription

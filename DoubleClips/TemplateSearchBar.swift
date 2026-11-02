@@ -6,6 +6,8 @@ struct TemplateSearchBar: View {
     /// The hot searches to rotate through (empty = the plain "Search templates..." prompt).
     let terms: [String]
     @Binding var index: Int
+    /// The prompt shown while there are no hot searches (the Assets tab says "Search assets...").
+    var emptyPrompt: String = "Search templates..."
     let onTap: () -> Void
 
     private let interval: UInt64 = 3_000_000_000
@@ -38,7 +40,7 @@ struct TemplateSearchBar: View {
     private var ticker: some View {
         ZStack(alignment: .leading) {
             if terms.isEmpty {
-                Text(L("Search templates..."))
+                Text(L(emptyPrompt))
                     .foregroundColor(.secondary)
             } else {
                 Text(terms[index % terms.count])

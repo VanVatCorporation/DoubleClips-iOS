@@ -145,12 +145,17 @@ final class TemplateSearchHints: ObservableObject {
 @MainActor
 final class TemplateSearchHistory: ObservableObject {
     static let shared = TemplateSearchHistory()
-    private let key = "TemplateSearchHistory"
+    /// The Assets tab's own history (same behaviour, separate list).
+    static let assets = TemplateSearchHistory(key: "AssetSearchHistory")
+    private let key: String
     private let limit = 20
 
     @Published private(set) var items: [String]
 
-    private init() { items = UserDefaults.standard.stringArray(forKey: key) ?? [] }
+    private init(key: String = "TemplateSearchHistory") {
+        self.key = key
+        items = UserDefaults.standard.stringArray(forKey: key) ?? []
+    }
 
     func add(_ query: String) {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)

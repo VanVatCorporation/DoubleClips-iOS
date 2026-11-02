@@ -65,8 +65,16 @@ final class AssetsModel: ObservableObject {
 }
 
 struct AssetsView: View {
+    /// Opened from the editor's toolbar: "Add to this project" puts media and fonts straight into this project.
+    var target: ProjectData? = nil
+    /// Set when shown as a sheet (the editor): adds a Done button.
+    var onClose: (() -> Void)? = nil
+
     @StateObject private var model = AssetsModel()
     @ObservedObject private var auth = AuthRepository.shared
+    @ObservedObject private var hints = AssetSearchHints.shared
+    @State private var path = NavigationPath()
+    @State private var hotIndex = 0                      // the hot search showing in the bar (rotates every ~3 s)
     @State private var showPost = false
     @State private var showMine = false
     @State private var showSignIn = false
@@ -75,10 +83,14 @@ struct AssetsView: View {
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 12)]
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    kindChips
+                    // Hot searches take turns inside the bar; tapping opens the search screen (like the Templates tab).
+                    TemplateSearchBar(terms: hotTerms, index: $hotIndex, emptyPrompt: "Search assets...") {
+                        path.append(AssetSearchRoute(placeholder: currentHotTerm))
+                    }
+                    AssetKindChips(selection: Binding(get: { model.kind }, set: { setKind($0) }))
                     content
                 }
                 .padding(.horizontal, 16)
@@ -86,14 +98,16 @@ struct AssetsView: View {
             }
             .navigationTitle("Assets")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $model.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search assets")
-            .onSubmit(of: .search) { Task { await model.reload() } }
-            .onChange(of: model.query) { _, new in if new.isEmpty { Task { await model.reload() } } }
             .toolbar { toolbarContent }
             .refreshable { await model.reload() }
             .task { if model.items.isEmpty { await model.reload() } }
+            .task { await hints.refresh() }
             .navigationDestination(for: CommunityAsset.self) { asset in
-                AssetDetailView(asset: asset, onBlocked: { blockedVersion += 1 })
+                AssetDetailView(asset: asset, target: target, onBlocked: { blockedVersion += 1 })
+            }
+            .navigationDestination(for: AssetSearchRoute.self) { route in
+                AssetSearchView(placeholder: route.placeholder, fallbackTitles: model.items.map(\.title), target: target,
+                                onBlocked: { blockedVersion += 1 })
             }
             .sheet(isPresented: $showPost) { PostAssetView(onPosted: { showPost = false; showMine = true }) }
             .sheet(isPresented: $showMine) { MyAssetsView() }
@@ -105,28 +119,15 @@ struct AssetsView: View {
 
     // MARK: pieces
 
-    private var kindChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                chip("All", icon: "square.grid.2x2", selected: model.kind == nil) { setKind(nil) }
-                ForEach(AssetKind.allCases) { kind in
-                    chip(kind.title, icon: kind.icon, selected: model.kind == kind) { setKind(kind) }
-                }
-            }
-            .padding(.vertical, 4)
-        }
+    /// What the bar rotates through: the server's hot searches, else the titles of the first assets in the tab.
+    private var hotTerms: [String] {
+        let hot = hints.trending.map(\.text)
+        return hot.isEmpty ? Array(model.items.prefix(8).map(\.title).filter { !$0.isEmpty }) : hot
     }
 
-    private func chip(_ title: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.system(size: 13, weight: .semibold))
-                .padding(.horizontal, 12).padding(.vertical, 7)
-                .foregroundColor(selected ? .white : .primary)
-                .background(selected ? Color.mdPrimary : Color.mdSurfaceContainerHigh)
-                .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
+    private var currentHotTerm: String {
+        let terms = hotTerms
+        return terms.isEmpty ? "" : terms[hotIndex % terms.count]
     }
 
     private func setKind(_ kind: AssetKind?) {
@@ -157,7 +158,8 @@ struct AssetsView: View {
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
+        ToolbarItemGroup(placement: .topBarLeading) {
+            if let onClose { Button("Done") { onClose() } }
             Menu {
                 Picker("Sort", selection: $model.sort) {
                     Text("Newest").tag("new")
@@ -235,5 +237,36 @@ struct AssetPreviewImage: View {
             }
         }
         .clipped()
+    }
+}
+
+
+// MARK: - Kind filter chips (the tab and the search results)
+
+struct AssetKindChips: View {
+    @Binding var selection: AssetKind?
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                chip("All", icon: "square.grid.2x2", selected: selection == nil) { selection = nil }
+                ForEach(AssetKind.allCases) { kind in
+                    chip(kind.title, icon: kind.icon, selected: selection == kind) { selection = kind }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func chip(_ title: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(LocalizedStringKey(title), systemImage: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .foregroundColor(selected ? .white : .primary)
+                .background(selected ? Color.mdPrimary : Color.mdSurfaceContainerHigh)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
