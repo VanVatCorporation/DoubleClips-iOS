@@ -8,7 +8,7 @@
 import SwiftUI
 
 enum Tab: Hashable, CaseIterable {
-   case home, template, search, storage, profile
+   case home, template, assets, storage, profile
 }
 
 struct ContentView: View {
@@ -19,7 +19,7 @@ struct ContentView: View {
     @StateObject private var storageModel = StorageModel()
     
     // Ordered list of tabs for swipe navigation
-    private let tabOrder: [Tab] = [.home, .template, .search, .storage, .profile]
+    private let tabOrder: [Tab] = [.home, .template, .assets, .storage, .profile]
     
     var body: some View {
         TabView(selection: $selection) {
@@ -36,11 +36,12 @@ struct ContentView: View {
                 }
                 .tag(Tab.template)
             
-            Text("Search Screen")
+            // Community assets (videos, effects, fonts, ...) shared from Van Vat Drive; see Assets/
+            AssetsView()
                 .tabItem {
-                    Label("Search", systemImage: "magnifyingglass")
+                    Label("Assets", systemImage: "square.grid.2x2")
                 }
-                .tag(Tab.search)
+                .tag(Tab.assets)
             
             StorageView()
                 .environmentObject(storageModel)

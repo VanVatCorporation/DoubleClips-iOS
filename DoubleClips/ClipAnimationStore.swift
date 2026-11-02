@@ -90,6 +90,7 @@ enum ClipAnimationStore {
         var problems = loadBuiltIns()
         problems.append(contentsOf: TransitionStyleLoader.loadBuiltIns())     // data-driven transition styles
         problems.append(contentsOf: EffectStyleLoader.loadBuiltIns())         // data-driven effect styles
+        problems.append(contentsOf: AssetLibrary.loadInstalledEffects())      // effects downloaded from the Assets tab
         problems.append(contentsOf: loadInstalledPacks())
         return problems
     }
