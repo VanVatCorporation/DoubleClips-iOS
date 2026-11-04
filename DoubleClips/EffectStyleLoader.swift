@@ -25,7 +25,7 @@ import Foundation
 //                                        //   saturation, contrast, hue, temperature, warp.*, opacity, edgeFill, redTint)
 //
 // The strength slider scales every channel's distance from its neutral value (ClipAnimationFrame.scaledDeviation): a push
-// of 12% becomes 24% at strength 2. A JSON style with the same id as a hard-coded effect replaces its rendering.
+// of 12% becomes 24% at strength 2.
 // Validation is the clip-animation one; a bad file throws `ClipAnimationFormatError` and registers nothing.
 
 final class EffectStyleDefinition {

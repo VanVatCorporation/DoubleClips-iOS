@@ -19,6 +19,9 @@ extension EffectFilterOps {
         "rgbShift": EffectFilterSpec(params: [EffectFilterParam(name: "dx", def: 0.01, neutral: 0.0, min: 0.0, max: 0.1, scaled: true)], flags: ["randomSign"], strings: [:]),
         "tearSlices": EffectFilterSpec(params: [EffectFilterParam(name: "amount", def: 1.0, neutral: 0.0, min: 0.0, max: 3.0, scaled: true)], flags: [], strings: [:]),
         "crossProcess": EffectFilterSpec(params: [], flags: [], strings: [:]),
-        "vhs": EffectFilterSpec(params: [EffectFilterParam(name: "amount", def: 1.0, neutral: 0.0, min: 0.0, max: 2.0, scaled: true)], flags: [], strings: [:])
+        "vhs": EffectFilterSpec(params: [EffectFilterParam(name: "amount", def: 1.0, neutral: 0.0, min: 0.0, max: 2.0, scaled: true)], flags: [], strings: [:]),
+        // Added by hand (the generator above predates it): the frame repeated in a cols x rows grid, each copy cropped to the
+        // cell's shape (never stretched). Not scaled by the strength slider. Android and desktop copy this entry.
+        "tile_grid": EffectFilterSpec(params: [EffectFilterParam(name: "cols", def: 2.0, neutral: 1.0, min: 1.0, max: 8.0, scaled: false), EffectFilterParam(name: "rows", def: 1.0, neutral: 1.0, min: 1.0, max: 8.0, scaled: false)], flags: [], strings: [:])
     ]
 }

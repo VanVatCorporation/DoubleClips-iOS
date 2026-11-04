@@ -10,16 +10,10 @@ import ImageIO
 // effect's track are drawn over the result and are not touched. (This is how Android's FFmpeg
 // filter graph reads: a filter placed in the chain only sees what came before it.)
 //
-// Android defines four effects (FXCommandEmitter.emit), ported to Core Image:
-//   glitch-pulse      tblend=addition + framestep=2 + eq=brightness=0.2
-//                     -> brightness lift, RGB split and slices that jump 15x/s and pulse. (The "blend
-//                        with the previous frame" part needs the previous frame, which a stateless
-//                        per-frame compositor doesn't have.)
-//   warp-zoom         zoompan z='zoom+0.001' -> slow push-in about the centre, 3% per second.
-//                     (Android's x='iw/2' puts the zoom window off to the right, which looks like a bug.)
-//   lens-flare-surge  curves=cross_process + eq=contrast=1.5:saturation=1.2 -> cross-process grade.
-//   spin-burst        rotate=2*PI*t/duration -> one clockwise turn across the clip, corners black.
-// and this app adds a starter set of its own (blur, glow, vignette, VHS, shake, ...).
+// Every effect is a JSON file (animations/effects/*.json, loaded by EffectStyleLoader; the same files Android and desktop
+// read): channels for movement and colour, `filters` for the Core Image ops below. Nothing about an individual effect is
+// written in code. (Android's FFmpeg glitch-pulse / warp-zoom / lens-flare-surge / spin-burst graphs are gone; their JSON
+// versions are the only definition.)
 //
 // Everything is a pure function of (picture so far, time into the effect), so preview, scrubbing,
 // export and the picker tiles all show the same thing.
@@ -49,7 +43,6 @@ enum EffectCatalog {
         }
     }
     
-    /// Android's four first, then the iOS starter set, grouped loosely: motion, colour, optics, retro, fades.
     /// The order of the picker (Android's four first, then motion, colour, optics, fades). Names, authors and strength sliders come from the
     /// JSON files (animations/effects/*.json); a file that isn't listed here follows the listed ones, sorted by name.
     private static let pickerOrder: [String] = [
@@ -107,8 +100,7 @@ enum EffectRenderer {
         let a = max(intensity, 0)
         let p = min(max(progress, 0), 1)
         
-        // A style defined by a JSON file (EffectStyleLoader) wins over the hard-coded one with the same key: its channels
-        // are evaluated over the clip's progress (or looped every `period` seconds) and applied to the whole picture.
+        // The style's JSON file (EffectStyleLoader): its channels are evaluated over the clip's progress (or looped every `period` seconds) and applied to the whole picture.
         if let definition = EffectStyleLoader.get(EffectCatalog.canonicalKey(style)) {
             let t: Float
             if definition.period > 0 {
@@ -220,6 +212,8 @@ enum EffectRenderer {
                 ])
             case "vhs":
                 out = vhs(out, a: v("amount"), step: step, canvas: canvas)
+            case "tile_grid":
+                out = tiled(out, cols: Int(v("cols").rounded()), rows: Int(v("rows").rounded()), canvas: canvas)
             default:
                 break
             }
@@ -269,6 +263,33 @@ enum EffectRenderer {
         return blue.applyingFilter("CIAdditionCompositing", parameters: [
             kCIInputBackgroundImageKey: red.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: green])
         ]).cropped(to: canvas)
+    }
+    
+    /// The picture repeated `cols` x `rows` times across the canvas ("tile_grid"). Each copy shows the middle of the picture,
+    /// cropped to the cell's shape, so nothing is stretched: two columns on a landscape canvas show the middle half of the frame twice.
+    private static func tiled(_ image: CIImage, cols: Int, rows: Int, canvas: CGRect) -> CIImage {
+        let c = max(1, cols), r = max(1, rows)
+        if c == 1 && r == 1 { return image }
+        let cellW = canvas.width / CGFloat(c), cellH = canvas.height / CGFloat(r)
+        // How much of the picture one cell shows: the cell's aspect ratio over the canvas's, which is rows / cols.
+        let k = CGFloat(r) / CGFloat(c)
+        let srcW = canvas.width * min(k, 1), srcH = canvas.height * min(1 / k, 1)
+        let source = CGRect(x: canvas.midX - srcW / 2, y: canvas.midY - srcH / 2, width: srcW, height: srcH)
+        let piece = image.cropped(to: source)
+        let sx = cellW / srcW, sy = cellH / srcH
+        var out: CIImage? = nil
+        for row in 0..<r {
+            for col in 0..<c {
+                // a.concatenating(b) applies a first: move the cropped piece to the origin, scale it to the cell, move it into place.
+                let move = CGAffineTransform(translationX: -source.minX, y: -source.minY)
+                    .concatenating(CGAffineTransform(scaleX: sx, y: sy))
+                    .concatenating(CGAffineTransform(translationX: canvas.minX + CGFloat(col) * cellW,
+                                                     y: canvas.minY + CGFloat(row) * cellH))
+                let placed = piece.transformed(by: move)
+                out = out.map { placed.composited(over: $0) } ?? placed
+            }
+        }
+        return (out ?? image).cropped(to: canvas)
     }
     
     /// Moves a horizontal band sideways (a "torn" scanline strip).
