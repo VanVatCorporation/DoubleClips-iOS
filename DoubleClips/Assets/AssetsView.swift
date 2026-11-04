@@ -28,20 +28,26 @@ final class AssetsModel: ObservableObject {
         let mine = generation
         isLoading = true
         failed = nil
-        next = nil
-        hasMore = true
-        do {
-            let page = try await AssetsClient.shared.list(kind: kind, query: query, sort: sort, cursor: nil)
-            guard mine == generation else { return }
+        let (kind, query, sort) = (self.kind, self.query, self.sort)
+        // The request runs in a task of its own. SwiftUI cancels the task that called reload() (a pull to refresh that ends, a view
+        // update) and a cancelled URLSession request would land here as an error ("cancelled") and empty the grid.
+        let result = await Task { try await AssetsClient.shared.list(kind: kind, query: query, sort: sort, cursor: nil) }.result
+        guard mine == generation else { return }
+        switch result {
+        case .success(let page):
             items = page.items
             next = page.next
             hasMore = page.next != nil
-        } catch {
-            guard mine == generation else { return }
-            items = []
-            failed = (error as? DriveError)?.message ?? error.localizedDescription
+        case .failure(let error):
+            // A cancelled request is not a failure: what is on screen stays.
+            if !Self.isCancellation(error) {
+                items = []
+                next = nil
+                hasMore = true
+                failed = (error as? DriveError)?.message ?? error.localizedDescription
+            }
         }
-        if mine == generation { isLoading = false }
+        isLoading = false
     }
 
     func loadMoreIfNeeded(after asset: CommunityAsset) async {
@@ -49,18 +55,26 @@ final class AssetsModel: ObservableObject {
         generation += 1
         let mine = generation
         isLoading = true
-        do {
-            let page = try await AssetsClient.shared.list(kind: kind, query: query, sort: sort, cursor: cursor)
-            guard mine == generation else { return }
+        let (kind, query, sort) = (self.kind, self.query, self.sort)
+        let result = await Task { try await AssetsClient.shared.list(kind: kind, query: query, sort: sort, cursor: cursor) }.result
+        guard mine == generation else { return }
+        switch result {
+        case .success(let page):
             let known = Set(items.map(\.id))
             items += page.items.filter { !known.contains($0.id) }
             next = page.next
             hasMore = page.next != nil
-        } catch {
-            guard mine == generation else { return }
-            hasMore = false
+        case .failure(let error):
+            // Scrolling cancels the .task of a card that left the screen: that must not stop the paging for good.
+            if !Self.isCancellation(error) { hasMore = false }
         }
-        if mine == generation { isLoading = false }
+        isLoading = false
+    }
+
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if (error as? URLError)?.code == .cancelled { return true }
+        return (error as NSError).domain == NSURLErrorDomain && (error as NSError).code == NSURLErrorCancelled
     }
 }
 
@@ -189,7 +203,7 @@ struct AssetCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             AssetPreviewImage(url: asset.previewUrl, kind: asset.kindValue)
-                .aspectRatio(16.0 / 10.0, contentMode: .fill)
+                .aspectRatio(16.0 / 10.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(alignment: .topLeading) {
@@ -222,21 +236,35 @@ struct AssetCard: View {
 }
 
 /// The poster's preview picture, or the kind's icon on a tinted card while it loads / when there is none.
+///
+/// The tinted box is what has the size (it takes whatever the caller gives it: a frame, or an aspect ratio) and the picture is only
+/// drawn inside it, sized to the box and clipped. A picture put next to the box in a ZStack would make the cell as big as the
+/// picture itself: a phone photo then filled the whole screen.
 struct AssetPreviewImage: View {
     let url: URL?
     let kind: AssetKind
 
     var body: some View {
-        ZStack {
-            Color.mdSurfaceContainerHigh
-            Image(systemName: kind.icon).font(.system(size: 28)).foregroundColor(.secondary)
-            if let url {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image { image.resizable().scaledToFill() }
+        Color.mdSurfaceContainerHigh
+            .overlay {
+                GeometryReader { box in
+                    ZStack {
+                        Image(systemName: kind.icon).font(.system(size: 28)).foregroundColor(.secondary)
+                            .frame(width: box.size.width, height: box.size.height)
+                        if let url {
+                            AsyncImage(url: url) { phase in
+                                if let image = phase.image {
+                                    image.resizable().scaledToFill()
+                                        .frame(width: box.size.width, height: box.size.height)
+                                        .clipped()
+                                }
+                            }
+                        }
+                    }
                 }
             }
-        }
-        .clipped()
+            .clipped()
+            .contentShape(Rectangle())
     }
 }
 

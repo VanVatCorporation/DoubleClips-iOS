@@ -25,11 +25,14 @@ struct PostAssetView: View {
     @State private var rights = false
     @State private var showPicker = false
     @State private var showImporter = false
-    @State private var working: String?
+    @StateObject private var transfer = PostTransfer()
+    @State private var postTask: Task<Void, Never>?
     @State private var errorText: String?
+    /// The upload failed for a quota / plan reason: the form offers "Get more resources" (like the backup sheet).
+    @State private var quotaFailure = false
 
     private var fileName: String? { node?.name ?? local?.lastPathComponent }
-    private var canPost: Bool { fileName != nil && rights && title.trimmingCharacters(in: .whitespaces).count >= 2 && working == nil }
+    private var canPost: Bool { fileName != nil && rights && title.trimmingCharacters(in: .whitespaces).count >= 2 && !transfer.running }
 
     static func splitTags(_ raw: String) -> [String] {
         raw.split(whereSeparator: { $0 == "," || $0 == "\n" }).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
@@ -68,20 +71,22 @@ struct PostAssetView: View {
                         Text("Posting shares the file with \"anyone with the link\" (view only) and lists it in the Assets tab for everyone. You can restrict it any time from My assets, Drive or OpenEditz.")
                     }
                 }
-                if let errorText { Section { Text(errorText).foregroundColor(.red).font(.footnote) } }
+                if let errorText {
+                    Section {
+                        Text(errorText).foregroundColor(.red).font(.footnote)
+                        if quotaFailure { GetMoreResourcesButton() }
+                    }
+                }
             }
             .navigationTitle("Post an asset")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(working != nil) }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(transfer.running) }
                 ToolbarItem(placement: .confirmationAction) { Button("Post") { post() }.disabled(!canPost) }
             }
-            .overlay {
-                if let working {
-                    VStack(spacing: 10) { ProgressView(); Text(LocalizedStringKey(working)).font(.footnote) }
-                        .padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-                }
-            }
+            // The same kind of card as the backup / download popups: file name, bar, "12 MB / 70 MB", percent, Stop. It covers the sheet
+            // (nothing behind it can be touched) and the only way out is Stop or the post finishing.
+            .overlay { PostTransferCard(transfer: transfer, onStop: stop) }
             .sheet(isPresented: $showPicker) {
                 OpenEditzFilePicker { picked in
                     node = picked; local = nil
@@ -108,6 +113,7 @@ struct PostAssetView: View {
                 }
             }
         }
+        .interactiveDismissDisabled(transfer.running)
     }
 
     /// A newly chosen file: guess the kind, suggest a title, make the preview picture when the file is here.
@@ -120,29 +126,215 @@ struct PostAssetView: View {
     }
 
     private func post() {
-        guard fileName != nil else { return }
+        guard let name = fileName else { return }
         errorText = nil
-        working = "Posting…"
-        Task {
-            defer { working = nil }
+        quotaFailure = false
+        let pickedNode = node
+        let pickedLocal = local
+        let assetKind = kind
+        let assetTitle = title.trimmingCharacters(in: .whitespaces)
+        let assetText = text
+        let assetTags = Self.splitTags(tags)
+        let picture = preview
+        transfer.begin(name: name, uploading: pickedNode == nil && pickedLocal != nil)
+
+        postTask = Task {
+            defer {
+                transfer.finish()
+                postTask = nil
+            }
             do {
-                var target = node
-                if target == nil, let local {
-                    working = "Uploading to OpenEditz…"
+                var target = pickedNode
+                if target == nil, let file = pickedLocal {
+                    let size = Self.size(of: file)
+                    transfer.total = size
+                    try await checkQuota(size: size, name: file.lastPathComponent)
                     let folder = try await DoubleClipsDrive.openEditz.ensureFolder(path: ["Assets"])
-                    target = try await DoubleClipsDrive.openEditz.upload(fileURL: local, into: folder)
-                    try? FileManager.default.removeItem(at: local)
+                    let uploadName = await Self.freeName(file.lastPathComponent, in: folder)
+                    let transfer = self.transfer
+                    let uploaded = try await DoubleClipsDrive.openEditz.upload(fileURL: file, into: folder, name: uploadName) { sent in
+                        Task { @MainActor in transfer.loaded = min(sent, max(size, 1)) }
+                    }
+                    // uploaded: if posting fails next, a second try reuses this file instead of uploading another copy
+                    node = uploaded
+                    local = nil
+                    try? FileManager.default.removeItem(at: file)
+                    target = uploaded
                 }
                 guard let target else { return }
-                working = "Posting…"
-                let asset = try await AssetsClient.shared.publish(node: target, kind: kind, title: title.trimmingCharacters(in: .whitespaces),
-                                                                  description: text, tags: Self.splitTags(tags))
-                if let preview { try? await AssetsClient.shared.uploadPreview(assetId: asset.id, jpeg: preview) }
+                transfer.phase = .posting
+                let asset = try await AssetsClient.shared.publish(node: target, kind: assetKind, title: assetTitle,
+                                                                  description: assetText, tags: assetTags)
+                if let picture { try? await AssetsClient.shared.uploadPreview(assetId: asset.id, jpeg: picture) }
                 onPosted()
+            } catch is CancellationError {
+                // Stop (or "Cancel" on the daily-limit warning): nothing to say
             } catch {
+                if Task.isCancelled { return }
                 errorText = (error as? DriveError)?.message ?? error.localizedDescription
+                quotaFailure = (error as? DriveError)?.isQuotaLimit ?? false
             }
         }
+    }
+
+    /// Stop: ends the upload (the server throws away the half-sent file) or the post.
+    private func stop() {
+        postTask?.cancel()
+        transfer.answerWarning(false)
+    }
+
+    /// Not enough storage left cannot work; the daily upload cap only warns ("Continue anyway", like the backup sheet and the Storage tab).
+    private func checkQuota(size: Int64, name: String) async throws {
+        guard let me = try? await DoubleClipsDrive.client.me() else { return }     // can't tell: the server has the final say
+        let free = max(0, me.quotaBytes - me.usedBytes)
+        if size > free {
+            throw DriveError(status: 413, code: "quota_exceeded",
+                             message: Lf("Not enough space for “%@”: %@ left.", name, StorageModel.bytes(free)))
+        }
+        let freeToday = me.usage?.uploadFree ?? .max
+        if size > freeToday {
+            let proceed = await transfer.askWarning(QuotaText.upload(size: size, free: freeToday))
+            if !proceed { throw CancellationError() }
+        }
+    }
+
+    private static func size(of url: URL) -> Int64 {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    /// A name not yet used in the folder ("beat.mp3" -> "beat (1).mp3"): an upload under a taken name is refused by the server.
+    private static func freeName(_ name: String, in folder: DriveNode) async -> String {
+        guard let existing = try? await DoubleClipsDrive.openEditz.list(folder) else { return name }
+        let taken = Set(existing.map { $0.name.lowercased() })
+        if !taken.contains(name.lowercased()) { return name }
+        let base = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        for i in 1..<1000 {
+            let candidate = ext.isEmpty ? "\(base) (\(i))" : "\(base) (\(i)).\(ext)"
+            if !taken.contains(candidate.lowercased()) { return candidate }
+        }
+        return name
+    }
+}
+
+// MARK: - The progress of a post
+
+/// What the post is doing right now; drives {@link PostTransferCard}.
+@MainActor
+final class PostTransfer: ObservableObject {
+    enum Phase: Equatable {
+        case idle
+        case uploading                 // the file goes to OpenEditz/Assets
+        case posting                   // the catalog entry and its picture
+        case warning(String)           // the file probably won't fit today's upload allowance: Continue anyway / Cancel
+    }
+
+    @Published var phase: Phase = .idle
+    @Published var name = ""
+    @Published var loaded: Int64 = 0
+    /// 0 = nothing to upload (the file is already in OpenEditz) or not known yet.
+    @Published var total: Int64 = 0
+    private var warningAnswer: CheckedContinuation<Bool, Never>?
+
+    var running: Bool { phase != .idle }
+    var fraction: Double? { total > 0 ? min(max(Double(loaded) / Double(total), 0), 1) : nil }
+
+    func begin(name: String, uploading: Bool) {
+        self.name = name
+        loaded = 0
+        total = 0
+        phase = uploading ? .uploading : .posting
+    }
+
+    func finish() {
+        warningAnswer?.resume(returning: false)
+        warningAnswer = nil
+        phase = .idle
+        loaded = 0
+        total = 0
+    }
+
+    /// Shows the daily-limit warning and waits for the answer.
+    func askWarning(_ message: String) async -> Bool {
+        phase = .warning(message)
+        return await withCheckedContinuation { warningAnswer = $0 }
+    }
+
+    func answerWarning(_ proceed: Bool) {
+        guard let answer = warningAnswer else { return }
+        warningAnswer = nil
+        if proceed { phase = .uploading }
+        answer.resume(returning: proceed)
+    }
+}
+
+/// The card shown while a post runs: the same pieces as the Storage download popup (name, bar, "12 MB / 70 MB", percent, Stop) and
+/// the backup sheet's daily-limit warning. An overlay on the whole sheet, not a nested sheet: it can't be swiped away.
+struct PostTransferCard: View {
+    @ObservedObject var transfer: PostTransfer
+    let onStop: () -> Void
+
+    var body: some View {
+        if transfer.running {
+            ZStack {
+                Color.black.opacity(0.45)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { }                      // swallow taps: the form behind is locked
+
+                VStack(spacing: 14) {
+                    switch transfer.phase {
+                    case .warning(let message):
+                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 40)).foregroundStyle(.orange)
+                        Text(QuotaText.uploadTitle).font(.headline)
+                        Text(L(message)).font(.footnote).multilineTextAlignment(.center).foregroundColor(.secondary)
+                        HStack {
+                            Button("Cancel") { transfer.answerWarning(false) }.buttonStyle(.bordered)
+                            Button("Continue anyway") { transfer.answerWarning(true) }.buttonStyle(.borderedProminent)
+                        }
+                    case .posting:
+                        Text("Posting…").font(.headline)
+                        Text(transfer.name).font(.subheadline).foregroundColor(.secondary).lineLimit(1).truncationMode(.middle)
+                        ProgressView().progressViewStyle(.linear)          // no size to count: indeterminate
+                        stopButton
+                    default:
+                        Text("Uploading to OpenEditz…").font(.headline)
+                        Text(transfer.name).font(.subheadline).foregroundColor(.secondary).lineLimit(1).truncationMode(.middle)
+                        if let fraction = transfer.fraction {
+                            ProgressView(value: fraction).progressViewStyle(.linear)
+                        } else {
+                            ProgressView().progressViewStyle(.linear)
+                        }
+                        HStack {
+                            Text(sizeText).font(.footnote.monospacedDigit()).foregroundColor(.secondary)
+                            Spacer()
+                            if let fraction = transfer.fraction {
+                                Text("\(Int((fraction * 100).rounded()))%").font(.footnote.monospacedDigit()).foregroundColor(.secondary)
+                            }
+                        }
+                        stopButton
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: 320)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .padding(24)
+            }
+            .transition(.opacity)
+            .accessibilityAddTraits(.isModal)
+        }
+    }
+
+    private var stopButton: some View {
+        Button(role: .cancel) { onStop() } label: { Text("Stop").frame(maxWidth: .infinity) }
+            .buttonStyle(.bordered)
+    }
+
+    /// "12 MB / 70 MB", or just what has gone when the total isn't known.
+    private var sizeText: String {
+        let loaded = StorageModel.bytes(transfer.loaded)
+        guard transfer.total > 0 else { return loaded }
+        return "\(loaded) / \(StorageModel.bytes(transfer.total))"
     }
 }
 

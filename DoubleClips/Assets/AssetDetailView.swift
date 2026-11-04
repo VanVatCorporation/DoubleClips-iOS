@@ -34,7 +34,7 @@ struct AssetDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 AssetPreviewImage(url: asset.previewUrl, kind: asset.kindValue)
-                    .aspectRatio(16.0 / 10.0, contentMode: .fill)
+                    .aspectRatio(16.0 / 10.0, contentMode: .fit)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
 
