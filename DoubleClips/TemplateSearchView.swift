@@ -219,6 +219,7 @@ struct TemplateSearchView: View {
                             isLoading: pager.isLoading,
                             emptyText: pager.didStart ? L("No templates found") : nil,
                             onSelect: { path.append(SearchPreviewRoute(templateId: $0.id)) },
+                            onHide: { pager.hide($0) },
                             onAppearItem: { pager.loadNextIfNeeded(near: $0) })
             .refreshable { await pager.restart() }
     }

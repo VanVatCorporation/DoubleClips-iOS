@@ -5,6 +5,8 @@ struct TemplateElementView: View {
     let itemWidth: CGFloat // Passed from parent
     /// Opens the template (the same as tapping the card); offered in the long-press menu.
     var onOpen: (() -> Void)? = nil
+    /// "Hide this template" (leaves the Templates tab and the search; Settings > Hidden content shows it again). nil = not offered.
+    var onHide: (() -> Void)? = nil
     
     var body: some View {
         VStack(spacing: 0) {
@@ -90,6 +92,9 @@ struct TemplateElementView: View {
         .contextMenu {
             if let onOpen {
                 Button(action: onOpen) { Label("Open", systemImage: "play.rectangle") }
+            }
+            if let onHide {
+                Button(role: .destructive, action: onHide) { Label("Hide this template", systemImage: "eye.slash") }
             }
         } preview: {
             TemplateHoldPreview(template: template)

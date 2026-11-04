@@ -93,6 +93,10 @@ struct AssetsView: View {
     @State private var showMine = false
     @State private var showSignIn = false
     @State private var blockedVersion = 0               // refreshes the grid after someone is blocked in the detail
+    /// Hidden authors (here or in Settings > Hidden content): the grid redraws at once.
+    @ObservedObject private var hidden = HiddenContent.shared
+    @State private var openAsset: CommunityAsset?       // "Open" in a card's long-press menu
+    @State private var reportAsset: CommunityAsset?     // "Report" in the long-press menu
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 12)]
 
@@ -119,12 +123,16 @@ struct AssetsView: View {
             .navigationDestination(for: CommunityAsset.self) { asset in
                 AssetDetailView(asset: asset, target: target, onBlocked: { blockedVersion += 1 })
             }
+            .navigationDestination(item: $openAsset) { asset in
+                AssetDetailView(asset: asset, target: target, onBlocked: { blockedVersion += 1 })
+            }
             .navigationDestination(for: AssetSearchRoute.self) { route in
                 AssetSearchView(placeholder: route.placeholder, fallbackTitles: model.items.map(\.title), target: target,
                                 onBlocked: { blockedVersion += 1 })
             }
             .sheet(isPresented: $showPost) { PostAssetView(onPosted: { showPost = false; showMine = true }) }
             .sheet(isPresented: $showMine) { MyAssetsView() }
+            .sheet(item: $reportAsset) { ReportAssetSheet(asset: $0) }
             .alert("Sign in to post assets", isPresented: $showSignIn) { Button("OK", role: .cancel) {} } message: {
                 Text("Sign in from the Profile tab to post assets, manage them and download.")
             }
@@ -152,6 +160,7 @@ struct AssetsView: View {
 
     @ViewBuilder private var content: some View {
         let _ = blockedVersion
+        let _ = hidden.authors
         if let failed = model.failed, model.items.isEmpty {
             ContentUnavailableView("Can't load assets", systemImage: "wifi.exclamationmark", description: Text(failed))
                 .padding(.top, 40)
@@ -162,9 +171,14 @@ struct AssetsView: View {
         } else {
             LazyVGrid(columns: columns, spacing: 14) {
                 ForEach(model.visibleItems) { asset in
-                    NavigationLink(value: asset) { AssetCard(asset: asset) }
-                        .buttonStyle(.plain)
-                        .task { await model.loadMoreIfNeeded(after: asset) }
+                    NavigationLink(value: asset) {
+                        AssetCard(asset: asset,
+                                  onOpen: { openAsset = asset },
+                                  onReport: { reportAsset = asset },
+                                  onHideAuthor: { if let owner = asset.ownerName { hidden.hideAuthor(owner) } })
+                    }
+                    .buttonStyle(.plain)
+                    .task { await model.loadMoreIfNeeded(after: asset) }
                 }
             }
             if model.isLoading { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 16) }
@@ -199,6 +213,10 @@ struct AssetsView: View {
 
 struct AssetCard: View {
     let asset: CommunityAsset
+    /// The long-press menu's actions. A card given none of them is a plain card (no menu).
+    var onOpen: (() -> Void)? = nil
+    var onReport: (() -> Void)? = nil
+    var onHideAuthor: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -225,6 +243,21 @@ struct AssetCard: View {
             }
             .font(.system(size: 11))
             .foregroundColor(.secondary)
+        }
+        // Long press: the picture, the details and the actions float up (like a template or a project on Home); "Hide assets from X"
+        // is here too (Settings > Hidden content shows them again).
+        .contextMenu {
+            if let onOpen {
+                Button(action: onOpen) { Label("Open", systemImage: "arrow.down.circle") }
+            }
+            if let onReport {
+                Button(action: onReport) { Label("Report", systemImage: "flag") }
+            }
+            if let owner = asset.ownerName, let onHideAuthor {
+                Button(role: .destructive, action: onHideAuthor) { Label("Hide assets from \(owner)", systemImage: "person.slash") }
+            }
+        } preview: {
+            AssetHoldPreview(asset: asset)
         }
     }
 
@@ -296,5 +329,66 @@ struct AssetKindChips: View {
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - The long-press preview of an asset
+
+/// What floats up when an asset card is held: the poster's picture, the title and poster, kind / size / downloads / date, the tags and
+/// the start of the description. Not interactive: the actions are in the menu under it.
+struct AssetHoldPreview: View {
+    let asset: CommunityAsset
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            AssetPreviewImage(url: asset.previewUrl, kind: asset.kindValue)
+                .aspectRatio(16.0 / 10.0, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .topLeading) {
+                    Label(asset.kindValue.singular, systemImage: asset.kindValue.icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(8)
+                }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(asset.title)
+                    .font(.system(size: 18, weight: .bold))
+                    .lineLimit(2)
+                if let owner = asset.ownerName {
+                    Label("@" + owner, systemImage: "person.circle")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                HStack(spacing: 14) {
+                    Label(ByteCountFormatter.string(fromByteCount: asset.size, countStyle: .file), systemImage: "doc")
+                    Label("\(asset.downloads)", systemImage: "arrow.down.circle")
+                    Label(asset.createdAt.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar")
+                }
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                if !asset.tags.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(asset.tags.prefix(4), id: \.self) { tag in
+                            Text("#\(tag)").font(.system(size: 11))
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(Color.mdSurfaceContainerHigh)
+                                .clipShape(Capsule())
+                        }
+                    }
+                    .lineLimit(1)
+                }
+                if let text = asset.description, !text.isEmpty {
+                    Text(text)
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .lineLimit(4)
+                }
+            }
+            .padding(14)
+        }
+        .frame(width: 320)
+        .background(Color.mdSurface)
     }
 }

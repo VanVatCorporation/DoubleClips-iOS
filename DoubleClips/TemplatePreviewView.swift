@@ -13,6 +13,13 @@ struct TemplatePreviewView: View {
         _initialScrollIndex = State(initialValue: initialScrollIndex)
     }
     
+    /// "Hide this template" in the page's ... menu: it leaves the list the preview came from (when that is the feed or the search) and
+    /// the preview closes. Settings > Hidden content shows it again.
+    private func hideTemplate(_ template: TemplateData) {
+        pager.hide(template)
+        presentationMode.wrappedValue.dismiss()
+    }
+
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
@@ -31,7 +38,8 @@ struct TemplatePreviewView: View {
                                 template: template,
                                 index: index,
                                 currentIndex: initialScrollIndex,
-                                onBecameActive: { pager.loadNextIfNeeded(afterIndex: index) }
+                                onBecameActive: { pager.loadNextIfNeeded(afterIndex: index) },
+                                onHide: pager.source == .mine ? nil : { hideTemplate(template) }
                             )
                             .background(ScrollEdgeEffectProbe()) // switches the paging scroll view's edge blur off
                             .tag(index)
@@ -85,6 +93,8 @@ struct TemplatePreviewItemView: View {
     let currentIndex: Int
     /// This page came on screen (the parent loads the next page when it is near the end of the list).
     var onBecameActive: () -> Void = { }
+    /// "Hide this template" in the ... menu (nil: not offered).
+    var onHide: (() -> Void)? = nil
     
     /// Likes, bookmarks and counters: the newest numbers the app knows (grid, Profile lists and this page agree).
     @ObservedObject private var states = TemplateStateStore.shared
@@ -137,6 +147,16 @@ struct TemplatePreviewItemView: View {
             do { try await TemplateAPI.setBookmark(template, bookmarked: want) }
             catch { actionError = error.localizedDescription }
         }
+    }
+    
+    /// "Use template": a timeline template opens the export flow; an old one (no timeline) could only be rendered with FFmpeg, and iOS has none.
+    private func useTemplate() {
+        guard !template.templateTimelineLink.isEmpty else {
+            showOldTemplate = true
+            return
+        }
+        preview.pause()          // stop the preview video behind the new screen
+        showTemplateExport = true
     }
     
     /// This page is the one on screen: report the view (the server counts once per viewer per 30 minutes)
@@ -248,10 +268,13 @@ struct TemplatePreviewItemView: View {
                         toggleBookmark()
                     }
                     
-                    // Other/Menu
-                    Button(action: {
-                        print("More options")
-                    }) {
+                    // Other/Menu: the same actions as the long-press menu on a template card ("Open" there is "Use template" here)
+                    Menu {
+                        Button(action: useTemplate) { Label("Use template", systemImage: "play.rectangle") }
+                        if let onHide {
+                            Button(role: .destructive, action: onHide) { Label("Hide this template", systemImage: "eye.slash") }
+                        }
+                    } label: {
                         Image(systemName: "ellipsis")
                             .font(.system(size: 24))
                             .foregroundColor(.white)
@@ -288,15 +311,7 @@ struct TemplatePreviewItemView: View {
                     }
                     .padding(.horizontal, 10)
                 }
-                Button(action: {
-                    // No timeline = made before timeline templates: only FFmpeg could render it, and iOS has none.
-                    guard !template.templateTimelineLink.isEmpty else {
-                        showOldTemplate = true
-                        return
-                    }
-                    preview.pause()          // stop the preview video behind the new screen
-                    showTemplateExport = true
-                }) {
+                Button(action: useTemplate) {
                     Text("Use template")
                         .font(.headline)
                         .foregroundColor(.white)

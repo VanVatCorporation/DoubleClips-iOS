@@ -9,6 +9,8 @@ struct TemplateMasonryGrid: View {
     /// Shown in the middle when there is nothing to list (nil = say nothing).
     var emptyText: String? = nil
     let onSelect: (TemplateData) -> Void
+    /// "Hide this template" in the long-press menu (nil: not offered: the Profile lists are the user's own picks).
+    var onHide: ((TemplateData) -> Void)? = nil
     /// A card appeared (the pager decides whether that means "load the next page").
     let onAppearItem: (TemplateData) -> Void
 
@@ -30,7 +32,8 @@ struct TemplateMasonryGrid: View {
                             LazyVStack(spacing: spacing) {
                                 ForEach(column(parity)) { template in
                                     TemplateElementView(template: states.applied(template), itemWidth: itemWidth,
-                                                        onOpen: { onSelect(template) })
+                                                        onOpen: { onSelect(template) },
+                                                        onHide: onHide.map { hide in { hide(template) } })
                                         .onTapGesture { onSelect(template) }
                                         .onAppear { onAppearItem(template) }
                                 }

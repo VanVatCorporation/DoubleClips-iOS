@@ -722,3 +722,13 @@
 "No assets found" = "Không tìm thấy tài nguyên";
 "Add to this project" = "Thêm vào dự án này";
 "Stop" = "Dừng";
+"Hide this template" = "Ẩn mẫu này";
+"Hidden content" = "Nội dung đã ẩn";
+"Asset authors and templates you hid. They stay hidden on this phone only; show them again here." = "Tác giả tài nguyên và mẫu bạn đã ẩn. Chúng chỉ bị ẩn trên điện thoại này; hãy hiện lại chúng tại đây.";
+"What you hid stays hidden on this phone only. Show it again here." = "Những gì bạn đã ẩn chỉ bị ẩn trên điện thoại này. Hãy hiện lại chúng tại đây.";
+"Asset authors" = "Tác giả tài nguyên";
+"Templates" = "Mẫu";
+"No hidden asset authors." = "Không có tác giả tài nguyên nào bị ẩn.";
+"No hidden templates." = "Không có mẫu nào bị ẩn.";
+"Show all" = "Hiện tất cả";
+"Show again" = "Hiện lại";

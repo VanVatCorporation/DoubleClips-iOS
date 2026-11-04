@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 // MARK: - Assets: community assets on top of Van Vat Drive
 //
@@ -213,19 +214,127 @@ struct AssetsClient {
     }
 }
 
-/// People whose assets this phone hides (their username, lower-case). Local to the phone, like the report button it goes with.
+/// People whose assets this phone hides. Local to the phone, like the report button it goes with. Names are compared in lower case;
+/// the name as it was written is kept too, so Settings > Hidden content can show it.
 enum BlockedAuthors {
-    private static let key = "AssetsBlockedAuthors"
+    private static let key = "AssetsBlockedAuthors"            // lower-case names: what is compared
+    private static let namesKey = "AssetsBlockedAuthorNames"    // lower-case name -> the name as written: what is shown
+
     static var all: Set<String> { Set(UserDefaults.standard.stringArray(forKey: key) ?? []) }
     static func contains(_ name: String?) -> Bool { name.map { all.contains($0.lowercased()) } ?? false }
-    static func block(_ name: String) {
-        var set = all
-        set.insert(name.lowercased())
-        UserDefaults.standard.set(Array(set), forKey: key)
+
+    private static var written: [String: String] {
+        UserDefaults.standard.dictionary(forKey: namesKey) as? [String: String] ?? [:]
     }
+
+    /// The hidden names as they were written, alphabetical.
+    static var displayNames: [String] {
+        let names = written
+        return all.map { names[$0] ?? $0 }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    static func block(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        var set = all
+        set.insert(trimmed.lowercased())
+        var names = written
+        names[trimmed.lowercased()] = trimmed
+        UserDefaults.standard.set(Array(set), forKey: key)
+        UserDefaults.standard.set(names, forKey: namesKey)
+    }
+
     static func unblock(_ name: String) {
         var set = all
         set.remove(name.lowercased())
+        var names = written
+        names.removeValue(forKey: name.lowercased())
         UserDefaults.standard.set(Array(set), forKey: key)
+        UserDefaults.standard.set(names, forKey: namesKey)
+    }
+
+    static func unblockAll() {
+        UserDefaults.standard.removeObject(forKey: key)
+        UserDefaults.standard.removeObject(forKey: namesKey)
+    }
+}
+
+/// Everything the user hid on this phone: asset authors ("Hide assets from X" in the Assets tab) and templates ("Hide this template"
+/// in the long-press menu and the preview). Both stay on this phone. Settings > Hidden content lists them and shows them again.
+/// Screens that draw lists observe this, so a hide or a "show again" is reflected at once; a list that was already loaded without a
+/// template reloads (see `unhideStamp`) to bring it back.
+@MainActor
+final class HiddenContent: ObservableObject {
+    static let shared = HiddenContent()
+
+    struct HiddenTemplate: Codable, Identifiable, Hashable {
+        let id: String            // the template's id
+        var title: String
+        var author: String
+    }
+
+    @Published private(set) var authors: [String]
+    @Published private(set) var templates: [HiddenTemplate]
+    /// Goes up whenever something is shown again: a feed loaded before that has to reload to bring it back.
+    @Published private(set) var unhideStamp = 0
+
+    private static let templatesKey = "HiddenTemplates"
+    private var templateIds: Set<String>
+
+    private init() {
+        authors = BlockedAuthors.displayNames
+        let stored = UserDefaults.standard.data(forKey: Self.templatesKey)
+            .flatMap { try? JSONDecoder().decode([HiddenTemplate].self, from: $0) } ?? []
+        templates = stored
+        templateIds = Set(stored.map { $0.id.lowercased() })
+    }
+
+    // MARK: asset authors
+
+    func hideAuthor(_ name: String) {
+        BlockedAuthors.block(name)
+        authors = BlockedAuthors.displayNames
+    }
+
+    func showAuthor(_ name: String) {
+        BlockedAuthors.unblock(name)
+        authors = BlockedAuthors.displayNames
+        unhideStamp += 1
+    }
+
+    func showAllAuthors() {
+        BlockedAuthors.unblockAll()
+        authors = []
+        unhideStamp += 1
+    }
+
+    // MARK: templates
+
+    func isHidden(templateId: String) -> Bool { templateIds.contains(templateId.lowercased()) }
+
+    func hide(_ template: TemplateData) {
+        let id = template.templateId
+        guard !id.isEmpty, !isHidden(templateId: id) else { return }
+        templates.append(HiddenTemplate(id: id, title: template.templateTitle, author: template.templateAuthor))
+        templateIds.insert(id.lowercased())
+        saveTemplates()
+    }
+
+    func show(templateId: String) {
+        templates.removeAll { $0.id.lowercased() == templateId.lowercased() }
+        templateIds.remove(templateId.lowercased())
+        saveTemplates()
+        unhideStamp += 1
+    }
+
+    func showAllTemplates() {
+        templates = []
+        templateIds = []
+        saveTemplates()
+        unhideStamp += 1
+    }
+
+    private func saveTemplates() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(templates), forKey: Self.templatesKey)
     }
 }

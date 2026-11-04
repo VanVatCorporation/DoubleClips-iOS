@@ -101,7 +101,7 @@ struct AssetDetailView: View {
         } message: { Text(errorText ?? "") }
         .confirmationDialog("Hide assets from \(asset.ownerName ?? "")?", isPresented: $confirmBlock, titleVisibility: .visible) {
             Button("Hide", role: .destructive) {
-                if let owner = asset.ownerName { BlockedAuthors.block(owner) }
+                if let owner = asset.ownerName { HiddenContent.shared.hideAuthor(owner) }
                 onBlocked()
                 dismiss()
             }

@@ -23,6 +23,7 @@ final class TemplatePager: ObservableObject {
     private var generation = 0
     private var delivered = Set<String>()
     private var viewerAtStart = TemplateAPI.currentOwner
+    private var unhideStampAtStart = HiddenContent.shared.unhideStamp
 
     /// Start the next page when this few cards are left after the one that appeared.
     private let prefetchDistance = 6
@@ -30,6 +31,26 @@ final class TemplatePager: ObservableObject {
 
     /// The account signed in / out since the list was loaded: the flags in it belong to someone else.
     var viewerChanged: Bool { didStart && viewerAtStart != TemplateAPI.currentOwner }
+
+    /// Something was shown again in Settings > Hidden content since this list was loaded: it reloads to bring it back.
+    var hiddenChanged: Bool { didStart && unhideStampAtStart != HiddenContent.shared.unhideStamp }
+
+    /// The discovery lists (the Templates tab and the search) leave out what the user hid. Liked / Saved / My templates are their own
+    /// picks and show everything.
+    private var hidesTemplates: Bool {
+        switch source {
+        case .feed, .search: return true
+        default: return false
+        }
+    }
+
+    /// "Hide this template": remembered on this phone, and gone from this list at once when this list is a discovery list.
+    func hide(_ template: TemplateData) {
+        HiddenContent.shared.hide(template)
+        guard hidesTemplates else { return }
+        let id = template.templateId.lowercased()
+        items.removeAll { $0.templateId.lowercased() == id }
+    }
 
     /// Begins a fresh list (first page) of the given source.
     func start(_ newSource: TemplateFeedSource) async {
@@ -41,6 +62,7 @@ final class TemplatePager: ObservableObject {
         errorMessage = nil
         didStart = false
         viewerAtStart = TemplateAPI.currentOwner
+        unhideStampAtStart = HiddenContent.shared.unhideStamp
         await loadPage(replacing: true, gen: gen, emptyRetries: 0)
     }
 
@@ -74,7 +96,8 @@ final class TemplatePager: ObservableObject {
 
             if replacing { delivered = [] }
             var fresh: [TemplateData] = []
-            for t in page.items where delivered.insert(t.templateId.lowercased()).inserted { fresh.append(t) }
+            for t in page.items where !(hidesTemplates && HiddenContent.shared.isHidden(templateId: t.templateId))
+                && delivered.insert(t.templateId.lowercased()).inserted { fresh.append(t) }
             if replacing { items = fresh } else { items.append(contentsOf: fresh) }
             didStart = true
             isLoading = false

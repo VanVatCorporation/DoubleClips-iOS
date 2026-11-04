@@ -40,6 +40,7 @@ struct TemplateView: View {
                                         isLoading: pager.isLoading,
                                         emptyText: pager.didStart ? L("No templates found") : nil,
                                         onSelect: { navigationPath.append($0) },
+                                        onHide: { pager.hide($0) },
                                         onAppearItem: { pager.loadNextIfNeeded(near: $0) })
                         .refreshable { await pager.restart() }   // a new feed session
                 }
@@ -50,7 +51,8 @@ struct TemplateView: View {
             .task { await hints.refresh() }
             .onAppear {
                 // Signed in / out in the Profile tab: the likes in this list belong to the previous account.
-                if pager.viewerChanged { Task { await pager.restart() } }
+                // Something shown again in Settings > Hidden content comes back with a fresh list too.
+                if pager.viewerChanged || pager.hiddenChanged { Task { await pager.restart() } }
             }
             .navigationDestination(for: TemplateSearchRoute.self) { route in
                 TemplateSearchView(placeholder: route.placeholder,

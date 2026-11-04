@@ -21,6 +21,9 @@ struct AssetSearchView: View {
     @ObservedObject private var hints = AssetSearchHints.shared
     @ObservedObject private var history = TemplateSearchHistory.assets
     @State private var blockedVersion = 0
+    @ObservedObject private var hidden = HiddenContent.shared
+    @State private var openAsset: CommunityAsset?       // "Open" in a card's long-press menu
+    @State private var reportAsset: CommunityAsset?     // "Report" in the long-press menu
 
     @State private var text = ""
     @State private var phase: Phase = .input
@@ -214,6 +217,7 @@ struct AssetSearchView: View {
 
     private var resultsBody: some View {
         let _ = blockedVersion
+        let _ = hidden.authors
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 AssetKindChips(selection: Binding(get: { results.kind }, set: { kind in
@@ -227,9 +231,14 @@ struct AssetSearchView: View {
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 14) {
                         ForEach(results.visibleItems) { asset in
-                            NavigationLink(value: asset) { AssetCard(asset: asset) }
-                                .buttonStyle(.plain)
-                                .task { await results.loadMoreIfNeeded(after: asset) }
+                            NavigationLink(value: asset) {
+                                AssetCard(asset: asset,
+                                          onOpen: { openAsset = asset },
+                                          onReport: { reportAsset = asset },
+                                          onHideAuthor: { if let owner = asset.ownerName { hidden.hideAuthor(owner) } })
+                            }
+                            .buttonStyle(.plain)
+                            .task { await results.loadMoreIfNeeded(after: asset) }
                         }
                     }
                     if results.isLoading { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 16) }
@@ -239,6 +248,10 @@ struct AssetSearchView: View {
             .padding(.bottom, 24)
         }
         .refreshable { await results.reload() }
+        .navigationDestination(item: $openAsset) { asset in
+            AssetDetailView(asset: asset, target: target, onBlocked: { blockedVersion += 1 })
+        }
+        .sheet(item: $reportAsset) { ReportAssetSheet(asset: $0) }
     }
 
     // MARK: actions
