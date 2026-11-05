@@ -22,6 +22,8 @@ struct TemplateSearchView: View {
 
     @State private var text = ""
     @State private var phase: Phase = .input
+    /// The template the long-press "Hide this template" was chosen for: the popup asks before it is hidden.
+    @State private var pendingHide: TemplateData?
     @State private var showAllHistory = false
     @State private var serverSuggestions: [String] = []
     @State private var serverSuggestionsFor = ""
@@ -48,6 +50,7 @@ struct TemplateSearchView: View {
                 TemplatePreviewView(pager: pager, initialScrollIndex: index)
             }
         }
+        .hideTemplateConfirmation($pendingHide) { pager.hide($0) }
         .task {
             await hints.refresh()
             try? await Task.sleep(nanoseconds: 350_000_000)   // let the push finish, then raise the keyboard
@@ -219,7 +222,7 @@ struct TemplateSearchView: View {
                             isLoading: pager.isLoading,
                             emptyText: pager.didStart ? L("No templates found") : nil,
                             onSelect: { path.append(SearchPreviewRoute(templateId: $0.id)) },
-                            onHide: { pager.hide($0) },
+                            onHide: { pendingHide = $0 },
                             onAppearItem: { pager.loadNextIfNeeded(near: $0) })
             .refreshable { await pager.restart() }
     }

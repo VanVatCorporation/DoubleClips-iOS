@@ -732,3 +732,5 @@
 "No hidden templates." = "Không có mẫu nào bị ẩn.";
 "Show all" = "Hiện tất cả";
 "Show again" = "Hiện lại";
+"Hide this template?" = "Ẩn mẫu này?";
+"It will leave the Templates tab and the search. You can show it again in Settings > Hidden content." = "Mẫu sẽ biến mất khỏi tab Mẫu và kết quả tìm kiếm. Bạn có thể hiện lại trong Cài đặt > Nội dung đã ẩn.";

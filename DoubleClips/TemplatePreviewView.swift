@@ -5,6 +5,8 @@ struct TemplatePreviewView: View {
     /// loads the next page into the same list, so the grid underneath grows too.
     @ObservedObject var pager: TemplatePager
     @State var initialScrollIndex: Int // Which item to start on
+    /// The template the ... menu's "Hide this template" was chosen for: the popup asks before it is hidden.
+    @State private var pendingHide: TemplateData?
     
     @Environment(\.presentationMode) var presentationMode
     
@@ -13,11 +15,32 @@ struct TemplatePreviewView: View {
         _initialScrollIndex = State(initialValue: initialScrollIndex)
     }
     
-    /// "Hide this template" in the page's ... menu: it leaves the list the preview came from (when that is the feed or the search) and
-    /// the preview closes. Settings > Hidden content shows it again.
+    /// "Hide this template" (the page's ... button): remembered at once, then the preview goes on to the next template (the previous one at
+    /// the end of the list; back to the list when it was the only one). The hidden page leaves the list once it is off screen, and the page
+    /// being looked at keeps its place. Settings > Hidden content shows the template again.
     private func hideTemplate(_ template: TemplateData) {
-        pager.hide(template)
-        presentationMode.wrappedValue.dismiss()
+        HiddenContent.shared.hide(template)
+        guard let index = pager.items.firstIndex(where: { $0.id == template.id }) else {
+            pager.dropHiddenFromList()
+            presentationMode.wrappedValue.dismiss()
+            return
+        }
+        let target: Int? = index + 1 < pager.items.count ? index + 1 : (index > 0 ? index - 1 : nil)
+        guard let target else {
+            pager.dropHiddenFromList()
+            presentationMode.wrappedValue.dismiss()           // the only one: nothing to go on to
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.3)) { initialScrollIndex = target }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            guard pager.items.indices.contains(initialScrollIndex) else { return }
+            let current = pager.items[initialScrollIndex].id
+            guard pager.dropHiddenFromList(), let moved = pager.items.firstIndex(where: { $0.id == current }) else { return }
+            // the list is shorter: the same template is now one place earlier (no animation: nothing should seem to move)
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { initialScrollIndex = moved }
+        }
     }
 
     var body: some View {
@@ -33,13 +56,14 @@ struct TemplatePreviewView: View {
                     // Vertical Paging using Rotated TabView
                     // Width and Height are swapped for the container
                     TabView(selection: $initialScrollIndex) {
-                        ForEach(Array(pager.items.enumerated()), id: \.offset) { index, template in
+                        // keyed by the template, not by its place: when a hidden template leaves the list the pages after it keep their own
+                        // video and timeline instead of inheriting those of the page that was removed
+                        ForEach(Array(pager.items.enumerated()), id: \.element.id) { index, template in
                             TemplatePreviewItemView(
                                 template: template,
                                 index: index,
                                 currentIndex: initialScrollIndex,
-                                onBecameActive: { pager.loadNextIfNeeded(afterIndex: index) },
-                                onHide: pager.source == .mine ? nil : { hideTemplate(template) }
+                                onBecameActive: { pager.loadNextIfNeeded(afterIndex: index) }
                             )
                             .background(ScrollEdgeEffectProbe()) // switches the paging scroll view's edge blur off
                             .tag(index)
@@ -59,6 +83,27 @@ struct TemplatePreviewView: View {
         .toolbar(.hidden, for: .navigationBar) // the bar's scroll-edge blur would be drawn down the rotated page's side
         .toolbar(.hidden, for: .tabBar) // Hide Tab Bar if present
         .edgesIgnoringSafeArea(.all)
+        .onDisappear { pager.dropHiddenFromList() }
+        // The ... menu sits here, over the pages, and not inside them: the pages are rotated 90 degrees for the vertical paging and a
+        // Menu inside a rotated view opens but cannot be tapped. It is at the same place as before (last of the column on the right).
+        .overlay(alignment: .bottomTrailing) {
+            if pager.source != .mine, pager.items.indices.contains(initialScrollIndex) {
+                Menu {
+                    Button(role: .destructive) {
+                        pendingHide = pager.items[initialScrollIndex]
+                    } label: { Label("Hide this template", systemImage: "eye.slash") }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 24))
+                        .foregroundColor(.white)
+                        .padding()
+                        .shadow(radius: 2)
+                }
+                .frame(width: 75)
+                .padding(.bottom, 80 + Constants.TEMPLATE_STRIP_BLOCK_HEIGHT)
+            }
+        }
+        .hideTemplateConfirmation($pendingHide) { hideTemplate($0) }
         .overlay(
             // Back Button (Top Left)
             Button(action: {
@@ -93,8 +138,6 @@ struct TemplatePreviewItemView: View {
     let currentIndex: Int
     /// This page came on screen (the parent loads the next page when it is near the end of the list).
     var onBecameActive: () -> Void = { }
-    /// "Hide this template" in the ... menu (nil: not offered).
-    var onHide: (() -> Void)? = nil
     
     /// Likes, bookmarks and counters: the newest numbers the app knows (grid, Profile lists and this page agree).
     @ObservedObject private var states = TemplateStateStore.shared
@@ -268,19 +311,13 @@ struct TemplatePreviewItemView: View {
                         toggleBookmark()
                     }
                     
-                    // Other/Menu: the same actions as the long-press menu on a template card ("Open" there is "Use template" here)
-                    Menu {
-                        Button(action: useTemplate) { Label("Use template", systemImage: "play.rectangle") }
-                        if let onHide {
-                            Button(role: .destructive, action: onHide) { Label("Hide this template", systemImage: "eye.slash") }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 24))
-                            .foregroundColor(.white)
-                            .padding()
-                            .shadow(radius: 2)
-                    }
+                    // Other: the ... menu is drawn by TemplatePreviewView, over the pages (a Menu inside this rotated page can't be tapped);
+                    // this stand-in only keeps the column's spacing.
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 24))
+                        .padding()
+                        .opacity(0)
+                        .allowsHitTesting(false)
                     .padding(.bottom, 80 + Constants.TEMPLATE_STRIP_BLOCK_HEIGHT)
                 }
                 .frame(width: 75)

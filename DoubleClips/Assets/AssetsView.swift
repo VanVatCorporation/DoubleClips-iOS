@@ -97,6 +97,7 @@ struct AssetsView: View {
     @ObservedObject private var hidden = HiddenContent.shared
     @State private var openAsset: CommunityAsset?       // "Open" in a card's long-press menu
     @State private var reportAsset: CommunityAsset?     // "Report" in the long-press menu
+    @State private var pendingHideOwner: String?        // "Hide assets from X" in the long-press menu: the popup asks first
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 12)]
 
@@ -133,6 +134,7 @@ struct AssetsView: View {
             .sheet(isPresented: $showPost) { PostAssetView(onPosted: { showPost = false; showMine = true }) }
             .sheet(isPresented: $showMine) { MyAssetsView() }
             .sheet(item: $reportAsset) { ReportAssetSheet(asset: $0) }
+            .hideAuthorConfirmation($pendingHideOwner) { hidden.hideAuthor($0) }
             .alert("Sign in to post assets", isPresented: $showSignIn) { Button("OK", role: .cancel) {} } message: {
                 Text("Sign in from the Profile tab to post assets, manage them and download.")
             }
@@ -175,7 +177,7 @@ struct AssetsView: View {
                         AssetCard(asset: asset,
                                   onOpen: { openAsset = asset },
                                   onReport: { reportAsset = asset },
-                                  onHideAuthor: { if let owner = asset.ownerName { hidden.hideAuthor(owner) } })
+                                  onHideAuthor: { pendingHideOwner = asset.ownerName })
                     }
                     .buttonStyle(.plain)
                     .task { await model.loadMoreIfNeeded(after: asset) }
@@ -390,5 +392,19 @@ struct AssetHoldPreview: View {
         }
         .frame(width: 320)
         .background(Color.mdSurface)
+    }
+}
+
+extension View {
+    /// "Hide assets from X?" popup (the same words as the detail screen) for the long-press menu on an asset card.
+    func hideAuthorConfirmation(_ owner: Binding<String?>, onConfirm: @escaping (String) -> Void) -> some View {
+        confirmationDialog("Hide assets from \(owner.wrappedValue ?? "")?",
+                           isPresented: Binding(get: { owner.wrappedValue != nil }, set: { if !$0 { owner.wrappedValue = nil } }),
+                           titleVisibility: .visible,
+                           presenting: owner.wrappedValue) { asked in
+            Button("Hide", role: .destructive) { onConfirm(asked) }
+        } message: { _ in
+            Text("Their assets won't show in the Assets tab on this phone.")
+        }
     }
 }

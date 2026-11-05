@@ -8,6 +8,8 @@ struct TemplateView: View {
     @ObservedObject private var hints = TemplateSearchHints.shared
     
     @State private var navigationPath = NavigationPath()
+    /// The template the long-press "Hide this template" was chosen for: the popup asks before it is hidden.
+    @State private var pendingHide: TemplateData?
     
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -40,7 +42,7 @@ struct TemplateView: View {
                                         isLoading: pager.isLoading,
                                         emptyText: pager.didStart ? L("No templates found") : nil,
                                         onSelect: { navigationPath.append($0) },
-                                        onHide: { pager.hide($0) },
+                                        onHide: { pendingHide = $0 },
                                         onAppearItem: { pager.loadNextIfNeeded(near: $0) })
                         .refreshable { await pager.restart() }   // a new feed session
                 }
@@ -64,6 +66,7 @@ struct TemplateView: View {
                     TemplatePreviewView(pager: pager, initialScrollIndex: index)
                 }
             }
+            .hideTemplateConfirmation($pendingHide) { pager.hide($0) }
         }
     }
 }

@@ -130,3 +130,22 @@ private struct StatItem: View {
         }
     }
 }
+
+// MARK: - The popup asked before a template is hidden
+
+extension View {
+    /// "Hide this template?" with the same words wherever a template can be hidden (the long-press menu on the Templates tab and in the
+    /// search, and the ... menu in the preview). Set `template` to ask; `onConfirm` gets the template that was asked about.
+    func hideTemplateConfirmation(_ template: Binding<TemplateData?>, onConfirm: @escaping (TemplateData) -> Void) -> some View {
+        confirmationDialog("Hide this template?",
+                           isPresented: Binding(get: { template.wrappedValue != nil },
+                                                set: { if !$0 { template.wrappedValue = nil } }),
+                           titleVisibility: .visible,
+                           presenting: template.wrappedValue) { asked in
+            Button("Hide this template", role: .destructive) { onConfirm(asked) }
+            Button("Cancel", role: .cancel) { }
+        } message: { _ in
+            Text("It will leave the Templates tab and the search. You can show it again in Settings > Hidden content.")
+        }
+    }
+}

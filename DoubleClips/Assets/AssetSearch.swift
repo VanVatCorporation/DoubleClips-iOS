@@ -24,6 +24,7 @@ struct AssetSearchView: View {
     @ObservedObject private var hidden = HiddenContent.shared
     @State private var openAsset: CommunityAsset?       // "Open" in a card's long-press menu
     @State private var reportAsset: CommunityAsset?     // "Report" in the long-press menu
+    @State private var pendingHideOwner: String?        // "Hide assets from X" in the long-press menu: the popup asks first
 
     @State private var text = ""
     @State private var phase: Phase = .input
@@ -235,7 +236,7 @@ struct AssetSearchView: View {
                                 AssetCard(asset: asset,
                                           onOpen: { openAsset = asset },
                                           onReport: { reportAsset = asset },
-                                          onHideAuthor: { if let owner = asset.ownerName { hidden.hideAuthor(owner) } })
+                                          onHideAuthor: { pendingHideOwner = asset.ownerName })
                             }
                             .buttonStyle(.plain)
                             .task { await results.loadMoreIfNeeded(after: asset) }
@@ -252,6 +253,7 @@ struct AssetSearchView: View {
             AssetDetailView(asset: asset, target: target, onBlocked: { blockedVersion += 1 })
         }
         .sheet(item: $reportAsset) { ReportAssetSheet(asset: $0) }
+        .hideAuthorConfirmation($pendingHideOwner) { hidden.hideAuthor($0) }
     }
 
     // MARK: actions

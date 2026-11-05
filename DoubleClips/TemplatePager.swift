@@ -44,6 +44,16 @@ final class TemplatePager: ObservableObject {
         }
     }
 
+    /// Takes the templates that were hidden out of this list (a discovery list only). The preview does it once it has scrolled away
+    /// from the one that was hidden. Returns true when something was taken out.
+    @discardableResult
+    func dropHiddenFromList() -> Bool {
+        guard hidesTemplates else { return false }
+        let before = items.count
+        items.removeAll { HiddenContent.shared.isHidden(templateId: $0.templateId) }
+        return items.count != before
+    }
+
     /// "Hide this template": remembered on this phone, and gone from this list at once when this list is a discovery list.
     func hide(_ template: TemplateData) {
         HiddenContent.shared.hide(template)
