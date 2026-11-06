@@ -1,5 +1,14 @@
 import SwiftUI
 
+/// Where the page's ... stand-in is, in the page's own coordinates (the active page reports it). TemplatePreviewView draws the real ...
+/// menu there, outside the rotated pages.
+private struct MoreButtonFrameKey: PreferenceKey {
+    static var defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) { value = nextValue() ?? value }
+}
+
+private let templatePageSpace = "templatePage"
+
 struct TemplatePreviewView: View {
     /// The list the user came from (feed / search / liked / saved). Shared with that screen: swiping near the end
     /// loads the next page into the same list, so the grid underneath grows too.
@@ -7,6 +16,8 @@ struct TemplatePreviewView: View {
     @State var initialScrollIndex: Int // Which item to start on
     /// The template the ... menu's "Hide this template" was chosen for: the popup asks before it is hidden.
     @State private var pendingHide: TemplateData?
+    /// Where the active page's ... stand-in is (see MoreButtonFrameKey): the menu is drawn exactly there.
+    @State private var moreButtonFrame: CGRect?
     
     @Environment(\.presentationMode) var presentationMode
     
@@ -84,23 +95,32 @@ struct TemplatePreviewView: View {
         .toolbar(.hidden, for: .tabBar) // Hide Tab Bar if present
         .edgesIgnoringSafeArea(.all)
         .onDisappear { pager.dropHiddenFromList() }
+        .onPreferenceChange(MoreButtonFrameKey.self) { moreButtonFrame = $0 }
         // The ... menu sits here, over the pages, and not inside them: the pages are rotated 90 degrees for the vertical paging and a
-        // Menu inside a rotated view opens but cannot be tapped. It is at the same place as before (last of the column on the right).
-        .overlay(alignment: .bottomTrailing) {
+        // Menu inside a rotated view opens but cannot be tapped. It is drawn exactly where the page's invisible stand-in is (so it
+        // is where the button always was); until the page has reported that, at the place it normally is.
+        .overlay {
             if pager.source != .mine, pager.items.indices.contains(initialScrollIndex) {
-                Menu {
-                    Button(role: .destructive) {
-                        pendingHide = pager.items[initialScrollIndex]
-                    } label: { Label("Hide this template", systemImage: "eye.slash") }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 24))
-                        .foregroundColor(.white)
-                        .padding()
-                        .shadow(radius: 2)
+                GeometryReader { screen in
+                    let reported = moreButtonFrame.flatMap { $0.width > 0 && $0.height > 0 ? $0 : nil }
+                    let size = reported?.size ?? CGSize(width: 75, height: 61)
+                    let center = reported.map { CGPoint(x: $0.midX, y: $0.midY) }
+                        ?? CGPoint(x: screen.size.width - 37.5 - 3,
+                                   y: screen.size.height - (80 + Constants.TEMPLATE_STRIP_BLOCK_HEIGHT) - size.height / 2)
+                    Menu {
+                        Button(role: .destructive) {
+                            pendingHide = pager.items[initialScrollIndex]
+                        } label: { Label("Hide this template", systemImage: "eye.slash") }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 24))
+                            .foregroundColor(.white)
+                            .shadow(radius: 2)
+                            .frame(width: size.width, height: size.height)
+                    }
+                    .position(x: center.x, y: center.y)
                 }
-                .frame(width: 75)
-                .padding(.bottom, 80 + Constants.TEMPLATE_STRIP_BLOCK_HEIGHT)
+                .ignoresSafeArea()      // the whole screen, like the pages: the bottom safe area must not push the menu up
             }
         }
         .hideTemplateConfirmation($pendingHide) { hideTemplate($0) }
@@ -318,6 +338,10 @@ struct TemplatePreviewItemView: View {
                         .padding()
                         .opacity(0)
                         .allowsHitTesting(false)
+                        .background(GeometryReader { place in
+                            Color.clear.preference(key: MoreButtonFrameKey.self,
+                                                   value: isActive ? place.frame(in: .named(templatePageSpace)) : nil)
+                        })
                     .padding(.bottom, 80 + Constants.TEMPLATE_STRIP_BLOCK_HEIGHT)
                 }
                 .frame(width: 75)
@@ -380,6 +404,7 @@ struct TemplatePreviewItemView: View {
                 legacyInfo = TemplateTimelineInfo.legacy(template, duration: seconds)
             }
         }
+        .coordinateSpace(name: templatePageSpace)
         .alert("This template is old", isPresented: $showOldTemplate) {
             Button("OK", role: .cancel) { }
         } message: {
