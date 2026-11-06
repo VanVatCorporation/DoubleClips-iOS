@@ -23,9 +23,11 @@ import ImageIO
 enum MediaKind: String {
     case video, image, audio, other
     
-    static let videoExtensions: Set<String> = ["mp4", "mov", "m4v", "3gp", "3g2", "mkv", "webm", "avi"]
+    static let videoExtensions: Set<String> = ["mp4", "mov", "m4v", "3gp", "3g2", "mkv", "webm", "avi",
+                                               "flv", "wmv", "asf", "ogv", "divx", "mpg", "mpeg", "vob", "ts", "m2ts", "mts", "mxf"]
     static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "heif", "gif", "webp", "bmp", "tif", "tiff"]
-    static let audioExtensions: Set<String> = ["mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "ogg", "opus"]
+    static let audioExtensions: Set<String> = ["mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "ogg", "opus",
+                                               "oga", "wma", "mka", "ape", "wv", "dts"]
     
     init(pathExtension: String) {
         let ext = pathExtension.lowercased()
@@ -78,7 +80,7 @@ enum MediaProbe {
             return MediaInfo(kind: .image, duration: 3, width: size.width, height: size.height, hasAudio: false)
         }
         
-        let asset = AVURLAsset(url: url)
+        let asset = AVURLAsset(url: MediaCompat.playableURL(url))      // a converted copy for .mkv / .avi ...
         var duration: Float = 3
         var width = 0, height = 0
         var hasVideo = false, hasAudio = false
@@ -178,7 +180,7 @@ enum ProjectLibrary {
             let values = try? url.resourceValues(forKeys: Set(keys))
             if values?.isDirectory == true { continue }
             let kind = MediaKind(url: url)
-            guard kind != .other else { continue }
+            guard kind != .other, !MediaCompat.isConvertedCopy(url.lastPathComponent) else { continue }      // the copies are caches
             items.append(ProjectFileItem(name: url.lastPathComponent, url: url, kind: kind,
                                          bytes: Int64(values?.fileSize ?? 0),
                                          modified: values?.contentModificationDate ?? .distantPast,

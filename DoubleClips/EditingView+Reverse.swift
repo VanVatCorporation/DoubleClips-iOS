@@ -563,7 +563,7 @@ extension EditingView {
         private func startJob(source: String, name: String, userInitiated: Bool) {
             guard let context, let folder else { return }
             let tracker = ProcessingTracker.shared
-            let sourceURL = folder.appendingPathComponent(source)
+            let sourceURL = MediaCompat.playableURL(folder.appendingPathComponent(source))      // an .mkv is reversed from its converted copy
             let finalURL = folder.appendingPathComponent(name)
             let partialURL = folder.appendingPathComponent(name + ".partial")
             let job = tracker.begin(source: source, feature: Self.feature)
@@ -710,7 +710,10 @@ extension EditingView {
 extension EditingView.Clip {
     /// The label a timeline clip shows: its name, or "Applying Reverse... 52.6%" while a feature is being processed.
     var timelineLabel: String {
-        if isReverse, let job = ProcessingTracker.shared.job(source: clipName) { return "\(L("Applying")) \(L(job.feature))… \(job.percentText)" }
+        if let job = ProcessingTracker.shared.job(source: clipName) {
+            if job.feature == ConvertManager.feature { return "\(L("Converting"))… \(job.percentText)" }
+            if isReverse { return "\(L("Applying")) \(L(job.feature))… \(job.percentText)" }
+        }
         return clipName
     }
 }

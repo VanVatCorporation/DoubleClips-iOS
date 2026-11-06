@@ -46,9 +46,10 @@ extension EditingView.Clip {
     
     /// Clip.getAbsolutePath(projectPath): media always lives in <project>/Clips/<clipName>.
     func mediaURL(projectPath: String) -> URL {
-        URL(fileURLWithPath: projectPath)
+        // A format iOS can't open (.mkv, .avi ...) is played from its converted copy once it exists (MediaCompat / ConvertManager).
+        MediaCompat.playableURL(URL(fileURLWithPath: projectPath)
             .appendingPathComponent(Constants.DEFAULT_CLIP_DIRECTORY)
-            .appendingPathComponent(clipName)
+            .appendingPathComponent(clipName))
     }
 }
 

@@ -61,8 +61,6 @@ struct EditingView: View {
     @State private var showExport = false
     /// Project settings panel (Android: settingsButton) — see EditingView+ProjectSettings.swift.
     @State private var showProjectSettings = false
-    /// The Assets browser (community assets), opened from the default toolbar next to Files.
-    @State private var showAssets = false
     /// Android: keepPlayingWhenClipSelected. Off = playing with a clip selected plays only that clip.
     @AppStorage(Constants.PREF_KEEP_PLAYING_SELECTION_KEY) private var keepPlayingWithSelection = false
     
@@ -523,8 +521,7 @@ struct EditingView: View {
                                     DefaultToolbarView(
                                         onAddTrack: { addTrack() },
                                         onSplit: { splitAtPlayhead() },
-                                        onFiles: { openProjectFiles() },
-                                        onAssets: { openAssets() }
+                                        onFiles: { openProjectFiles() }
                                     )
                                 case .clip:
                                     ClipToolbarView(
@@ -651,6 +648,8 @@ struct EditingView: View {
                 ReverseManager.shared.configure(projectPath: project.projectPath, timeline: timeline, commandManager: commandManager,
                                                 onChanged: { rebuildPreview() })
                 ReverseManager.shared.syncAll()      // flagged clips without their reversed copy get it made
+                ConvertManager.shared.configure(projectPath: project.projectPath, timeline: timeline, onChanged: { rebuildPreview() })
+                ConvertManager.shared.syncAll()      // .mkv / .avi ... clips without their playable copy get it made
             }
             if hasLoadedProject, !timeline.tracks.isEmpty, !isPreview { rebuildPreview(markDirty: false) }   // the Home preview has no canvas
         }
@@ -681,9 +680,6 @@ struct EditingView: View {
         }) {
             ExportSheetView(project: project, timeline: timeline)
         }
-        .sheet(isPresented: $showAssets) {
-            AssetsView(target: project, onClose: { showAssets = false })
-        }
         .sheet(isPresented: $showProjectSettings) {
             ProjectSettingsSheet(initial: engine.settings, engine: engine) { edited in
                 applyProjectSettings(edited)
@@ -698,7 +694,7 @@ struct EditingView: View {
         }
         .fileImporter(
             isPresented: $showFileImporter,
-            allowedContentTypes: [.audiovisualContent, .image],
+            allowedContentTypes: MediaCompat.importTypes,
             allowsMultipleSelection: true
         ) { result in
             handleFileImport(result)
@@ -1034,13 +1030,6 @@ struct EditingView: View {
         withAnimation { activeOverlay = .transition }
     }
     
-    /// Toolbar "Assets": the community assets browser. Getting a video, image, audio or font adds it straight to this project's files
-    /// (Files panel); effects and animation packs are installed in the app (Assets/).
-    private func openAssets() {
-        engine.pause()
-        showAssets = true
-    }
-    
     /// Toolbar "Files": the project's media library (EditingView+ProjectFiles.swift).
     private func openProjectFiles() {
         engine.pause()
@@ -1325,6 +1314,8 @@ struct EditingView: View {
                         continue
                     }
                     let targetUrl = ProjectLibrary.clipsDirectory(project.projectPath).appendingPathComponent(filename)
+                    // .mkv / .avi ...: wait for the playable copy (it has the duration), or skip a file that can't be converted
+                    if MediaCompat.needsConversion(filename), !(await ConvertManager.shared.convertAndWait(source: filename)) { continue }
                     let info = await MediaProbe.probe(targetUrl)
                     let hasAudio = info.hasAudio
                     let trackWidth = info.width
@@ -1900,14 +1891,12 @@ private struct DefaultToolbarView: View {
     var onAddTrack: () -> Void = {}
     var onSplit: () -> Void = {}
     var onFiles: () -> Void = {}
-    var onAssets: () -> Void = {}
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 ToolbarButton(icon: "rectangle.stack.badge.plus", label: "Add Track") { onAddTrack() }
                 ToolbarButton(icon: "scissors", label: "Cut") { onSplit() }
                 ToolbarButton(icon: "folder", label: "Files") { onFiles() }
-                ToolbarButton(icon: "square.grid.2x2", label: "Assets") { onAssets() }
                 ToolbarButton(icon: "square.and.arrow.down", label: "Import") {}
             }
             .padding(.horizontal, 4)

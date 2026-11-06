@@ -717,20 +717,8 @@
 "An effect with this id already exists." = "Đã có hiệu ứng với mã này.";
 "This kind is installed in the app, not added to a project." = "Loại này được cài vào ứng dụng, không thêm vào dự án.";
 
-/* Assets search + editor */
-"Search assets..." = "Tìm tài nguyên...";
-"No assets found" = "Không tìm thấy tài nguyên";
-"Add to this project" = "Thêm vào dự án này";
-"Stop" = "Dừng";
-"Hide this template" = "Ẩn mẫu này";
-"Hidden content" = "Nội dung đã ẩn";
-"Asset authors and templates you hid. They stay hidden on this phone only; show them again here." = "Tác giả tài nguyên và mẫu bạn đã ẩn. Chúng chỉ bị ẩn trên điện thoại này; hãy hiện lại chúng tại đây.";
-"What you hid stays hidden on this phone only. Show it again here." = "Những gì bạn đã ẩn chỉ bị ẩn trên điện thoại này. Hãy hiện lại chúng tại đây.";
-"Asset authors" = "Tác giả tài nguyên";
-"Templates" = "Mẫu";
-"No hidden asset authors." = "Không có tác giả tài nguyên nào bị ẩn.";
-"No hidden templates." = "Không có mẫu nào bị ẩn.";
-"Show all" = "Hiện tất cả";
-"Show again" = "Hiện lại";
-"Hide this template?" = "Ẩn mẫu này?";
-"It will leave the Templates tab and the search. You can show it again in Settings > Hidden content." = "Mẫu sẽ biến mất khỏi tab Mẫu và kết quả tìm kiếm. Bạn có thể hiện lại trong Cài đặt > Nội dung đã ẩn.";
+/* Format conversion */
+"Converting" = "Đang chuyển đổi";
+"Convert" = "Chuyển đổi định dạng";
+"FFmpeg isn't installed in this build, so this format can't be converted yet." = "Bản dựng này chưa cài FFmpeg nên chưa chuyển đổi được định dạng này.";
+"This file can't be read." = "Không đọc được tệp này.";

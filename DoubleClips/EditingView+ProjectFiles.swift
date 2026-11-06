@@ -66,7 +66,7 @@ final class ProjectFilesModel: ObservableObject {
     @MainActor private func loadDurations() async {
         for item in items where (item.kind == .video || item.kind == .audio) && item.duration == nil {
             if Task.isCancelled { return }
-            let asset = AVURLAsset(url: item.url)
+            let asset = AVURLAsset(url: MediaCompat.playableURL(item.url))
             guard let time = try? await asset.load(.duration), time.seconds.isFinite, time.seconds > 0 else { continue }
             durations[ProjectFilesModel.key(item)] = time.seconds
             if let index = items.firstIndex(where: { $0.id == item.id }) {
@@ -199,7 +199,7 @@ extension EditingView {
             // sheet / alert / dialog per view.
             .background(Color.clear.fileImporter(
                 isPresented: $showPicker,
-                allowedContentTypes: [.audiovisualContent, .image],
+                allowedContentTypes: MediaCompat.importTypes,
                 allowsMultipleSelection: isLibraryPicker
             ) { result in handlePicked(result) })
             .background(Color.clear.sheet(isPresented: $showSolidSheet) {
@@ -623,9 +623,10 @@ extension EditingView {
                     let scoped = url.startAccessingSecurityScopedResource()
                     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                     do {
-                        _ = try await Task.detached(priority: .userInitiated) {
+                        let name = try await Task.detached(priority: .userInitiated) {
                             try ProjectLibrary.copyIn(url, projectPath: path)
                         }.value
+                        if MediaCompat.needsConversion(name) { ConvertManager.shared.ensure(source: name) }     // .mkv / .avi ...: made playable
                         imported += 1
                     } catch {
                         failure = error.localizedDescription
