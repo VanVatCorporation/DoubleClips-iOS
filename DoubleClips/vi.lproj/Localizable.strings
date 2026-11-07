@@ -722,3 +722,22 @@
 "Convert" = "Chuyển đổi định dạng";
 "FFmpeg isn't installed in this build, so this format can't be converted yet." = "Bản dựng này chưa cài FFmpeg nên chưa chuyển đổi được định dạng này.";
 "This file can't be read." = "Không đọc được tệp này.";
+
+/* Open-source licences */
+"Open-source licences" = "Giấy phép mã nguồn mở";
+"DoubleClips is built with the open-source software listed here. Tap one for its licence and where to get its source code." = "DoubleClips được xây dựng bằng các phần mềm mã nguồn mở được liệt kê tại đây. Chạm vào một mục để xem giấy phép và nơi lấy mã nguồn.";
+"Used for" = "Dùng để";
+"Licence" = "Giấy phép";
+"Links" = "Liên kết";
+"Show the licence text" = "Hiện nội dung giấy phép";
+"Hide the licence text" = "Ẩn nội dung giấy phép";
+"The full text isn't bundled with this build. Use the licence link above." = "Bản dựng này chưa kèm toàn văn giấy phép. Hãy dùng liên kết giấy phép ở trên.";
+"Converting video and audio formats iOS can't open (MKV, AVI, WebM, FLV, WMV, Opus, ...) into MP4 / M4A." = "Chuyển các định dạng video và âm thanh mà iOS không mở được (MKV, AVI, WebM, FLV, WMV, Opus, ...) sang MP4 / M4A.";
+"Website" = "Trang web";
+"Source code" = "Mã nguồn";
+"Licence text" = "Nội dung giấy phép";
+"Source code of the version used (FFmpeg 6.0 as patched by ffmpeg-kit)" = "Mã nguồn của phiên bản đang dùng (FFmpeg 6.0 đã được ffmpeg-kit vá)";
+"Built without any GPL or non-free component. FFmpeg is linked as separate dynamic frameworks (libavcodec, libavformat, libavutil, libavfilter, libavdevice, libswresample, libswscale): you may replace them with your own build of the same sources, which the app then uses." = "Được dựng không có thành phần GPL hay không tự do nào. FFmpeg được liên kết dưới dạng các framework động riêng (libavcodec, libavformat, libavutil, libavfilter, libavdevice, libswresample, libswscale): bạn có thể thay bằng bản dựng của riêng mình từ cùng mã nguồn, ứng dụng sẽ dùng bản đó.";
+"The wrapper that runs FFmpeg inside the app (version 6.0)." = "Lớp bao chạy FFmpeg bên trong ứng dụng (phiên bản 6.0).";
+"The project is retired by its authors; the app uses a build made from the v6.0 sources." = "Dự án đã được tác giả ngừng phát triển; ứng dụng dùng bản dựng từ mã nguồn v6.0.";
+"Decoding AV1 video (through FFmpeg)." = "Giải mã video AV1 (qua FFmpeg).";

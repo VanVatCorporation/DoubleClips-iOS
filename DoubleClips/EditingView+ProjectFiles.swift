@@ -754,7 +754,7 @@ struct ProjectFileThumbnail: View {
             .clipped()
             .task(id: "\(item.name)|\(item.bytes)|\(item.modified.timeIntervalSince1970)") {
                 guard item.kind != .audio else { return }
-                image = await ClipMediaCache.shared.thumbnail(url: item.url, isVideo: item.kind == .video, time: 0)
+                image = await ClipMediaCache.shared.thumbnail(url: MediaCompat.playableURL(item.url), isVideo: item.kind == .video, time: 0)   // a converted copy for .mkv / .avi ...
             }
     }
 }

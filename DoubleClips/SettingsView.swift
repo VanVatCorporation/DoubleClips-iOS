@@ -82,6 +82,7 @@ struct SettingsView: View {
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0")
                         .foregroundColor(.secondary)
                 }
+                NavigationLink { OpenSourceLicensesView() } label: { Text("Open-source licences") }
             }
         }
         .navigationTitle("Settings")
