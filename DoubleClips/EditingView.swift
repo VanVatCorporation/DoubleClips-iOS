@@ -818,6 +818,8 @@ struct EditingView: View {
     /// state — called after every structural edit (move/split/delete/clone/undo/redo),
     /// since none of those otherwise touch the player.
     private func rebuildPreview(markDirty: Bool = true) {
+        // Every structural edit comes through here (like Android's reassignClips): keep the clips' edges on whole frames.
+        timeline.snapClipsToFrames(frameRate: projectFrameRate)
         engine.rebuildComposition(from: timeline, projectDir: URL(fileURLWithPath: project.projectPath))
         if markDirty { scheduleAutosave() }
     }

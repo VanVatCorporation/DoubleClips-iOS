@@ -112,6 +112,16 @@ extension EditingView.Clip {
         endClipTrim = s.endTrim
     }
     
+    /// Puts both edges of the clip on whole frames (see `ClipTrimMath.snapToFrames`). Returns whether anything changed.
+    @discardableResult
+    func snapToFrames(frameRate: Int) -> Bool {
+        let before = trimState
+        let after = EditingView.ClipTrimMath.snapToFrames(before, frameRate: frameRate, sourceLimited: isSourceLimited, map: timeMap)
+        guard after != before else { return false }
+        apply(trim: after)
+        return true
+    }
+    
     /// Video / audio with a known source length: their edges stop at the ends of the file.
     var isSourceLimited: Bool {
         (type == .video || type == .audio) && originalDuration > 0

@@ -41,6 +41,20 @@ extension EditingView.Timeline {
         self.duration = maxEnd
     }
     
+    /// Every clip's start and end on whole frames (Android: `Track.reassignClips`, which snaps the start and, like Desktop's
+    /// `ClipEndSnap`, the end). Clips whose length isn't a whole number of frames (a freshly imported video, say) otherwise end
+    /// between two frames and leave a hairline gap before the next clip. Idempotent. Returns whether anything changed.
+    @discardableResult
+    func snapClipsToFrames(frameRate: Int) -> Bool {
+        guard frameRate > 0 else { return false }
+        var changed = false
+        for track in tracks {
+            for clip in track.clips where clip.snapToFrames(frameRate: frameRate) { changed = true }
+        }
+        if changed { recalculateDuration() }
+        return changed
+    }
+    
     /// Equivalent of Android's `Timeline.getClipsAtCurrentTime(currentTime)` — every clip,
     /// across all tracks, whose range strictly contains `time`. Used by both the default
     /// and track toolbars' Split button to split "whatever's under the playhead".
