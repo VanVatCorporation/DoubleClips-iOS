@@ -66,6 +66,37 @@ extension EditingView {
             }
             return out
         }
+        
+        /// Both edges of the clip on whole frames, applied when a handle drag ends (Android: `Clip.snapToFrames`, Desktop: `ClipEndSnap`).
+        /// The start goes to the nearest frame; the END (start + duration) goes to the nearest frame, keeping that start, and for video /
+        /// audio the end trim follows in SOURCE seconds - never past the end of the file (then the frame before is used). Without this a
+        /// clip trimmed by a handle ended between two frames and left a hairline gap before the next clip.
+        static func snapToFrames(_ s: ClipTrimState, frameRate: Int, sourceLimited: Bool, map: EditingView.ClipTimeMap) -> ClipTrimState {
+            guard frameRate > 0 else { return s }
+            let fps = Double(frameRate)
+            let frame = 1.0 / fps
+            var out = s
+            out.startTime = Float(Swift.max(0, (Double(s.startTime) * fps).rounded() / fps))
+            
+            let start = Double(out.startTime)
+            let end = start + Double(s.duration)
+            var newDuration = Swift.max(frame, (end * fps).rounded() / fps - start)
+            if abs(newDuration - Double(s.duration)) < 1e-6 { return out }
+            
+            if sourceLimited {
+                let used = map.sourceOffset(atLocal: Double(s.duration))
+                var endTrim = Double(s.endTrim) - (map.sourceOffset(atLocal: newDuration) - used)
+                if endTrim < -1e-4 {
+                    // Not enough footage left to reach the next frame: use the frame before instead.
+                    newDuration = Swift.max(frame, (end * fps + 1e-4).rounded(.down) / fps - start)
+                    if abs(newDuration - Double(s.duration)) < 1e-6 { return out }
+                    endTrim = Double(s.endTrim) - (map.sourceOffset(atLocal: newDuration) - used)
+                }
+                out.endTrim = Float(Swift.max(0, endTrim))
+            }
+            out.duration = Float(newDuration)
+            return out
+        }
     }
 }
 

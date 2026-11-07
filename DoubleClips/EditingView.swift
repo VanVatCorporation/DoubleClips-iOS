@@ -425,6 +425,7 @@ struct EditingView: View {
                                                                             scrollOffset: timelineScrollOffset,
                                                                             viewportWidth: geo.size.width - Constants.TRACK_LABEL_WIDTH,
                                                                             centerOffset: centerOffset),
+                                                    frameRate: projectFrameRate,
                                                     onClipTap: { clip in selectingClip(clip) },
                                                     onTap: { selectingTrack(track) },
                                                     onClipMoved: { rebuildPreview() },
@@ -662,7 +663,8 @@ struct EditingView: View {
         // ruler advanced and the clips stood still. Feed the playhead into the scroll offset
         // (same formula as scrubbing, inverted: offset = time * pixelsPerSecond).
         .onChange(of: engine.currentTime) { time in
-            guard engine.isPlaying else { return }
+            // While playing, and once when a stop moved the playhead onto a frame (see `settleOnFrame`).
+            guard engine.isPlaying || engine.consumeScrollSync() else { return }
             timelineScrollOffset = CGFloat(time) * (pixelsPerSecond * pinchScale)
         }
         .onChange(of: scenePhase) { phase in
@@ -1557,6 +1559,8 @@ private struct TrackRowView: View {
     var draggingClipID: UUID? = nil
     /// Project path + scroll window: lets each block build only the thumbnails/bars on screen.
     var media: ClipMediaContext = .empty
+    /// Project frame rate: a trim handle drag ends on whole frames. 0 = no snapping.
+    var frameRate: Int = 0
     
     var onClipTap: (EditingView.Clip) -> Void
     var onTap: () -> Void
@@ -1590,6 +1594,7 @@ private struct TrackRowView: View {
                     isMultiSelected: selectedClipIDs.contains(clip.id),
                     isGhostSource: draggingClipID == clip.id,
                     media: media,
+                    frameRate: frameRate,
                     pps: pps,
                     currentTime: currentTime,
                     trackRowHeight: trackRowHeight,
@@ -1641,6 +1646,8 @@ private struct ClipBlockView: View {
     /// True while this clip's ghost is being dragged: the block stays in layout but is invisible.
     var isGhostSource: Bool = false
     var media: ClipMediaContext = .empty
+    /// Project frame rate: a trim handle drag ends on whole frames. 0 = no snapping.
+    var frameRate: Int = 0
     var pps: CGFloat
     var currentTime: Float
     var trackRowHeight: CGFloat = Constants.TRACK_HEIGHT
@@ -1720,6 +1727,11 @@ private struct ClipBlockView: View {
                 let base = trimBase
                 trimBase = nil
                 trimMap = nil
+                // The handle moves freely while dragging; on release both edges settle on whole frames.
+                if base != nil, frameRate > 0 {
+                    clip.apply(trim: EditingView.ClipTrimMath.snapToFrames(
+                        clip.trimState, frameRate: frameRate, sourceLimited: clip.isSourceLimited, map: clip.timeMap))
+                }
                 if let base, let onTrimmed, clip.trimState != base {
                     onTrimmed(clip, base, clip.trimState)
                 } else {

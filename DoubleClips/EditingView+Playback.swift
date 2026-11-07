@@ -62,6 +62,7 @@ extension EditingView {
         func togglePlayPause(window: ClosedRange<Double>? = nil) {
             if player.timeControlStatus == .playing {
                 pause()
+                settleOnFrame()          // playback runs smoothly between frames; a stopped playhead sits on one
             } else {
                 startPlayback(window: window)
             }
@@ -152,6 +153,8 @@ extension EditingView {
         private var isSeekInProgress = false
         
         func scrub(to seconds: Double) {
+            // A scrub lands on a whole frame (the scroll offset is points, which can't say which frame it means at most zooms).
+            let seconds = nearestFrame(seconds)
             currentTime = seconds                  // ruler / readout follow the finger immediately
             let target = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
             guard !chaseTime.isValid || CMTimeCompare(target, chaseTime) != 0 else { return }
@@ -195,6 +198,40 @@ extension EditingView {
             pause()
             scrubAudio.shutdown()
             AudioSessionController.deactivate()
+        }
+        
+        // MARK: Frame snapping (Android: nearestFrameTime / floorToFrameTime + snapPlayheadTo)
+        
+        /// The time of the NEAREST frame (what a scrub lands on). Unchanged when the frame rate is unknown.
+        private func nearestFrame(_ seconds: Double) -> Double {
+            let fps = Double(settings.frameRate)
+            guard fps > 0 else { return seconds }
+            return max(0, (seconds * fps).rounded() / fps)
+        }
+        
+        /// Set when the playhead was moved by `settleOnFrame`, so the timeline follows it once (the timeline normally only
+        /// follows `currentTime` while playing; while scrubbing it is the other way round).
+        private var scrollSyncPending = false
+        func consumeScrollSync() -> Bool {
+            defer { scrollSyncPending = false }
+            return scrollSyncPending
+        }
+        
+        /// The clock runs between frames: a playhead that stops sits on the frame that was showing (floor), and the preview shows
+        /// exactly that frame. Playback itself is not snapped. The end of the timeline stays where it is.
+        func settleOnFrame() {
+            let fps = Double(settings.frameRate)
+            guard fps > 0, !isPlaying, let item = player.currentItem else { return }
+            let now = player.currentTime()
+            let seconds = now.isValid ? now.seconds : currentTime
+            let end = item.duration
+            if end.isValid, end.isNumeric, seconds >= end.seconds - 1e-3 { return }
+            let frameTime = max(0, (seconds * fps + 1e-4).rounded(.down) / fps)
+            guard abs(frameTime - currentTime) > 1e-6 else { return }
+            scrollSyncPending = true
+            currentTime = frameTime
+            chaseTime = .invalid
+            player.seek(to: CMTime(seconds: frameTime, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         }
         
         /// Explicit stop, distinct from the toggle above — this is what timeline
