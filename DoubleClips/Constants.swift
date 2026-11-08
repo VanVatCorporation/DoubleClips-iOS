@@ -93,7 +93,8 @@ enum Constants {
     // MARK: - Project share (ZIP export)
     /// Folder (inside the temporary directory) that holds finished project ZIPs until shared.
     static let SHARE_TEMP_DIRECTORY         = "DoubleClips-Share"
-    /// Leave `Clips/Temp` (the frame cache) out of the ZIP. Android's own export wipes it anyway.
+    /// Leave the regenerable folders out of the ZIP: `Clips/Temp` (the frame cache; Android's own export wipes it anyway) and
+    /// `PreviewClips` (preview proxies / sound / compatibility copies, made again from the originals when an Android project is entered).
     static let PROJECT_ZIP_EXCLUDE_TEMP     = true
     /// Already-compressed formats: stored as is, since deflating them gains nothing and costs time.
     static let PROJECT_ZIP_STORED_EXTENSIONS: Set<String> = [

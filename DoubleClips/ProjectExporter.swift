@@ -16,8 +16,10 @@ import Combine
 // Files, Messages, other apps).
 //
 // Differences from Android/desktop, on purpose:
-//   - `Clips/Temp` (the frame cache) is left out — Android's own export wipes that folder, and it
-//     only holds regenerable data (Constants.PROJECT_ZIP_EXCLUDE_TEMP to include it).
+//   - `Clips/Temp` (the frame cache) and `PreviewClips` (Android / Desktop's preview proxies, preview
+//     audio and compatibility copies) are left out: both only hold data made again from the originals
+//     (Android does that every time a project is entered), so they would just make the ZIP bigger
+//     (Constants.PROJECT_ZIP_EXCLUDE_TEMP to include them).
 //   - Already-compressed media is STORED instead of deflated (faster, no size gain from deflate).
 //   - Free space is checked up front; cancel and every failure delete the half-written ZIP.
 //   - The finished ZIP's directory is read back with ZipArchiveReader as a sanity check.
@@ -138,7 +140,8 @@ enum ProjectExporter {
         } catch {
             throw ZipError.io("Couldn't read the project folder: \(error.localizedDescription)")
         }
-        let excluded = Constants.DEFAULT_CLIP_TEMP_DIRECTORY.split(separator: "/").map(String.init)
+        let excluded: [[String]] = [Constants.DEFAULT_CLIP_TEMP_DIRECTORY, Constants.DEFAULT_PREVIEW_CLIP_DIRECTORY]
+            .map { $0.split(separator: "/").map(String.init) }
         
         for item in items.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             if cancellation.isCancelled { throw ZipError.cancelled }
@@ -150,7 +153,7 @@ enum ProjectExporter {
             
             let path = relative + [name]
             if values?.isDirectory == true {
-                if Constants.PROJECT_ZIP_EXCLUDE_TEMP && path == excluded { continue }
+                if Constants.PROJECT_ZIP_EXCLUDE_TEMP && excluded.contains(path) { continue }
                 try collect(directory: item, relative: path, root: root, into: &list, cancellation: cancellation)
             } else {
                 list.append(PlannedFile(url: item,
