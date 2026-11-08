@@ -5,6 +5,8 @@ struct ProfileView: View {
     @State private var isLoading: Bool = false
     @State private var showLoginView: Bool = false
     @State private var showSettingsView: Bool = false
+    /// Statistics: the phone's own numbers, plus (signed in) how the account's templates perform.
+    @State private var showStatistics: Bool = false
     /// The account's Liked / Saved templates, shown full screen.
     @State private var templateCollection: TemplateFeedSource?
     
@@ -124,6 +126,10 @@ struct ProfileView: View {
                         
                         // Liquid Glass Card
                         VStack(spacing: 0) {
+                            Button(action: { showStatistics = true }) {
+                                SettingsRow(icon: "chart.bar.fill", title: "Statistics", height: 50)
+                            }
+                            Divider().padding(.leading, 56)
                             Button(action: {
                                 showSettingsView = true
                             }) {
@@ -145,8 +151,6 @@ struct ProfileView: View {
                         // Liquid Glass Card
                         VStack(spacing: 0) {
                             if isLoggedIn {
-                                SettingsRow(icon: "chart.bar.fill", title: "Statistics", height: 50)
-                                Divider().padding(.leading, 56)
                                 Button(action: { templateCollection = .mine }) {
                                     SettingsRow(icon: "film.stack", title: "My Templates", height: 50)
                                 }
@@ -212,6 +216,9 @@ struct ProfileView: View {
             }
             .fullScreenCover(item: $templateCollection) { source in
                 TemplateCollectionView(source: source)
+            }
+            .fullScreenCover(isPresented: $showStatistics) {
+                StatisticsView()
             }
             
             if isLoading {
